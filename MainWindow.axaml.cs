@@ -77,12 +77,13 @@ public partial class MainWindow : Window
             return; 
         }
 
-        // Add the key to our set of pressed keys
+        // Lagra tangentnamnet (t.ex. "Left", "Space", "A")
         string keyName = e.Key.ToString();
         _pressedKeys.Add(keyName);
 
-        // If we are in the SCREEN tab and a program is running, 
-        // prevent the key from moving focus or scrolling UI
+        // Debug: Avkommentera raden nedan om du vill se i Debug-utgången vad tangenten heter
+        System.Diagnostics.Debug.WriteLine($"Key Pressed: {keyName}");
+
         if (MainTabs.SelectedIndex == 1)
         {
             e.Handled = true;
@@ -320,7 +321,7 @@ public partial class MainWindow : Window
             AllowMultiple = false,
             FileTypeFilter =
             [
-                new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }
+                new FilePickerFileType("AMOS Project") { Patterns = ["*.*"] }
             ]
         });
 
@@ -366,6 +367,8 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
         // Switch to SCREEN tab when running
         MainTabs.SelectedIndex = 1;
 
+        ScreenImage.Focus();
+        
         _runCts?.Cancel();
         _runCts = new CancellationTokenSource();
 

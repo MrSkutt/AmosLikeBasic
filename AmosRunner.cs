@@ -12,21 +12,60 @@ namespace AmosLikeBasic;
 public static class AmosRunner
 {
     private sealed class ForFrame { public required string VarName; public required int EndValue; public required int StepValue; public required int LineAfterForPc; public required int ForLineNumber; }
+    private static readonly Random _rng = new();
 
     public static async Task ExecuteAsync(string programText, Func<string, Task> appendLineAsync, Func<Task> clearAsync, AmosGraphics graphics, Action onGraphicsChanged, Func<string> getInkey, Func<string, bool> isKeyDown, CancellationToken token)
     {
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         var forStack = new Stack<ForFrame>();
+        var gosubStack = new Stack<int>();
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        
+        // 1. Pre-scan for labels and line numbers
+        var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var rawLine = lines[i].Trim();
+            if (string.IsNullOrWhiteSpace(rawLine)) continue;
+
+            // Check for line number (e.g., "10 PRINT")
+            var firstWord = rawLine.Split(' ')[0];
+            if (int.TryParse(firstWord, out _)) labels[firstWord] = i;
+
+            // Check for label (e.g., "MainLoop:")
+            if (rawLine.EndsWith(':'))
+            {
+                var labelName = rawLine.TrimEnd(':').Trim();
+                labels[labelName] = i;
+            }
+        }
+
         int pc = 0;
         while (pc < lines.Length) {
             token.ThrowIfCancellationRequested();
-            var ln = pc + 1; var line = (lines[pc] ?? "").Trim();
-            if (string.IsNullOrWhiteSpace(line)) { pc++; continue; }
+            var ln = pc + 1; 
+            var line = (lines[pc] ?? "").Trim();
+            
+            if (string.IsNullOrWhiteSpace(line) || line.EndsWith(':')) { pc++; continue; }
+            
             line = StripLeadingLineNumber(line);
             var (cmd, arg) = SplitCommand(line);
+
             switch (cmd) {
                 case "REM": pc++; break;
+                case "GOTO":
+                    if (labels.TryGetValue(arg, out var targetPc)) pc = targetPc;
+                    else throw new Exception($"Label or Line {arg} not found at line {ln}");
+                    break;
+                case "GOSUB":
+                    gosubStack.Push(pc + 1);
+                    if (labels.TryGetValue(arg, out var subPc)) pc = subPc;
+                    else throw new Exception($"Label or Line {arg} not found at line {ln}");
+                    break;
+                case "RETURN":
+                    if (gosubStack.Count > 0) pc = gosubStack.Pop();
+                    else throw new Exception($"RETURN without GOSUB at line {ln}");
+                    break;
                 case "CLS": await appendLineAsync("@@CLS"); await clearAsync(); pc++; break;
                 case "LOCATE": var lp = SplitCsvOrSpaces(arg); await appendLineAsync($"@@LOCATE {EvalInt(lp[0], vars, ln, getInkey, isKeyDown)} {EvalInt(lp[1], vars, ln, getInkey, isKeyDown)}"); pc++; break;
                 case "PRINT": await appendLineAsync("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown))); pc++; break;
@@ -35,8 +74,10 @@ public static class AmosRunner
                 case "VSYNC": await appendLineAsync("@@VSYNC"); pc++; break;
                 case "IF":
                     var tIdx = IndexOfWord(arg, "THEN");
-                    if (EvalCondition(arg[..tIdx].Trim(), vars, ln, getInkey, isKeyDown)) {
-                        var (tc, ta) = SplitCommand(arg[(tIdx + 4)..].Trim());
+                    if (tIdx >= 0 && EvalCondition(arg[..tIdx].Trim(), vars, ln, getInkey, isKeyDown)) {
+                        var restOfLine = arg[(tIdx + 4)..].Trim();
+                        var (tc, ta) = SplitCommand(restOfLine);
+                        // Viktigt: skicka med 'vars' här så att LET fungerar inuti IF
                         if (await ExecuteSingleStatementAsync(tc, ta, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, token, ln)) return;
                     }
                     pc++; break;
@@ -85,7 +126,11 @@ public static class AmosRunner
         switch (cmd) {
             case "PRINT": await al("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, gk, ikd))); return false;
             case "LOCATE": var p = SplitCsvOrSpaces(arg); await al($"@@LOCATE {EvalInt(p[0], vars, ln, gk, ikd)} {EvalInt(p[1], vars, ln, gk, ikd)}"); return false;
-            case "LET": var (n, vt) = SplitAssignment(arg); vars[n] = EvalValue(vt, vars, ln, gk, ikd); return false;
+            case "LET": 
+                var (n, vt) = SplitAssignment(arg); 
+                vars[n] = EvalValue(vt, vars, ln, gk, ikd); 
+                return false;
+            case "PLOT": var pp = SplitCsvOrSpaces(arg); g.Plot(EvalInt(pp[0], vars, ln, gk, ikd), EvalInt(pp[1], vars, ln, gk, ikd)); og(); return false;
             case "VSYNC": await al("@@VSYNC"); return false;
             case "REFRESH": g.Refresh(); og(); return false;
             case "END": return true;
@@ -95,6 +140,13 @@ public static class AmosRunner
 
     private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd)
     {
+        // Om villkoret bara är en funktion som returnerar 0 eller 1 (som KEYSTATE)
+        if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>'))
+        {
+            var val = EvalValue(c, v, ln, gk, ikd);
+            return Convert.ToInt32(val) != 0;
+        }
+
         var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
         foreach (var op in ops) {
             var i = c.IndexOf(op); if (i < 0) continue;
@@ -103,6 +155,7 @@ public static class AmosRunner
             var li = Convert.ToInt32(lV); var ri = Convert.ToInt32(rV);
             return op switch { "=" => li == ri, "<>" => li != ri, "<" => li < ri, ">" => li > ri, "<=" => li <= ri, ">=" => li >= ri, _ => false };
         }
+        
         return false;
     }
 
@@ -110,8 +163,10 @@ public static class AmosRunner
     {
         t = t.Trim();
         if (t.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
+        
         if (t.StartsWith("KEYSTATE(", StringComparison.OrdinalIgnoreCase)) {
             var k = t.Substring(9).TrimEnd(')').Trim('"');
+            // Anropa ikd (isKeyDown) med tangentnamnet
             return ikd(k) ? 1 : 0;
         }
         if (IsQuotedString(t)) return Unquote(t);
@@ -135,6 +190,12 @@ public static class AmosRunner
         if (t.TryReadInt(out var n)) return n;
         if (t.TryReadIdentifier(out var id)) {
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk().Length;
+            if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('('); 
+                var max = ParseExpr(ref t, v, ln, gk, ikd); 
+                t.TryConsume(')'); 
+                return _rng.Next(max + 1); 
+            }
             if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var k = Unquote(t.ReadUntil(')')); t.TryConsume(')'); return ikd(k) ? 1 : 0;
             }
