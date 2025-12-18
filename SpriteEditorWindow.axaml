@@ -1,0 +1,83 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AmosLikeBasic.SpriteEditorWindow"
+        Width="900" Height="650"
+        Title="Sprite Editor">
+  <Grid RowDefinitions="Auto,*" Margin="12">
+
+    <!-- Top controls -->
+    <Border Background="#06206F" BorderBrush="#7FB2FF" BorderThickness="2" Padding="10">
+      <Grid ColumnDefinitions="Auto,110,Auto,110,Auto,110,Auto,*"
+            RowDefinitions="Auto,Auto"
+            ColumnSpacing="10"
+            RowSpacing="10">
+
+        <TextBlock Grid.Row="0" Grid.Column="0" Foreground="#7FB2FF" FontWeight="Bold" Text="Sprite ID"/>
+        <NumericUpDown Grid.Row="0" Grid.Column="1" Name="SpriteIdUpDown"
+                       Minimum="0" Maximum="256" Value="0"
+                       Increment="1"
+                       Foreground="White" Background="#00134D"
+                       ValueChanged="SpriteIdUpDown_OnValueChanged"/>
+
+        <NumericUpDown Grid.Row="0" Grid.Column="3" Name="WidthUpDown"
+                       Minimum="1" Maximum="256" Value="32"
+                       Increment="1"
+                       Foreground="White" Background="#00134D"
+                       ValueChanged="SizeUpDown_OnValueChanged"/>
+
+        <NumericUpDown Grid.Row="0" Grid.Column="5" Name="HeightUpDown"
+                       Minimum="1" Maximum="256" Value="32"
+                       Increment="1"
+                       Foreground="White" Background="#00134D"
+                       ValueChanged="SizeUpDown_OnValueChanged"/>
+
+        <Button Grid.Row="0" Grid.Column="6" Name="CreateButton"
+                Content="Create/Resize"
+                Click="CreateButton_OnClick"/>
+
+        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="8" Orientation="Horizontal" Spacing="8">
+          <TextBlock Foreground="#7FB2FF" FontWeight="Bold" Text="Palette:" VerticalAlignment="Center"/>
+
+          <Button Width="28" Height="28" Background="White" Click="PaletteWhite_OnClick"/>
+          <Button Width="28" Height="28" Background="Black" Click="PaletteBlack_OnClick"/>
+          <Button Width="28" Height="28" Background="Red" Click="PaletteRed_OnClick"/>
+          <Button Width="28" Height="28" Background="Lime" Click="PaletteGreen_OnClick"/>
+          <Button Width="28" Height="28" Background="Blue" Click="PaletteBlue_OnClick"/>
+          <Button Width="28" Height="28" Background="Yellow" Click="PaletteYellow_OnClick"/>
+          <Button Width="28" Height="28" Background="Cyan" Click="PaletteCyan_OnClick"/>
+          <Button Width="28" Height="28" Background="Magenta" Click="PaletteTransparent_OnClick"/>
+
+          <Button Margin="12,0,0,0" Content="Clear (Transparent)" Click="ClearButton_OnClick"/>
+
+          <TextBlock Margin="20,0,0,0" Foreground="#7FB2FF" FontWeight="Bold" Text="Zoom:" VerticalAlignment="Center"/>
+          <Slider Name="ZoomSlider"
+                  Minimum="4" Maximum="30" Value="12"
+                  Width="220"
+                  ValueChanged="ZoomSlider_OnValueChanged"/>
+          <TextBlock Name="ZoomText" Foreground="White" VerticalAlignment="Center" Text="12x"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Canvas -->
+    <Border Grid.Row="1" Margin="0,12,0,0" Background="#00134D" BorderBrush="#7FB2FF" BorderThickness="2" Padding="10">
+      <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                    VerticalScrollBarVisibility="Auto">
+        <Border Background="Black" BorderBrush="#7FB2FF" BorderThickness="2" Padding="10"
+                HorizontalAlignment="Left" VerticalAlignment="Top">
+          <Image Name="SpriteImage"
+                 Stretch="Fill"
+                 HorizontalAlignment="Left"
+                 VerticalAlignment="Top"
+                 RenderOptions.BitmapInterpolationMode="None"
+                 Focusable="True"
+                 Cursor="Cross"
+                 PointerPressed="SpriteImage_OnPointerPressed"
+                 PointerMoved="SpriteImage_OnPointerMoved"
+                 PointerReleased="SpriteImage_OnPointerReleased"/>
+        </Border>
+      </ScrollViewer>
+    </Border>
+
+  </Grid>
+</Window>

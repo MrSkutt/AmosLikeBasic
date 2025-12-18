@@ -1,0 +1,60 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="AmosLikeBasic.App"
+             RequestedThemeVariant="Default">
+             <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
+
+    <Application.Styles>
+        <FluentTheme />
+
+        <!-- AMOS-ish palette + chunky controls -->
+        <Style Selector="Window">
+            <Setter Property="Background" Value="#0B2A9B"/>
+        </Style>
+
+        <Style Selector="Border.amos-panel">
+            <Setter Property="Background" Value="#06206F"/>
+            <Setter Property="BorderBrush" Value="#7FB2FF"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="CornerRadius" Value="0"/>
+        </Style>
+
+        <Style Selector="TextBox.amos-editor">
+            <Setter Property="FontFamily" Value="Menlo, Consolas, Courier New"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="Background" Value="#00134D"/>
+            <Setter Property="Foreground" Value="#EAF2FF"/>
+            <Setter Property="CaretBrush" Value="White"/>
+            <Setter Property="SelectionBrush" Value="#3D7CFF"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style Selector="TextBox.amos-console">
+            <Setter Property="FontFamily" Value="Menlo, Consolas, Courier New"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Background" Value="#010C33"/>
+            <Setter Property="Foreground" Value="#B7FFB7"/>
+            <Setter Property="CaretBrush" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+
+        <Style Selector="Button.amos-button">
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="BorderBrush" Value="#00134D"/>
+            <Setter Property="CornerRadius" Value="0"/>
+        </Style>
+
+        <Style Selector="Menu">
+            <Setter Property="Background" Value="#08237F"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <Style Selector="TextBlock.amos-title">
+            <Setter Property="Foreground" Value="#7FB2FF"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+    </Application.Styles>
+</Application>
