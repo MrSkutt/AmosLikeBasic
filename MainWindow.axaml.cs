@@ -70,6 +70,15 @@ public partial class MainWindow : Window
 
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
+        
+        // Växla fullskärm med F11
+        if (e.Key == Key.F10)
+        {
+            ToggleFullscreen();
+            e.Handled = true;
+            return;
+        }
+        
         if (e.Key == Key.F1) 
         { 
             ToggleConsole(); 
@@ -101,6 +110,26 @@ public partial class MainWindow : Window
         }
     }
 
+    private void ToggleFullscreen_OnClick(object? sender, RoutedEventArgs e) => ToggleFullscreen();
+
+    private void ToggleFullscreen()
+    {
+        if (WindowState == WindowState.FullScreen)
+        {
+            WindowState = WindowState.Normal;
+            TopMenu.IsVisible = true;
+            AmosTitleBar.IsVisible = true;
+            ToolbarBorder.IsVisible = true;
+        }
+        else
+        {
+            WindowState = WindowState.FullScreen;
+            TopMenu.IsVisible = false;
+            AmosTitleBar.IsVisible = false;
+            ToolbarBorder.IsVisible = false;
+        }
+    }
+    
     private void ToggleConsole_OnClick(object? sender, RoutedEventArgs e) => ToggleConsole();
 
     private void ToggleConsole()

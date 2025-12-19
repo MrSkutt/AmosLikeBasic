@@ -6,11 +6,12 @@
         x:Class="AmosLikeBasic.MainWindow"
         Title="AMOS Professional IDE"
         Background="#00134D"
-        Width="1100" Height="720">
+        Width="1024" Height="768" 
+        WindowStartupLocation="CenterScreen">
     <DockPanel>
 
         <!-- Top Menu -->
-        <Menu DockPanel.Dock="Top" Focusable="False">>
+        <Menu Name="TopMenu" DockPanel.Dock="Top" Focusable="False">
             <MenuItem Header="_Project">
                 <MenuItem Header="New"/>
                 <MenuItem Header="Open..." Click="OpenProject_OnClick"/>
@@ -23,6 +24,7 @@
                 <MenuItem Header="Paste"/>
             </MenuItem>
             <MenuItem Header="_View">
+                <MenuItem Header="Toggle Fullscreen (F11)" Click="ToggleFullscreen_OnClick"/>
                 <MenuItem Header="Reset Layout"/>
             </MenuItem>
             <MenuItem Header="_Help">
@@ -30,7 +32,7 @@
             </MenuItem>
         </Menu>
 
-               <Border DockPanel.Dock="Top" Background="#FFD400" Height="30" VerticalAlignment="Top">
+        <Border Name="AmosTitleBar" DockPanel.Dock="Top" Background="#FFD400" Height="30" VerticalAlignment="Top">
             <Grid ColumnDefinitions="Auto, *, Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="10,0">
                     <TextBlock Text="AMOS Professional" Foreground="Black" FontWeight="Bold" VerticalAlignment="Center"/>
@@ -44,7 +46,7 @@
         </Border>
 
         <!-- Main Toolbar -->
-        <Border DockPanel.Dock="Top" Background="#0A2D8F" Padding="5" BorderBrush="#7FB2FF" BorderThickness="0,0,0,2">
+        <Border Name="ToolbarBorder" DockPanel.Dock="Top" Background="#0A2D8F" Padding="5" BorderBrush="#7FB2FF" BorderThickness="0,0,0,2">
             <StackPanel Orientation="Horizontal" Spacing="10">
                 <Button x:Name="RunButton" Classes="amos-button" Content="[ RUN ]" Background="#00CC00" Foreground="White" Click="RunButton_OnClick"/>
                 <Button x:Name="StopButton" Classes="amos-button" Content="[ STOP ]" Background="#CC0000" Foreground="White" Click="StopButton_OnClick" IsEnabled="False"/>
@@ -80,20 +82,31 @@
                     </Grid>
                 </TabItem>
 
+                <!-- Screen Tab -->
                 <TabItem Header="[ SCREEN ]" Foreground="#7FB2FF" FontWeight="Bold">
                     <Grid Background="Black">
                         <Viewbox Stretch="Uniform">
-                            <Image x:Name="ScreenImage" Focusable="True" RenderOptions.BitmapInterpolationMode="None"/>
+                            <!-- En Grid som håller både grafik och text så de skalar identiskt -->
+                            <Grid Width="640" Height="480">
+                                <Image x:Name="ScreenImage" 
+                                       Focusable="True" 
+                                       Stretch="Fill"
+                                       RenderOptions.BitmapInterpolationMode="None"/>
+                                
+                                <!-- Denna används för BASIC PRINT-kommandon -->
+                                <TextBox x:Name="Console" 
+                                         Classes="amos-console" 
+                                         Background="Transparent" 
+                                         Foreground="White"
+                                         IsHitTestVisible="False"
+                                         IsReadOnly="True"
+                                         BorderThickness="0"
+                                         Margin="0"
+                                         Padding="0"
+                                         VerticalAlignment="Stretch"
+                                         HorizontalAlignment="Stretch"/>
+                            </Grid>
                         </Viewbox>
-                        
-                        <!-- Denna används för BASIC PRINT-kommandon -->
-                        <TextBox x:Name="Console" 
-                                 Classes="amos-console" 
-                                 Background="Transparent" 
-                                 Foreground="White"
-                                 IsHitTestVisible="False"
-                                 IsReadOnly="True"
-                                 BorderThickness="0"/>
                     </Grid>
                 </TabItem>
             </TabControl>
