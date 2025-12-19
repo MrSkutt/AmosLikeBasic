@@ -70,8 +70,17 @@ public static class AmosRunner
                 case "LOCATE": var lp = SplitCsvOrSpaces(arg); await appendLineAsync($"@@LOCATE {EvalInt(lp[0], vars, ln, getInkey, isKeyDown)} {EvalInt(lp[1], vars, ln, getInkey, isKeyDown)}"); pc++; break;
                 case "PRINT": await appendLineAsync("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown))); pc++; break;
                 case "LET": var (n, vt) = SplitAssignment(arg); vars[n] = EvalValue(vt, vars, ln, getInkey, isKeyDown); pc++; break;
-                case "WAIT": await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown)), token); pc++; break;
                 case "VSYNC": await appendLineAsync("@@VSYNC"); pc++; break;
+                case "WAIT": 
+                    var waitArg = arg.ToUpperInvariant();
+                    if (waitArg == "VBL") {
+                        // WAIT VBL väntar på nästa skärmuppdatering
+                        await appendLineAsync("@@VSYNC");
+                    } else {
+                        // Vanlig WAIT väntar i millisekunder
+                        await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown)), token);
+                    }
+                    pc++; break;
                 case "IF":
                     var tIdx = IndexOfWord(arg, "THEN");
                     if (tIdx >= 0 && EvalCondition(arg[..tIdx].Trim(), vars, ln, getInkey, isKeyDown)) {
@@ -99,7 +108,12 @@ public static class AmosRunner
                 case "LINE": var lL = SplitCsvOrSpaces(arg); graphics.Line(EvalInt(lL[0], vars, ln, getInkey, isKeyDown), EvalInt(lL[1], vars, ln, getInkey, isKeyDown), EvalInt(lL[2], vars, ln, getInkey, isKeyDown), EvalInt(lL[3], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); pc++; break;
                 case "BOX": var bB = SplitCsvOrSpaces(arg); graphics.Box(EvalInt(bB[0], vars, ln, getInkey, isKeyDown), EvalInt(bB[1], vars, ln, getInkey, isKeyDown), EvalInt(bB[2], vars, ln, getInkey, isKeyDown), EvalInt(bB[3], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); pc++; break;
                 case "BAR": var rR = SplitCsvOrSpaces(arg); graphics.Bar(EvalInt(rR[0], vars, ln, getInkey, isKeyDown), EvalInt(rR[1], vars, ln, getInkey, isKeyDown), EvalInt(rR[2], vars, ln, getInkey, isKeyDown), EvalInt(rR[3], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); pc++; break;
+                case "SCROLL": 
+                    var sc = SplitCsvOrSpaces(arg); 
+                    graphics.Scroll(EvalInt(sc[0], vars, ln, getInkey, isKeyDown), EvalInt(sc[1], vars, ln, getInkey, isKeyDown)); 
+                    pc++; break;
                 case "REFRESH": graphics.Refresh(); onGraphicsChanged(); pc++; break;
+// ... existing code ...
                 case "SPRITE":
                     var ss = SplitCsvOrSpaces(arg);
                     if (!int.TryParse(ss[0], out var sid)) {
@@ -131,6 +145,10 @@ public static class AmosRunner
                 vars[n] = EvalValue(vt, vars, ln, gk, ikd); 
                 return false;
             case "PLOT": var pp = SplitCsvOrSpaces(arg); g.Plot(EvalInt(pp[0], vars, ln, gk, ikd), EvalInt(pp[1], vars, ln, gk, ikd)); og(); return false;
+            case "WAIT":
+                if (arg.ToUpperInvariant() == "VBL") await al("@@VSYNC");
+                else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, gk, ikd)), t);
+                return false;
             case "VSYNC": await al("@@VSYNC"); return false;
             case "REFRESH": g.Refresh(); og(); return false;
             case "END": return true;

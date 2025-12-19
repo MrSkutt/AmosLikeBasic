@@ -12,6 +12,9 @@ public sealed class AmosGraphics
 {
     private WriteableBitmap? _bmp;
     private WriteableBitmap? _backbuffer;
+    
+    private int _scrollX = 0;
+    private int _scrollY = 0;
 
     private sealed class Sprite
     {
@@ -36,12 +39,16 @@ public sealed class AmosGraphics
 
         public int Width { get; }
         public int Height { get; }
+        private int _scrollX = 0;
+        private int _scrollY = 0;
         public WriteableBitmap Bitmap { get; }
-        public Color Ink { get; set; }
+        public Color Ink { get; set; } = Colors.White;
         public Color TransparentKey { get; set; }
 
         public int X { get; set; }
         public int Y { get; set; }
+        public int HandleX { get; set; } // Ny: Offset X
+        public int HandleY { get; set; } // Ny: Offset Y
         public bool Visible { get; set; }
     }
 
@@ -258,14 +265,20 @@ public sealed class AmosGraphics
     public void SpriteShow(int id, int dstX, int dstY)
     {
         EnsureScreen(); var s = GetSprite(id);
+        
+        // Justera destinationen baserat på spritens Handle (Hotspot)
+        int realX = dstX - s.HandleX;
+        int realY = dstY - s.HandleY;
+
         using var dst = _bmp!.Lock(); using var src = s.Bitmap.Lock();
         unsafe {
             var dp = (byte*)dst.Address; var sp = (byte*)src.Address; var k = s.TransparentKey;
             for (var y = 0; y < s.Height; y++) {
-                var ty = dstY + y; if ((uint)ty >= (uint)Height) continue;
+                var ty = realY + y; if ((uint)ty >= (uint)Height) continue;
                 var dr = dp + ty * dst.RowBytes; var sr = sp + y * src.RowBytes;
                 for (var x = 0; x < s.Width; x++) {
-                    var tx = dstX + x; if ((uint)tx >= (uint)Width) continue;
+                    var tx = realX + x; if ((uint)tx >= (uint)Width) continue;
+
                     var si = x * 4; var b = sr[si+0]; var g = sr[si+1]; var r = sr[si+2]; var a = sr[si+3];
                     if (r == k.R && g == k.G && b == k.B) continue;
                     var di = tx * 4; dr[di+0]=b; dr[di+1]=g; dr[di+2]=r; dr[di+3]=a;
@@ -274,10 +287,20 @@ public sealed class AmosGraphics
         }
     }
 
+
+
     public void SpritePos(int id, int x, int y) { var s = GetSprite(id); s.X = x; s.Y = y; }
+    
+    public void SpriteHandle(int id, int hx, int hy) 
+    { 
+        var s = GetSprite(id); 
+        s.HandleX = hx; 
+        s.HandleY = hy; 
+    }
     public void SpriteOn(int id) { GetSprite(id).Visible = true; }
     public void SpriteOff(int id) { GetSprite(id).Visible = false; }
 
+// ... existing code ...
     public void Refresh()
     {
         EnsureScreen();
@@ -286,11 +309,44 @@ public sealed class AmosGraphics
         {
             unsafe
             {
-                var size = src.RowBytes * Height;
-                Buffer.MemoryCopy((void*)src.Address, (void*)dst.Address, size, size);
+                var dp = (byte*)dst.Address;
+                var sp = (byte*)src.Address;
+                var rowBytes = src.RowBytes;
+
+                // Kopiera bakgrunden med SCROLL-offset
+                for (var y = 0; y < Height; y++)
+                {
+                    // Beräkna vilken rad i backbuffern vi ska läsa ifrån (med wrap-around/modulo)
+                    var sy = (y + _scrollY) % Height;
+                    if (sy < 0) sy += Height;
+
+                    var dr = dp + y * rowBytes;
+                    var sr = sp + sy * rowBytes;
+
+                    for (var x = 0; x < Width; x++)
+                    {
+                        var sx = (x + _scrollX) % Width;
+                        if (sx < 0) sx += Width;
+
+                        var di = x * 4;
+                        var si = sx * 4;
+
+                        dr[di + 0] = sr[si + 0];
+                        dr[di + 1] = sr[si + 1];
+                        dr[di + 2] = sr[si + 2];
+                        dr[di + 3] = sr[si + 3];
+                    }
+                }
             }
         }
+        // Rita sprites ovanpå den färdigscrollade bilden
         foreach (var kv in _sprites) { if (kv.Value.Visible) SpriteShow(kv.Key, kv.Value.X, kv.Value.Y); }
+    }
+
+    public void Scroll(int x, int y)
+    {
+        _scrollX = x;
+        _scrollY = y;
     }
 
     private Sprite GetSprite(int id) => _sprites.TryGetValue(id, out var s) ? s : throw new InvalidOperationException($"Sprite {id} not defined.");
