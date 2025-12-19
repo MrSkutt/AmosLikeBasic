@@ -68,8 +68,28 @@ public static class AmosRunner
                     break;
                 case "CLS": await appendLineAsync("@@CLS"); await clearAsync(); pc++; break;
                 case "LOCATE": var lp = SplitCsvOrSpaces(arg); await appendLineAsync($"@@LOCATE {EvalInt(lp[0], vars, ln, getInkey, isKeyDown)} {EvalInt(lp[1], vars, ln, getInkey, isKeyDown)}"); pc++; break;
-                case "PRINT": await appendLineAsync("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown))); pc++; break;
-                case "LET": var (n, vt) = SplitAssignment(arg); vars[n] = EvalValue(vt, vars, ln, getInkey, isKeyDown); pc++; break;
+                case "PRINT":
+                    var printArg = arg.Trim();
+                    if (printArg.ToUpperInvariant().StartsWith("AT "))
+                    {
+                        // Hantera PRINT AT x,y, "text"
+                        var parts = SplitCsvOrSpaces(printArg.Substring(3));
+                        if (parts.Count >= 3)
+                        {
+                            var r = EvalInt(parts[0], vars, ln, getInkey, isKeyDown);
+                            var c = EvalInt(parts[1], vars, ln, getInkey, isKeyDown);
+                            await appendLineAsync($"@@LOCATE {r} {c}");
+                            
+                            // Hitta resten av strängen (allt efter koordinaterna)
+                            var textPart = string.Join(" ", parts.Skip(2));
+                            await appendLineAsync("@@PRINT " + ValueToString(EvalValue(textPart, vars, ln, getInkey, isKeyDown)));
+                        }
+                    }
+                    else
+                    {
+                        await appendLineAsync("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown)));
+                    }
+                    pc++; break;                case "LET": var (n, vt) = SplitAssignment(arg); vars[n] = EvalValue(vt, vars, ln, getInkey, isKeyDown); pc++; break;
                 case "VSYNC": await appendLineAsync("@@VSYNC"); pc++; break;
                 case "WAIT": 
                     var waitArg = arg.ToUpperInvariant();
@@ -103,6 +123,12 @@ public static class AmosRunner
                     break;
                 case "SCREEN": var sP = SplitCsvOrSpaces(arg); graphics.Screen(EvalInt(sP[0], vars, ln, getInkey, isKeyDown), EvalInt(sP[1], vars, ln, getInkey, isKeyDown)); graphics.Clear(Colors.Black); onGraphicsChanged(); pc++; break;
                 case "CLSG": graphics.Clear(Colors.Black); onGraphicsChanged(); pc++; break;
+                case "LOAD":
+                    // Enkel version: LOAD "bild.png" laddar bakgrund
+                    var loadPath = Unquote(arg);
+                    graphics.LoadBackground(loadPath);
+                    onGraphicsChanged();
+                    pc++; break;
                 case "INK": graphics.Ink = ParseColor(arg); pc++; break;
                 case "PLOT": var pP = SplitCsvOrSpaces(arg); graphics.Plot(EvalInt(pP[0], vars, ln, getInkey, isKeyDown), EvalInt(pP[1], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); pc++; break;
                 case "LINE": var lL = SplitCsvOrSpaces(arg); graphics.Line(EvalInt(lL[0], vars, ln, getInkey, isKeyDown), EvalInt(lL[1], vars, ln, getInkey, isKeyDown), EvalInt(lL[2], vars, ln, getInkey, isKeyDown), EvalInt(lL[3], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); pc++; break;
@@ -112,6 +138,20 @@ public static class AmosRunner
                     var sc = SplitCsvOrSpaces(arg); 
                     graphics.Scroll(EvalInt(sc[0], vars, ln, getInkey, isKeyDown), EvalInt(sc[1], vars, ln, getInkey, isKeyDown)); 
                     pc++; break;
+                case "TEXT":
+                    var tP = SplitCsvOrSpaces(arg);
+                    if (tP.Count >= 3)
+                    {
+                        var tx = EvalInt(tP[0], vars, ln, getInkey, isKeyDown);
+                        var ty = EvalInt(tP[1], vars, ln, getInkey, isKeyDown);
+                        // Ta allt efter koordinaterna som text
+                        var txtVal = string.Join(" ", tP.Skip(2));
+                        var txt = ValueToString(EvalValue(txtVal, vars, ln, getInkey, isKeyDown));
+                        
+                        graphics.DrawText(tx, ty, txt);
+                        onGraphicsChanged();
+                    }
+                    pc++; break;         
                 case "REFRESH": graphics.Refresh(); onGraphicsChanged(); pc++; break;
 // ... existing code ...
                 case "SPRITE":
@@ -119,6 +159,12 @@ public static class AmosRunner
                     if (!int.TryParse(ss[0], out var sid)) {
                         var sub = ss[0].ToUpperInvariant();
                         if (sub=="POS") graphics.SpritePos(EvalInt(ss[1],vars,ln,getInkey,isKeyDown), EvalInt(ss[2],vars,ln,getInkey,isKeyDown), EvalInt(ss[3],vars,ln,getInkey,isKeyDown));
+                        else if (sub=="LOAD") {
+                            // SPRITE LOAD id, "path"
+                            var path = Unquote(ss[2]); 
+                            graphics.LoadSprite(EvalInt(ss[1], vars, ln, getInkey, isKeyDown), path);
+                        }
+                        else if (sub=="HANDLE") graphics.SpriteHandle(EvalInt(ss[1],vars,ln,getInkey,isKeyDown), EvalInt(ss[2],vars,ln,getInkey,isKeyDown), EvalInt(ss[3],vars,ln,getInkey,isKeyDown));
                         else if (sub=="ON") graphics.SpriteOn(EvalInt(ss[1],vars,ln,getInkey,isKeyDown));
                         else if (sub=="OFF") graphics.SpriteOff(EvalInt(ss[1],vars,ln,getInkey,isKeyDown));
                         else if (sub=="SHOW") { graphics.SpriteShow(EvalInt(ss[1],vars,ln,getInkey,isKeyDown), EvalInt(ss[2],vars,ln,getInkey,isKeyDown), EvalInt(ss[3],vars,ln,getInkey,isKeyDown)); onGraphicsChanged(); }
@@ -130,7 +176,14 @@ public static class AmosRunner
                     }
                     graphics.CreateSprite(sid, EvalInt(ss[1],vars,ln,getInkey,isKeyDown), EvalInt(ss[2],vars,ln,getInkey,isKeyDown)); pc++; break;
                 case "END": return;
-                default: pc++; break;
+                default: 
+                    // Om vi hamnar här är kommandot okänt
+                    if (!string.IsNullOrWhiteSpace(cmd))
+                    {
+                        throw new Exception($"Syntax Error: Unknown command '{cmd}' at line {ln}");
+                    }
+                    pc++; 
+                    break;
             }
         }
     }
@@ -152,7 +205,12 @@ public static class AmosRunner
             case "VSYNC": await al("@@VSYNC"); return false;
             case "REFRESH": g.Refresh(); og(); return false;
             case "END": return true;
-            default: return false;
+            default: 
+                if (!string.IsNullOrWhiteSpace(cmd))
+                {
+                    throw new Exception($"Syntax Error in IF-THEN: Unknown command '{cmd}' at line {ln}");
+                }
+                return false;
         }
     }
 

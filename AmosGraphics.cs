@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Media.Imaging;
+using System.Globalization; // Behövs för FormattedText
 
 namespace AmosLikeBasic;
 
@@ -74,6 +75,7 @@ public sealed class AmosGraphics
         int Id,
         int Width, int Height,
         int X, int Y,
+        int HandleX, int HandleY, // Lägg till dessa
         bool Visible,
         string TransparentKey,
         int Stride,
@@ -91,15 +93,11 @@ public sealed class AmosGraphics
             var bytes = new byte[stride * s.Height];
             unsafe
             {
-                var src = (byte*)fb.Address;
-                for (var y = 0; y < s.Height; y++)
-                {
-                    System.Runtime.InteropServices.Marshal.Copy((nint)(src + y * stride), bytes, y * stride, stride);
-                }
+                System.Runtime.InteropServices.Marshal.Copy(fb.Address, bytes, 0, bytes.Length);
             }
 
             sprites.Add(new SpriteFile(
-                id, s.Width, s.Height, s.X, s.Y, s.Visible, s.TransparentKey.ToString(), stride, Convert.ToBase64String(bytes)
+                id, s.Width, s.Height, s.X, s.Y, s.HandleX, s.HandleY, s.Visible, s.TransparentKey.ToString(), stride, Convert.ToBase64String(bytes)
             ));
         }
 
@@ -117,18 +115,16 @@ public sealed class AmosGraphics
         {
             CreateSprite(sf.Id, sf.Width, sf.Height);
             var s = GetSprite(sf.Id);
-            s.X = sf.X; s.Y = sf.Y; s.Visible = sf.Visible;
+            s.X = sf.X; s.Y = sf.Y; 
+            s.HandleX = sf.HandleX; s.HandleY = sf.HandleY; // Läs in dessa
+            s.Visible = sf.Visible;
             s.TransparentKey = Color.Parse(sf.TransparentKey);
 
             var bytes = Convert.FromBase64String(sf.PixelDataBase64);
             using var fb = s.Bitmap.Lock();
             unsafe
             {
-                var dst = (byte*)fb.Address;
-                for (var y = 0; y < s.Height; y++)
-                {
-                    System.Runtime.InteropServices.Marshal.Copy(bytes, y * fb.RowBytes, (nint)(dst + y * fb.RowBytes), fb.RowBytes);
-                }
+                System.Runtime.InteropServices.Marshal.Copy(bytes, 0, fb.Address, bytes.Length);
             }
         }
     }
@@ -170,6 +166,80 @@ public sealed class AmosGraphics
         }
     }
 
+// ... existing code ...
+    public void DrawText(int x, int y, string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => {
+            EnsureScreen();
+            
+            var fmtText = new FormattedText(
+                text,
+                CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Arial"), // Prova en garanterad font
+                20, // Lite större så det syns tydligt
+                new SolidColorBrush(Ink));
+
+            var pixelSize = new PixelSize(
+                (int)Math.Max(1, Math.Ceiling(fmtText.Width)), 
+                (int)Math.Max(1, Math.Ceiling(fmtText.Height)));
+
+            using (var rtb = new RenderTargetBitmap(pixelSize))
+            {
+                using (var ctx = rtb.CreateDrawingContext())
+                {
+                    // Fyll bakgrunden med genomskinligt först för säkerhets skull
+                    ctx.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, pixelSize.Width, pixelSize.Height));
+                    ctx.DrawText(fmtText, new Point(0, 0));
+                }
+
+                var buffer = new byte[pixelSize.Width * pixelSize.Height * 4];
+                unsafe
+                {
+                    fixed (byte* pBuffer = buffer)
+                    {
+                        rtb.CopyPixels(new PixelRect(pixelSize), (nint)pBuffer, buffer.Length, pixelSize.Width * 4);
+                    }
+                }
+
+                using (var dst = _backbuffer!.Lock())
+                {
+                    unsafe
+                    {
+                        var dp = (byte*)dst.Address;
+                        for (int row = 0; row < pixelSize.Height; row++)
+                        {
+                            var targetY = y + row;
+                            if (targetY < 0 || targetY >= Height) continue;
+                            var dstRow = dp + targetY * dst.RowBytes;
+                            for (int col = 0; col < pixelSize.Width; col++)
+                            {
+                                var targetX = x + col;
+                                if (targetX < 0 || targetX >= Width) continue;
+                                var si = (row * pixelSize.Width + col) * 4;
+                                var di = targetX * 4;
+                                
+                                // Alpha blending
+                                byte a = buffer[si + 3];
+                                if (a > 0)
+                                {
+                                    dstRow[di + 0] = buffer[si + 0];
+                                    dstRow[di + 1] = buffer[si + 1];
+                                    dstRow[di + 2] = buffer[si + 2];
+                                    dstRow[di + 3] = buffer[si + 3];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // VIKTIGT: Kopiera från backbuffer till skärmen och trigga UI-update
+            Refresh();
+        });
+    }
+// ... existing code ...
     public void Plot(int x, int y) => Plot(x, y, Ink);
     public void Plot(int x, int y, Color color)
     {
@@ -262,6 +332,83 @@ public sealed class AmosGraphics
         }
     }
 
+    public void LoadSprite(int id, string fileName)
+    {
+        try
+        {
+            using var bitmap = new Avalonia.Media.Imaging.Bitmap(fileName);
+            int w = (int)bitmap.Size.Width;
+            int h = (int)bitmap.Size.Height;
+
+            CreateSprite(id, w, h);
+            var s = GetSprite(id);
+
+            using (var fb = s.Bitmap.Lock())
+            {
+                // Kopiera pixlar och tvinga formatet till Bgra8888 (vårt interna format)
+                bitmap.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
+                
+                // FIXA FÄRGERNA: Byt plats på Röd och Blå om de är fel (vanligt på macOS/PNG)
+                // Vi gör detta genom att läsa första pixeln och se om den ser rimlig ut, 
+                // men det säkraste är att bara swappa kanalerna manuellt om färgerna är inverterade.
+                unsafe {
+                    byte* p = (byte*)fb.Address;
+                    for (int i = 0; i < w * h; i++) {
+                        byte b = p[i*4 + 0];
+                        byte r = p[i*4 + 2];
+                        p[i*4 + 0] = r; // Sätt Blå till Röd
+                        p[i*4 + 2] = b; // Sätt Röd till Blå
+                    }
+                    // Sätt transparens baserat på första pixeln (efter swap)
+                    s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
+                }
+            }
+        }
+        catch (Exception ex) {
+            System.Diagnostics.Debug.WriteLine($"Error: {ex.Message}");
+        }
+    }
+
+    public void LoadBackground(string fileName)
+    {
+        try
+        {
+            using var bitmap = new Avalonia.Media.Imaging.Bitmap(fileName);
+            EnsureScreen();
+
+            // Beräkna hur mycket vi ska kopiera (max storleken på skärmen eller bilden)
+            int copyW = Math.Min(Width, (int)bitmap.Size.Width);
+            int copyH = Math.Min(Height, (int)bitmap.Size.Height);
+
+            using (var fb = _backbuffer!.Lock())
+            {
+                // Kopiera in bilden i backbuffern
+                bitmap.CopyPixels(
+                    new PixelRect(0, 0, copyW, copyH), 
+                    fb.Address, 
+                    fb.RowBytes * Height, 
+                    fb.RowBytes);
+                
+                // Swappa färger manuellt för macOS
+                unsafe {
+                    byte* p = (byte*)fb.Address;
+                    for (int i = 0; i < Width * Height; i++) {
+                        byte b = p[i*4 + 0];
+                        byte r = p[i*4 + 2];
+                        p[i*4 + 0] = r;
+                        p[i*4 + 2] = b;
+                        p[i*4 + 3] = 255; // Tvinga full opacitet (ingen genomskinlig bakgrund)
+                    }
+                }
+            }
+            
+            // Tvinga en omedelbar kopiering till skärm-bitmappen
+            Refresh();
+        }
+        catch (Exception ex) {
+            System.Diagnostics.Debug.WriteLine($"Error loading background: {ex.Message}");
+        }
+    }
     public void SpriteShow(int id, int dstX, int dstY)
     {
         EnsureScreen(); var s = GetSprite(id);

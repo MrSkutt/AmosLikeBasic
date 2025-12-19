@@ -105,15 +105,14 @@ public partial class MainWindow : Window
 
     private void ToggleConsole()
     {
-        if (ConsoleOverlay is null)
-            return;
-
-        ConsoleOverlay.IsVisible = !ConsoleOverlay.IsVisible;
+        // Istället för att gömma konsolen (som nu är fast), kan vi rensa den
+        _textScreen.Clear();
+        if (Console is not null)
+            Console.Text = "";
     }
 
     private async Task AppendConsoleLineAsync(string line)
     {
-        // VSYNC: wait until next render tick on UI thread
         if (line.StartsWith("@@VSYNC", StringComparison.Ordinal))
         {
             await Dispatcher.UIThread.InvokeAsync(() => { }, DispatcherPriority.Render);
@@ -122,35 +121,38 @@ public partial class MainWindow : Window
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            if (Console is null)
-                return;
+            // Om det är ett internt kommando (@@), använd TextScreen och rita på SCREEN
+            if (line.StartsWith("@@", StringComparison.Ordinal))
+            {
+                if (Console is null) return;
 
-            if (line.StartsWith("@@LOCATE ", StringComparison.Ordinal))
-            {
-                var rest = line.Substring("@@LOCATE ".Length).Trim();
-                var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (parts.Length >= 2 &&
-                    int.TryParse(parts[0], out var r) &&
-                    int.TryParse(parts[1], out var c))
+                if (line.StartsWith("@@LOCATE ", StringComparison.Ordinal))
                 {
-                    _textScreen.Locate(r, c);
+                    var rest = line.Substring("@@LOCATE ".Length).Trim();
+                    var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 2 && int.TryParse(parts[0], out var r) && int.TryParse(parts[1], out var c))
+                        _textScreen.Locate(r, c);
                 }
-            }
-            else if (line.StartsWith("@@PRINT ", StringComparison.Ordinal))
-            {
-                var text = line.Substring("@@PRINT ".Length);
-                _textScreen.Print(text);
-            }
-            else if (line.StartsWith("@@CLS", StringComparison.Ordinal))
-            {
-                _textScreen.Clear();
+                else if (line.StartsWith("@@PRINT ", StringComparison.Ordinal))
+                {
+                    _textScreen.Print(line.Substring("@@PRINT ".Length));
+                }
+                else if (line.StartsWith("@@CLS", StringComparison.Ordinal))
+                {
+                    _textScreen.Clear();
+                }
+
+                Console.Text = _textScreen.Render();
             }
             else
             {
-                _textScreen.Print(line);
+                // Vanliga meddelanden (Running, OK, Error) hamnar i LogBox under editorn
+                if (LogBox is not null)
+                {
+                    LogBox.Text += line + Environment.NewLine;
+                    LogBox.CaretIndex = LogBox.Text.Length;
+                }
             }
-
-            Console.Text = _textScreen.Render();
         });
     }
 
@@ -168,10 +170,9 @@ public partial class MainWindow : Window
     {
         return Dispatcher.UIThread.InvokeAsync(() =>
         {
-            _textScreen.Clear();
-            _textScreen.Print(text.Replace("\r\n", "\n").Replace('\r', '\n'));
-            if (Console is not null)
-                Console.Text = _textScreen.Render();
+            // När vi startar programmet, logga i LogBox istället för att rensa spelsidan
+            if (LogBox is not null)
+                LogBox.Text += text + Environment.NewLine;
         }).GetTask();
     }
 
@@ -274,36 +275,30 @@ public partial class MainWindow : Window
     private async void SaveProject_OnClick(object? sender, RoutedEventArgs e)
     {
         var sp = StorageProvider;
-        if (sp is null)
-        {
-            await AppendConsoleLineAsync("ERROR: No StorageProvider available.");
-            return;
-        }
+        if (sp is null) return;
 
         var file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Save AMOS-like Project",
+            Title = "Save AMOS Project",
             SuggestedFileName = "project.amosproj",
-            FileTypeChoices =
-            [
-                new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }
-            ]
+            FileTypeChoices = [ new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] } ]
         });
 
-        if (file is null)
-            return;
+        if (file is null) return;
 
-        var path = file.TryGetLocalPath();
-        if (string.IsNullOrWhiteSpace(path))
+        try 
         {
-            await AppendConsoleLineAsync("ERROR: Could not get local file path.");
-            return;
+            var project = _gfx.ExportProject(Editor.Text ?? string.Empty);
+            // Öppna strömmen direkt för att skriva
+            using var stream = await file.OpenWriteAsync();
+            await AmosProjectSerializer.SaveAsync(stream, project);
+            
+            await AppendConsoleLineAsync($"Saved: {file.Name}");
         }
-
-        var project = _gfx.ExportProject(Editor.Text ?? string.Empty);
-        await AmosProjectSerializer.SaveAsync(path, project);
-
-        await AppendConsoleLineAsync($"Saved: {path}");
+        catch (Exception ex)
+        {
+            await AppendConsoleLineAsync($"ERROR saving: {ex.Message}");
+        }
     }
 
     private async void OpenProject_OnClick(object? sender, RoutedEventArgs e)
@@ -329,26 +324,28 @@ public partial class MainWindow : Window
         if (file is null)
             return;
 
-        var path = file.TryGetLocalPath();
-        if (string.IsNullOrWhiteSpace(path))
+        try 
         {
-            await AppendConsoleLineAsync("ERROR: Could not get local file path.");
-            return;
+            // Öppna strömmen direkt istället för att använda TryGetLocalPath
+            using var stream = await file.OpenReadAsync();
+            var project = await AmosProjectSerializer.LoadAsync(stream);
+
+            // Apply graphics + sprites
+            _gfx.ImportProject(project);
+
+            // Update UI screen
+            ScreenImage.Source = _gfx.Bitmap;
+            ScreenImage.InvalidateVisual();
+
+            // Load program text
+            Editor.Text = project.ProgramText ?? string.Empty;
+
+            await AppendConsoleLineAsync($"Opened: {file.Name}");
         }
-
-        var project = await AmosProjectSerializer.LoadAsync(path);
-
-        // Apply graphics + sprites
-        _gfx.ImportProject(project);
-
-        // Update UI screen
-        ScreenImage.Source = _gfx.Bitmap;
-        ScreenImage.InvalidateVisual();
-
-        // Load program text
-        Editor.Text = project.ProgramText ?? string.Empty;
-
-        await AppendConsoleLineAsync($"Opened: {path}");
+        catch (Exception ex)
+        {
+            await AppendConsoleLineAsync($"ERROR loading: {ex.Message}");
+        }
     }
 
     // ... existing code (Run/Stop/console helpers) ...

@@ -7,25 +7,13 @@ namespace AmosLikeBasic;
 
 public static class AmosProjectSerializer
 {
-    private static readonly JsonSerializerOptions Options = new()
+    public static async Task SaveAsync(System.IO.Stream stream, AmosGraphics.ProjectFile project)
     {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
-    public static async Task SaveAsync(string filePath, AmosGraphics.ProjectFile project)
-    {
-        var json = JsonSerializer.Serialize(project, Options);
-        await File.WriteAllTextAsync(filePath, json);
+        await System.Text.Json.JsonSerializer.SerializeAsync(stream, project);
     }
 
-    public static async Task<AmosGraphics.ProjectFile> LoadAsync(string filePath)
+    public static async Task<AmosGraphics.ProjectFile> LoadAsync(System.IO.Stream stream)
     {
-        var json = await File.ReadAllTextAsync(filePath);
-        var project = JsonSerializer.Deserialize<AmosGraphics.ProjectFile>(json, Options);
-        if (project is null)
-            throw new InvalidDataException("Project file is invalid or empty.");
-        return project;
+        return await System.Text.Json.JsonSerializer.DeserializeAsync<AmosGraphics.ProjectFile>(stream);
     }
 }
