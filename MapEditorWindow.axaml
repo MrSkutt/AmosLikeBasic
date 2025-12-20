@@ -26,6 +26,11 @@
                     
                     <Separator Background="#7FB2FF" Height="2" Margin="0,10"/>
                     
+                    <TextBlock Text="FILE" Classes="amos-title" HorizontalAlignment="Center"/>
+                    <Button Content="Save Map..." Click="SaveMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
+                    <Button Content="Load Map..." Click="LoadMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
+
+                    
                     <TextBlock Text="TILES" Classes="amos-title" HorizontalAlignment="Center"/>
                     <Button Content="Load Tileset" Click="LoadTiles_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
                     

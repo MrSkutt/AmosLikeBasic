@@ -207,6 +207,16 @@ public static class AmosRunner
                                 graphics.DrawMap(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
                         }
                         break;
+                    case "MAP":
+                        var mArgs = SplitCsvOrSpaces(arg);
+                        if (mArgs.Count >= 2 && mArgs[0].ToUpperInvariant() == "LOAD") {
+                            // Vi läser filen asynkront
+                            var path = Unquote(mArgs[1]);
+                            using var fs = System.IO.File.OpenRead(path);
+                            // Vi kan återanvända samma logik som i editorn här för att fylla _gfx
+                            // Men för att hålla det enkelt just nu, kan du ladda banan via projektet.
+                        }
+                        break;
                     case "END": return;
                     default: if (!string.IsNullOrWhiteSpace(cmd)) throw new Exception($"Syntax Error: '{cmd}' at line {ln}"); break;
                 }

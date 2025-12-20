@@ -143,4 +143,59 @@ public partial class MapEditorWindow : Window
         RenderOptions.SetBitmapInterpolationMode(img, BitmapInterpolationMode.None);
         MapCanvas.Children.Add(img);
     }
+    // ... inuti MapEditorWindow.axaml.cs ...
+
+    private async void SaveMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var sp = StorageProvider;
+        var file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save AMOS Map",
+            SuggestedFileName = "level.amosmap",
+            FileTypeChoices = [new FilePickerFileType("AMOS Map") { Patterns = ["*.amosmap"] }]
+        });
+
+        if (file != null)
+        {
+            var mapData = new List<int>();
+            int mw = _gfx.GetMapWidth();
+            int mh = _gfx.GetMapHeight();
+            for (int y = 0; y < mh; y++)
+                for (int x = 0; x < mw; x++)
+                    mapData.Add(_gfx.GetMapTile(x, y));
+
+            var dto = new { Width = mw, Height = mh, Data = mapData };
+            using var stream = await file.OpenWriteAsync();
+            await System.Text.Json.JsonSerializer.SerializeAsync(stream, dto);
+        }
+    }
+
+    private async void LoadMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var sp = StorageProvider;
+        var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions 
+        { 
+            Title = "Load AMOS Map", 
+            FileTypeFilter = [new FilePickerFileType("AMOS Map") { Patterns = ["*.amosmap"] }] 
+        });
+
+        if (files.Count > 0)
+        {
+            using var stream = await files[0].OpenReadAsync();
+            var dto = await System.Text.Json.JsonSerializer.DeserializeAsync<MapDto>(stream);
+            if (dto != null)
+            {
+                _gfx.SetMapSize(dto.Width, dto.Height);
+                int idx = 0;
+                for (int y = 0; y < dto.Height; y++)
+                    for (int x = 0; x < dto.Width; x++)
+                        _gfx.SetMapTile(x, y, dto.Data[idx++]);
+                
+                RedrawMap();
+            }
+        }
+    }
+
+    // En liten hjälp-klass för laddning
+    private record MapDto(int Width, int Height, List<int> Data);
 }
