@@ -326,6 +326,15 @@ public static class AmosRunner
         if (t.TryReadInt(out var n)) return n;
         if (t.TryReadIdentifier(out var id)) {
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk().Length;
+            
+            // NYTT: Hämta banans storlek i pixlar
+            if (id.Equals("MAP", StringComparison.OrdinalIgnoreCase)) {
+                t.SkipWs();
+                if (t.TryReadIdentifier(out var sub)) {
+                    if (sub.Equals("WIDTH", StringComparison.OrdinalIgnoreCase)) return g.GetMapWidth() * 32; 
+                    if (sub.Equals("HEIGHT", StringComparison.OrdinalIgnoreCase)) return g.GetMapHeight() * 32;
+                }
+            }
             if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var id1 = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(','); var id2 = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')');
                 return g.SpriteHit(id1, id2) ? 1 : 0;

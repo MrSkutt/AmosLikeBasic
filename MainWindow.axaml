@@ -55,6 +55,7 @@
                 <Button Classes="amos-button" Content="SAVE" Click="SaveProject_OnClick" Background="#0A2D8F" Foreground="White"/>
                 <Separator Background="#7FB2FF" Width="2"/>
                 <Button Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White"/>
+                <Button Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White"/>
                 <Button Classes="amos-button" Content="CONSOLE" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White"/>
             </StackPanel>
         </Border>

@@ -1,0 +1,80 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AmosLikeBasic.MapEditorWindow"
+        Title="Map Editor" Width="1100" Height="800"
+        Background="#00134D">
+    <Grid ColumnDefinitions="250, *"> <!-- Ökad bredd på sidopanelen -->
+        <!-- Vänster panel -->
+        <Border Grid.Column="0" Background="#06206F" BorderBrush="#7FB2FF" BorderThickness="0,0,2,0">
+            <ScrollViewer>
+                <StackPanel Margin="15" Spacing="15">
+                    <TextBlock Text="MAP SIZE" Classes="amos-title" HorizontalAlignment="Center"/>
+                    
+                    <Grid ColumnDefinitions="Auto, *" RowDefinitions="Auto, Auto" ColumnSpacing="10" RowSpacing="10">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Width:" VerticalAlignment="Center" Foreground="#7FB2FF"/>
+                        <NumericUpDown Grid.Row="0" Grid.Column="1" Name="MapWidthUpDown" 
+                                       Value="20" Minimum="1" Maximum="1000" Increment="1" FormatString="0"
+                                       Foreground="White" Background="#000A26" BorderBrush="#7FB2FF"/>
+                        
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Height:" VerticalAlignment="Center" Foreground="#7FB2FF"/>
+                        <NumericUpDown Grid.Row="1" Grid.Column="1" Name="MapHeightUpDown" 
+                                       Value="15" Minimum="1" Maximum="1000" Increment="1" FormatString="0"
+                                       Foreground="White" Background="#000A26" BorderBrush="#7FB2FF"/>
+                    </Grid>
+                    
+                    <Button Content="Resize Map" Click="ResizeMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
+                    
+                    <Separator Background="#7FB2FF" Height="2" Margin="0,10"/>
+                    
+                    <TextBlock Text="TILES" Classes="amos-title" HorizontalAlignment="Center"/>
+                    <Button Content="Load Tileset" Click="LoadTiles_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
+                    
+                    <ListBox Name="TileList" Background="#000A26" BorderThickness="1" BorderBrush="#7FB2FF" Height="400" Margin="0,10,0,0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="#7FB2FF" BorderThickness="1" Margin="2">
+                                    <Image Source="{Binding}" Width="64" Height="64" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
+                                </Border>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Höger panel: Banan -->
+        <!-- Höger panel: Banan -->
+        <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+            <Border Background="Black" HorizontalAlignment="Left" VerticalAlignment="Top">
+                <Canvas Name="MapCanvas" Width="2000" Height="2000"
+                        PointerPressed="MapCanvas_OnPointerPressed"
+                        PointerMoved="MapCanvas_OnPointerMoved">
+                    <!-- Det säkraste sättet för rutnät i Avalonia: En DrawingBrush -->
+                    <Canvas.Background>
+                        <DrawingBrush TileMode="Tile" SourceRect="0,0,32,32" DestinationRect="0,0,32,32">
+                            <DrawingBrush.Drawing>
+                                <DrawingGroup>
+                                    <!-- Själva rutan (Svart bakgrund) -->
+                                    <GeometryDrawing Brush="Black">
+                                        <GeometryDrawing.Geometry>
+                                            <RectangleGeometry Rect="0,0,32,32" />
+                                        </GeometryDrawing.Geometry>
+                                    </GeometryDrawing>
+                                    <!-- Linjerna (Ljusblå) -->
+                                    <GeometryDrawing>
+                                        <GeometryDrawing.Pen>
+                                            <Pen Brush="#447FB2FF" Thickness="1" />
+                                        </GeometryDrawing.Pen>
+                                        <GeometryDrawing.Geometry>
+                                            <PathGeometry Figures="M 0,32 L 0,0 L 32,0" />
+                                        </GeometryDrawing.Geometry>
+                                    </GeometryDrawing>
+                                </DrawingGroup>
+                            </DrawingBrush.Drawing>
+                        </DrawingBrush>
+                    </Canvas.Background>
+                </Canvas>
+            </Border>
+        </ScrollViewer>
+    </Grid>
+</Window>

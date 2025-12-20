@@ -59,5 +59,9 @@
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="FontSize" Value="14"/>
         </Style>
+        <Style Selector="NumericUpDown">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="14" />
+        </Style>
     </Application.Styles>
 </Application>

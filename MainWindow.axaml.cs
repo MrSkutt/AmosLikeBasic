@@ -491,4 +491,9 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
         AmosRunner.StopAllSounds();
     }
     
+    private void MapButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var win = new MapEditorWindow(_gfx);
+        win.Show();
+    }
 }

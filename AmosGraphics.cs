@@ -16,6 +16,8 @@ public sealed class AmosGraphics
     private readonly List<WriteableBitmap> _screens = new();
     private readonly List<Point> _screenOffsets = new();
     private int _currentScreen = 0;
+    
+    public List<WriteableBitmap> GetTileBitmaps() => _tiles;
 
     private sealed class Sprite
     {
@@ -57,12 +59,21 @@ public sealed class AmosGraphics
 
     // ---------------- Project Export/Import ----------------
 
-    public sealed record ProjectFile(int Version, string ProgramText, int ScreenWidth, int ScreenHeight, List<SpriteFile> Sprites);
+    public sealed record ProjectFile(
+        int Version, 
+        string ProgramText, 
+        int ScreenWidth, 
+        int ScreenHeight, 
+        List<SpriteFile> Sprites,
+        int MapWidth, // Lägg till dessa
+        int MapHeight,
+        List<int> MapData);
     public sealed record SpriteFile(int Id, int Width, int Height, int X, int Y, int HandleX, int HandleY, int CurrentFrame, bool Visible, string TransparentKey, List<string> FramesBase64);
 
     public ProjectFile ExportProject(string programText)
     {
         EnsureScreen();
+        // 1. Exportera Sprites
         var sprites = new List<SpriteFile>();
         foreach (var (id, s) in _sprites.OrderBy(k => k.Key))
         {
@@ -76,7 +87,25 @@ public sealed class AmosGraphics
             }
             sprites.Add(new SpriteFile(id, s.Width, s.Height, s.X, s.Y, s.HandleX, s.HandleY, s.CurrentFrame, s.Visible, s.TransparentKey.ToString(), framesData));
         }
-        return new ProjectFile(1, programText ?? "", Width, Height, sprites);
+        // 2. Exportera Banan (NY LOGIK)
+        var mapList = new List<int>();
+        int mw = GetMapWidth();
+        int mh = GetMapHeight();
+        
+        for (int y = 0; y < mh; y++)
+          for (int x = 0; x < mw; x++)
+            mapList.Add(GetMapTile(x, y));
+        
+        // 3. Skapa ProjectFile med ALLA 8 argument (inklusive de nya för Map)
+        return new ProjectFile(
+            Version: 1, 
+            ProgramText: programText ?? "", 
+            ScreenWidth: Width, 
+            ScreenHeight: Height, 
+            Sprites: sprites,
+            MapWidth: mw,
+            MapHeight: mh,
+            MapData: mapList);
     }
 
     public void ImportProject(ProjectFile project)
@@ -99,6 +128,12 @@ public sealed class AmosGraphics
             }
             _sprites[sf.Id] = s;
         }
+        SetMapSize(project.MapWidth, project.MapHeight);
+        int idx = 0;
+        for (int y = 0; y < project.MapHeight; y++)
+        for (int x = 0; x < project.MapWidth; x++)
+            if (idx < project.MapData.Count) _map[x, y] = project.MapData[idx++];
+
     }
 
     // ---------------- Screen & Core ----------------
@@ -152,16 +187,27 @@ public sealed class AmosGraphics
 
                 // Rita alla lager
                 for (int sIdx = 0; sIdx < _screens.Count; sIdx++) {
-                    using (var src = _screens[sIdx].Lock()) {
+                    var currentScreen = _screens[sIdx];
+                    using (var src = currentScreen.Lock()) {
                         var sp = (byte*)src.Address;
+                        var sWidth = currentScreen.PixelSize.Width; // LAGRETS FAKTISKA BREDD
+                        var sHeight = currentScreen.PixelSize.Height;
+                        var sRowBytes = src.RowBytes;
+
                         var off = _screenOffsets[sIdx];
                         int sX = (int)off.X, sY = (int)off.Y;
+
                         for (var y = 0; y < Height; y++) {
-                            int sy = (y + sY) % Height; if (sy < 0) sy += Height;
-                            var dr = dp + y * rb; var sr = sp + sy * rb;
+                            // Beräkna rätt rad i käll-bitmappen (med wrap-around baserat på lagrets storlek)
+                            int sy = (y + sY) % sHeight; if (sy < 0) sy += sHeight;
+                            var dr = dp + y * rb; 
+                            var sr = sp + sy * sRowBytes; // Använd lagrets egna RowBytes!
+
                             for (var x = 0; x < Width; x++) {
-                                int sx = (x + sX) % Width; if (sx < 0) sx += Width;
+                                // Beräkna rätt kolumn i käll-bitmappen
+                                int sx = (x + sX) % sWidth; if (sx < 0) sx += sWidth;
                                 int di = x * 4, si = sx * 4;
+                                
                                 if (sIdx == 0 || (sr[si+0] > 0 || sr[si+1] > 0 || sr[si+2] > 0)) {
                                     dr[di+0]=sr[si+0]; dr[di+1]=sr[si+1]; dr[di+2]=sr[si+2]; dr[di+3]=255;
                                 }
@@ -273,31 +319,114 @@ public sealed class AmosGraphics
             }
         } catch {}
     }
-
-    public void SetMapSize(int w, int h) => _map = new int[w, h];
-    public void SetMapTile(int x, int y, int tid) { if (x>=0 && x<_map.GetLength(0) && y>=0 && y<_map.GetLength(1)) _map[x, y] = tid; }
-    public void DrawMap(int ox, int oy) {
-        if (_map.GetLength(0) == 0 || _tiles.Count == 0) return;
-        for (int y = 0; y < _map.GetLength(1); y++) for (int x = 0; x < _map.GetLength(0); x++) {
-            int tid = _map[x, y]; if (tid < 0 || tid >= _tiles.Count) continue;
-            DrawTileToBackbuffer(_tiles[tid], x * _tileWidth - ox, y * _tileHeight - oy);
-        }
+    
+    public void LoadTileBank(System.IO.Stream stream, int tw, int th) {
+        try {
+            using var b = new Bitmap(stream); 
+            _tileWidth = tw; _tileHeight = th; _tiles.Clear();
+            int cs = (int)b.Size.Width / tw, rs = (int)b.Size.Height / th;
+            for (int y = 0; y < rs; y++) {
+                for (int x = 0; x < cs; x++) {
+                    var t = CreateEmptyBitmap(tw, th);
+                    using (var fb = t.Lock()) {
+                        b.CopyPixels(new PixelRect(x*tw, y*th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
+                        unsafe { var p = (byte*)fb.Address; for (int i = 0; i < tw*th; i++) { byte temp = p[i*4+0]; p[i*4+0]=p[i*4+2]; p[i*4+2]=temp; } }
+                    }
+                    _tiles.Add(t);
+                }
+            }
+        } catch {}
     }
 
-    private void DrawTileToBackbuffer(WriteableBitmap t, int dx, int dy) {
-        using var dst = GetActiveScreen().Lock(); using var src = t.Lock();
-        unsafe {
-            var dp = (byte*)dst.Address; var sp = (byte*)src.Address;
-            for (int y = 0; y < _tileHeight; y++) {
-                int ty = dy + y; if (ty < 0 || ty >= Height) continue;
-                var dr = dp + ty * dst.RowBytes; var sr = sp + y * src.RowBytes;
-                for (int x = 0; x < _tileWidth; x++) {
-                    int tx = dx + x; if (tx < 0 || tx >= Width) continue;
-                    int si = x * 4, di = tx * 4; dr[di+0]=sr[si+0]; dr[di+1]=sr[si+1]; dr[di+2]=sr[si+2]; dr[di+3]=255;
+    public void SetMapSize(int newW, int newH) 
+    {
+        var oldMap = _map;
+        _map = new int[newW, newH];
+        for (int y = 0; y < newH; y++)
+        for (int x = 0; x < newW; x++)
+            _map[x, y] = -1;
+
+        int pixelW = newW * _tileWidth;
+        int pixelH = newH * _tileHeight;
+        
+        _screens[_currentScreen] = CreateEmptyBitmap(pixelW, pixelH);
+
+        // Initiera banan med -1 (tomt) istället för 0 (första tilen)
+        for (int y = 0; y < newH; y++)
+        for (int x = 0; x < newW; x++)
+            _map[x, y] = -1;
+
+        // Kopiera över gamla datan om den fanns
+        int copyW = Math.Min(newW, oldMap.GetLength(0));
+        int copyH = Math.Min(newH, oldMap.GetLength(1));
+
+        for (int y = 0; y < copyH; y++)
+        for (int x = 0; x < copyW; x++)
+            _map[x, y] = oldMap[x, y];
+    }
+   
+    public void SetMapTile(int x, int y, int tileId) {
+        if (x >= 0 && x < _map.GetLength(0) && y >= 0 && y < _map.GetLength(1)) {
+            _map[x, y] = tileId;
+        }
+    }
+   
+    public void DrawMap(int ox, int oy) {
+        if (_map.GetLength(0) == 0 || _tiles.Count == 0) return;
+        
+        // Hämta det lagret vi ska rita på
+        var target = GetActiveScreen();
+        int targetW = target.PixelSize.Width;
+        int targetH = target.PixelSize.Height;
+
+        for (int y = 0; y < _map.GetLength(1); y++) {
+            for (int x = 0; x < _map.GetLength(0); x++) {
+                int tid = _map[x, y]; 
+                if (tid < 0 || tid >= _tiles.Count) continue;
+
+                // Beräkna koordinaterna i det stora lagret
+                int dx = x * _tileWidth - ox;
+                int dy = y * _tileHeight - oy;
+
+                // VIKTIGT: Rita bara om vi är inom lagrets gränser
+                if (dx >= 0 && dx < targetW && dy >= 0 && dy < targetH) {
+                    DrawTileToBackbuffer(_tiles[tid], dx, dy);
                 }
             }
         }
     }
+
+    private void DrawTileToBackbuffer(WriteableBitmap t, int dx, int dy) {
+        var target = GetActiveScreen();
+        using var dst = target.Lock(); 
+        using var src = t.Lock();
+        unsafe {
+            var dp = (byte*)dst.Address; var sp = (byte*)src.Address;
+            // VIKTIGT: Använd target.PixelSize istället för globala Width/Height
+            int tw = target.PixelSize.Width;
+            int th = target.PixelSize.Height;
+
+            for (int y = 0; y < _tileHeight; y++) {
+                int ty = dy + y; if (ty < 0 || ty >= th) continue;
+                var dr = dp + ty * dst.RowBytes; var sr = sp + y * src.RowBytes;
+                for (int x = 0; x < _tileWidth; x++) {
+                    int tx = dx + x; if (tx < 0 || tx >= tw) continue;
+                    int si = x * 4, di = tx * 4; 
+                    dr[di+0]=sr[si+0]; dr[di+1]=sr[si+1]; dr[di+2]=sr[si+2]; dr[di+3]=255;
+                }
+            }
+        }
+    }
+    
+    public int GetMapWidth() => _map.GetLength(0);
+    public int GetMapHeight() => _map.GetLength(1);
+    public int GetMapTile(int x, int y) {
+        if (x >= 0 && x < _map.GetLength(0) && y >= 0 && y < _map.GetLength(1))
+            return _map[x, y];
+        return -1;
+    }
+
+
 
     // ---------------- Sprites ----------------
 
