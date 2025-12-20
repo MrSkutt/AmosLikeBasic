@@ -13,7 +13,7 @@
         <!-- Top Menu -->
         <Menu Name="TopMenu" DockPanel.Dock="Top" Focusable="False">
             <MenuItem Header="_Project">
-                <MenuItem Header="New"/>
+                <MenuItem Header="New" Click="NewProject_OnClick"/>
                 <MenuItem Header="Open..." Click="OpenProject_OnClick"/>
                 <Separator/>
                 <MenuItem Header="Exit"/>
@@ -84,14 +84,14 @@
 
                 <!-- Screen Tab -->
                 <TabItem Header="[ SCREEN ]" Foreground="#7FB2FF" FontWeight="Bold">
-                    <Grid Background="Black">
+                    <Grid Background="Black" ClipToBounds="True"> <!-- ClipToBounds tar bort spill -->
                         <Viewbox Stretch="Uniform">
-                            <!-- En Grid som håller både grafik och text så de skalar identiskt -->
-                            <Grid Width="640" Height="480">
+                            <Grid Width="640" Height="480" Background="Black">
                                 <Image x:Name="ScreenImage" 
                                        Focusable="True" 
                                        Stretch="Fill"
                                        RenderOptions.BitmapInterpolationMode="None"/>
+                                
                                 
                                 <!-- Denna används för BASIC PRINT-kommandon -->
                                 <TextBox x:Name="Console" 

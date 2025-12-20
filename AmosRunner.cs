@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -13,7 +12,9 @@ public static class AmosRunner
 {
     private sealed class ForFrame { public required string VarName; public required int EndValue; public required int StepValue; public required int LineAfterForPc; public required int ForLineNumber; }
     private static readonly Random _rng = new();
+    private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
 
+    
     public static async Task ExecuteAsync(string programText, Func<string, Task> appendLineAsync, Func<Task> clearAsync, AmosGraphics graphics, Action onGraphicsChanged, Func<string> getInkey, Func<string, bool> isKeyDown, CancellationToken token)
     {
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -21,7 +22,6 @@ public static class AmosRunner
         var gosubStack = new Stack<int>();
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         
-        // 1. Pre-scan for labels (oförändrad)
         var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < lines.Length; i++) {
             var rawLine = lines[i].Trim();
@@ -36,20 +36,19 @@ public static class AmosRunner
             token.ThrowIfCancellationRequested();
             var ln = pc + 1; 
             var line = StripComments((lines[pc] ?? "").Trim());
-            
             if (string.IsNullOrWhiteSpace(line) || line.EndsWith(':')) { pc++; continue; }
             line = StripLeadingLineNumber(line);
 
-            // NYTT: Dela upp raden i flera kommandon (:)
             var commands = SplitMultipleCommands(line);
             bool jumpHappened = false;
 
             foreach (var fullCmd in commands) {
-                if (string.IsNullOrWhiteSpace(fullCmd)) continue;
-                var (cmd, arg) = SplitCommand(fullCmd);
+                var trimmedCmd = fullCmd.Trim();
+                if (string.IsNullOrEmpty(trimmedCmd)) continue;
+                var (cmd, arg) = SplitCommand(trimmedCmd);
 
                 switch (cmd) {
-                    case "REM": goto next_line; // REM hoppar över resten av raden
+                    case "REM": goto next_line;
                     case "GOTO":
                         if (labels.TryGetValue(arg, out var targetPc)) { pc = targetPc; jumpHappened = true; }
                         else throw new Exception($"Label {arg} not found at line {ln}");
@@ -64,86 +63,158 @@ public static class AmosRunner
                         else throw new Exception($"RETURN without GOSUB at line {ln}");
                         break;
                     case "CLS": await appendLineAsync("@@CLS"); await clearAsync(); break;
-                    case "LOCATE": var lp = SplitCsvOrSpaces(arg); await appendLineAsync($"@@LOCATE {EvalInt(lp[0], vars, ln, getInkey, isKeyDown)} {EvalInt(lp[1], vars, ln, getInkey, isKeyDown)}"); break;
+                    case "LOCATE": 
+                        var lp = SplitCsvOrSpaces(arg); 
+                        await appendLineAsync($"@@LOCATE {EvalInt(lp[0], vars, ln, getInkey, isKeyDown, graphics)} {EvalInt(lp[1], vars, ln, getInkey, isKeyDown, graphics)}"); 
+                        break;
                     case "PRINT":
                         var printArg = arg.Trim();
                         if (printArg.ToUpperInvariant().StartsWith("AT ")) {
                             var parts = SplitCsvOrSpaces(printArg.Substring(3));
                             if (parts.Count >= 3) {
-                                await appendLineAsync($"@@LOCATE {EvalInt(parts[0], vars, ln, getInkey, isKeyDown)} {EvalInt(parts[1], vars, ln, getInkey, isKeyDown)}");
-                                await appendLineAsync("@@PRINT " + ValueToString(EvalValue(string.Join(" ", parts.Skip(2)), vars, ln, getInkey, isKeyDown)));
+                                await appendLineAsync($"@@LOCATE {EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics)} {EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics)}");
+                                await appendLineAsync("@@PRINT " + ValueToString(EvalValue(string.Join(" ", parts.Skip(2)), vars, ln, getInkey, isKeyDown, graphics)));
                             }
-                        } else await appendLineAsync("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown)));
+                        } else await appendLineAsync("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)));
                         break;
-                    case "LET": var (n, vt) = SplitAssignment(arg); vars[n] = EvalValue(vt, vars, ln, getInkey, isKeyDown); break;
+                    case "LET": 
+                        var (n, vt) = SplitAssignment(arg); 
+                        vars[n] = EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics); 
+                        break;
                     case "WAIT": 
-                        if (arg.ToUpperInvariant() == "VBL") await appendLineAsync("@@VSYNC");
-                        else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown)), token);
+                        if (arg.ToUpperInvariant() == "VBL") {
+                            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Render);
+                            await Task.Delay(16, token);
+                        } else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics)), token);
                         break;
                     case "IF":
                         var tIdx = IndexOfWord(arg, "THEN");
-                        if (tIdx >= 0 && EvalCondition(arg[..tIdx].Trim(), vars, ln, getInkey, isKeyDown)) {
+                        if (tIdx >= 0 && EvalCondition(arg[..tIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics)) {
                             var restOfLine = arg[(tIdx + 4)..].Trim();
-                            // Kör resten av raden som nya kommandon
                             var thenCmds = SplitMultipleCommands(restOfLine);
                             foreach (var tc in thenCmds) {
-                                var (tc_cmd, tc_arg) = SplitCommand(tc);
-                                if (await ExecuteSingleStatementAsync(tc_cmd, tc_arg, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, token, ln)) { jumpHappened = true; break; }
+                                // Trimma här också för säkerhets skull
+                                var trimmedTc = tc.Trim();
+                                if (string.IsNullOrEmpty(trimmedTc)) continue;
+                                
+                                var (tc_cmd, tc_arg) = SplitCommand(trimmedTc);
+                                if (await ExecuteSingleStatementAsync(tc_cmd, tc_arg, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, token, ln)) { 
+                                    jumpHappened = true; 
+                                    break; 
+                                }
                             }
                         }
-                        goto next_line; // IF avbryter alltid resten av originalraden för att inte köra kommandon efter THEN av misstag
+                        goto next_line;
                     case "FOR":
-                        var eq = arg.IndexOf('='); var fV = arg[..eq].Trim(); var rhs = arg[(eq + 1)..].Trim(); var toIdx = IndexOfWord(rhs, "TO");
-                        var start = EvalInt(rhs[..toIdx].Trim(), vars, ln, getInkey, isKeyDown); var rest = rhs[(toIdx + 2)..].Trim(); var stIdx = IndexOfWord(rest, "STEP");
-                        var end = EvalInt(stIdx < 0 ? rest : rest[..stIdx].Trim(), vars, ln, getInkey, isKeyDown);
-                        var step = stIdx < 0 ? 1 : EvalInt(rest[(stIdx + 4)..].Trim(), vars, ln, getInkey, isKeyDown);
-                        vars[fV] = start; forStack.Push(new ForFrame { VarName = fV, EndValue = end, StepValue = step, LineAfterForPc = pc + 1, ForLineNumber = ln });
+                        var eq = arg.IndexOf('='); 
+                        if (eq < 0) throw new Exception($"Syntax Error in FOR: Missing '=' at line {ln}");
+                        var fV = arg[..eq].Trim(); 
+                        var rhs = arg[(eq + 1)..].Trim(); 
+                        var toIdx = IndexOfWord(rhs, "TO");
+                        if (toIdx < 0) throw new Exception($"Syntax Error in FOR: Missing 'TO' at line {ln}");
+                        var start = EvalInt(rhs[..toIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics); 
+                        var rest = rhs[(toIdx + 2)..].Trim(); 
+                        var stIdx = IndexOfWord(rest, "STEP");
+                        var end = EvalInt(stIdx < 0 ? rest : rest[..stIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                        var step = stIdx < 0 ? 1 : EvalInt(rest[(stIdx + 4)..].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                        vars[fV] = start; 
+                        forStack.Push(new ForFrame { VarName = fV, EndValue = end, StepValue = step, LineAfterForPc = pc + 1, ForLineNumber = ln });
                         break;
                     case "NEXT":
                         if (forStack.Count == 0) break;
                         var f = forStack.Peek(); var cur = GetIntVar(f.VarName, vars, ln) + f.StepValue; vars[f.VarName] = cur;
                         if (f.StepValue > 0 ? cur <= f.EndValue : cur >= f.EndValue) { pc = f.LineAfterForPc; jumpHappened = true; } else forStack.Pop();
                         break;
-                    case "SCREEN": var sP = SplitCsvOrSpaces(arg); graphics.Screen(EvalInt(sP[0], vars, ln, getInkey, isKeyDown), EvalInt(sP[1], vars, ln, getInkey, isKeyDown)); graphics.Clear(Colors.Black); onGraphicsChanged(); break;
+                    case "SCREEN":
+                        var screenArgs = SplitCsvOrSpaces(arg);
+                        if (screenArgs.Count > 0 && screenArgs[0].Equals("SELECT", StringComparison.OrdinalIgnoreCase)) {
+                            if (screenArgs.Count >= 2) graphics.SetDrawingScreen(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
+                        } else if (screenArgs.Count >= 2) {
+                            graphics.Screen(EvalInt(screenArgs[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
+                            graphics.Clear(Colors.Black);
+                        }
+                        break;
+                    case "SCROLL":
+                        var sc = SplitCsvOrSpaces(arg);
+                        if (sc.Count >= 3) graphics.Scroll(EvalInt(sc[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(sc[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(sc[2], vars, ln, getInkey, isKeyDown, graphics));
+                        else {
+                            var parts = arg.Split(',');
+                            if (parts.Length >= 2) graphics.Scroll(0, EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics));
+                        }
+                        break;
                     case "CLSG": graphics.Clear(Colors.Black); onGraphicsChanged(); break;
                     case "LOAD": graphics.LoadBackground(Unquote(arg)); onGraphicsChanged(); break;
                     case "INK": graphics.Ink = ParseColor(arg); break;
-                    case "PLOT": var pP = SplitCsvOrSpaces(arg); graphics.Plot(EvalInt(pP[0], vars, ln, getInkey, isKeyDown), EvalInt(pP[1], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); break;
-                    case "LINE": var lL = SplitCsvOrSpaces(arg); graphics.Line(EvalInt(lL[0], vars, ln, getInkey, isKeyDown), EvalInt(lL[1], vars, ln, getInkey, isKeyDown), EvalInt(lL[2], vars, ln, getInkey, isKeyDown), EvalInt(lL[3], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); break;
-                    case "BOX": var bB = SplitCsvOrSpaces(arg); graphics.Box(EvalInt(bB[0], vars, ln, getInkey, isKeyDown), EvalInt(bB[1], vars, ln, getInkey, isKeyDown), EvalInt(bB[2], vars, ln, getInkey, isKeyDown), EvalInt(bB[3], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); break;
-                    case "BAR": var rR = SplitCsvOrSpaces(arg); graphics.Bar(EvalInt(rR[0], vars, ln, getInkey, isKeyDown), EvalInt(rR[1], vars, ln, getInkey, isKeyDown), EvalInt(rR[2], vars, ln, getInkey, isKeyDown), EvalInt(rR[3], vars, ln, getInkey, isKeyDown)); onGraphicsChanged(); break;
-                    case "SCROLL": var sc = SplitCsvOrSpaces(arg); graphics.Scroll(EvalInt(sc[0], vars, ln, getInkey, isKeyDown), EvalInt(sc[1], vars, ln, getInkey, isKeyDown)); break;
+                    case "PLOT": 
+                        var pP = SplitCsvOrSpaces(arg); 
+                        graphics.Plot(EvalInt(pP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(pP[1], vars, ln, getInkey, isKeyDown, graphics)); 
+                        onGraphicsChanged(); break;
+                    case "LINE": 
+                        var lL = SplitCsvOrSpaces(arg); 
+                        graphics.Line(EvalInt(lL[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                        onGraphicsChanged(); break;
+                    case "BOX": 
+                        var bB = SplitCsvOrSpaces(arg); 
+                        graphics.Box(EvalInt(bB[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                        onGraphicsChanged(); break;
+                    case "BAR": 
+                        var rR = SplitCsvOrSpaces(arg); 
+                        graphics.Bar(EvalInt(rR[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                        onGraphicsChanged(); break;
                     case "TEXT":
                         var tP = SplitCsvOrSpaces(arg);
-                        if (tP.Count >= 3) graphics.DrawText(EvalInt(tP[0], vars, ln, getInkey, isKeyDown), EvalInt(tP[1], vars, ln, getInkey, isKeyDown), ValueToString(EvalValue(string.Join(" ", tP.Skip(2)), vars, ln, getInkey, isKeyDown)));
+                        if (tP.Count >= 3) graphics.DrawText(EvalInt(tP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tP[1], vars, ln, getInkey, isKeyDown, graphics), ValueToString(EvalValue(string.Join(" ", tP.Skip(2)), vars, ln, getInkey, isKeyDown, graphics)));
                         onGraphicsChanged(); break;
                     case "REFRESH": graphics.Refresh(); onGraphicsChanged(); break;
                     case "SPRITE":
                         var ss = SplitCsvOrSpaces(arg);
                         if (!int.TryParse(ss[0], out var sid)) {
                             var sub = ss[0].ToUpperInvariant();
-                            if (sub=="POS") graphics.SpritePos(EvalInt(ss[1],vars,ln,getInkey,isKeyDown), EvalInt(ss[2],vars,ln,getInkey,isKeyDown), EvalInt(ss[3],vars,ln,getInkey,isKeyDown));
-                            else if (sub=="LOAD") graphics.LoadSprite(EvalInt(ss[1], vars, ln, getInkey, isKeyDown), Unquote(ss[2]));
-                            else if (sub=="ADDFRAME") graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown), Unquote(ss[2]));
-                            else if (sub=="FRAME") graphics.SetSpriteFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown), EvalInt(ss[2], vars, ln, getInkey, isKeyDown));
-                            else if (sub=="HANDLE") graphics.SpriteHandle(EvalInt(ss[1],vars,ln,getInkey,isKeyDown), EvalInt(ss[2],vars,ln,getInkey,isKeyDown), EvalInt(ss[3],vars,ln,getInkey,isKeyDown));
-                            else if (sub=="ON") graphics.SpriteOn(EvalInt(ss[1],vars,ln,getInkey,isKeyDown));
-                            else if (sub=="OFF") graphics.SpriteOff(EvalInt(ss[1],vars,ln,getInkey,isKeyDown));
-                        } else graphics.CreateSprite(sid, EvalInt(ss[1],vars,ln,getInkey,isKeyDown), EvalInt(ss[2],vars,ln,getInkey,isKeyDown)); 
+                            if (sub=="POS") graphics.SpritePos(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[3],vars,ln,getInkey,isKeyDown, graphics));
+                            else if (sub=="LOAD") graphics.LoadSprite(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
+                            else if (sub=="ADDFRAME") graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
+                            else if (sub=="FRAME") graphics.SetSpriteFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
+                            else if (sub=="HANDLE") graphics.SpriteHandle(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[3],vars,ln,getInkey,isKeyDown, graphics));
+                            else if (sub=="ON") graphics.SpriteOn(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics));
+                            else if (sub=="OFF") graphics.SpriteOff(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics));
+                        } else graphics.CreateSprite(sid, EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics)); 
+                        break;
+                    case "SAM":
+                        var samArgs = SplitCsvOrSpaces(arg);
+                        if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "PLAY") {
+                            PlayEffect(Unquote(samArgs[1])); // Ljudeffekt
+                        }
+                        break;
+                    case "MUSIC":
+                        var musArgs = SplitCsvOrSpaces(arg);
+                        if (musArgs.Count >= 2 && musArgs[0].ToUpperInvariant() == "PLAY") {
+                            PlayMusic(Unquote(musArgs[1])); // Bakgrundsmusik
+                        } else if (musArgs.Count >= 1 && musArgs[0].ToUpperInvariant() == "STOP") {
+                            StopMusic();
+                        }
+                        break;;
+                    case "TILE":
+                        var tArgs = SplitCsvOrSpaces(arg);
+                        if (tArgs.Count > 0) {
+                            var tileSub = tArgs[0].ToUpperInvariant(); // Ändrat namn från sub till tileSub
+                            if (tileSub == "LOAD" && tArgs.Count >= 4) 
+                                graphics.LoadTileBank(Unquote(tArgs[1]), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
+                            else if (tileSub == "MAP" && tArgs.Count >= 3) 
+                                graphics.SetMapSize(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+                            else if (tileSub == "SET" && tArgs.Count >= 4) 
+                                graphics.SetMapTile(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
+                            else if (tileSub == "DRAW" && tArgs.Count >= 3) 
+                                graphics.DrawMap(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+                        }
                         break;
                     case "END": return;
                     default: if (!string.IsNullOrWhiteSpace(cmd)) throw new Exception($"Syntax Error: '{cmd}' at line {ln}"); break;
                 }
                 if (jumpHappened) break;
             }
-            
-            // Om inget hopp skedde (GOTO/NEXT etc), gå till nästa rad
             if (!jumpHappened) pc++;
-            
-            continue; // Hoppa över next_line labeln om vi körde normalt
-
-            next_line:
-            pc++; // VIKTIGT: Se till att vi faktiskt stegar framåt även om vi använde 'goto next_line'
+            continue;
+            next_line: pc++;
         }
     }
 
@@ -159,107 +230,108 @@ public static class AmosRunner
     private static async Task<bool> ExecuteSingleStatementAsync(string cmd, string arg, Dictionary<string, object> vars, Func<string, Task> al, Func<Task> cl, AmosGraphics g, Action og, Func<string> gk, Func<string, bool> ikd, CancellationToken t, int ln)
     {
         switch (cmd) {
-            case "PRINT": await al("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, gk, ikd))); return false;
-            case "LOCATE": var p = SplitCsvOrSpaces(arg); await al($"@@LOCATE {EvalInt(p[0], vars, ln, gk, ikd)} {EvalInt(p[1], vars, ln, gk, ikd)}"); return false;
+            case "PRINT": await al("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, gk, ikd, g))); return false;
+            case "LOCATE": var p = SplitCsvOrSpaces(arg); await al($"@@LOCATE {EvalInt(p[0], vars, ln, gk, ikd, g)} {EvalInt(p[1], vars, ln, gk, ikd, g)}"); return false;
             case "LET": 
                 var (n, vt) = SplitAssignment(arg); 
-                vars[n] = EvalValue(vt, vars, ln, gk, ikd); 
+                vars[n] = EvalValue(vt, vars, ln, gk, ikd, g); 
                 return false;
-            case "PLOT": var pp = SplitCsvOrSpaces(arg); g.Plot(EvalInt(pp[0], vars, ln, gk, ikd), EvalInt(pp[1], vars, ln, gk, ikd)); og(); return false;
+            case "PLOT": var pp = SplitCsvOrSpaces(arg); g.Plot(EvalInt(pp[0], vars, ln, gk, ikd, g), EvalInt(pp[1], vars, ln, gk, ikd, g)); og(); return false;
             case "SPRITE":
                 var ss = SplitCsvOrSpaces(arg);
                 if (ss.Count >= 2) {
                     var sub = ss[0].ToUpperInvariant();
-                    if (sub == "POS") g.SpritePos(EvalInt(ss[1], vars, ln, gk, ikd), EvalInt(ss[2], vars, ln, gk, ikd), EvalInt(ss[3], vars, ln, gk, ikd));
-                    else if (sub == "FRAME") g.SetSpriteFrame(EvalInt(ss[1], vars, ln, gk, ikd), EvalInt(ss[2], vars, ln, gk, ikd));
-                    else if (sub == "ON") g.SpriteOn(EvalInt(ss[1], vars, ln, gk, ikd));
-                    else if (sub == "OFF") g.SpriteOff(EvalInt(ss[1], vars, ln, gk, ikd));
+                    if (sub == "POS") g.SpritePos(EvalInt(ss[1], vars, ln, gk, ikd, g), EvalInt(ss[2], vars, ln, gk, ikd, g), EvalInt(ss[3], vars, ln, gk, ikd, g));
+                    else if (sub == "FRAME") g.SetSpriteFrame(EvalInt(ss[1], vars, ln, gk, ikd, g), EvalInt(ss[2], vars, ln, gk, ikd, g));
+                    else if (sub == "ON") g.SpriteOn(EvalInt(ss[1], vars, ln, gk, ikd, g));
+                    else if (sub == "OFF") g.SpriteOff(EvalInt(ss[1], vars, ln, gk, ikd, g));
                 }
                 return false;
             case "WAIT":
-                if (arg.ToUpperInvariant() == "VBL") await al("@@VSYNC");
-                else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, gk, ikd)), t);
+                if (arg.ToUpperInvariant() == "VBL") {
+                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Render);
+                    await Task.Delay(16, t);
+                } else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, gk, ikd, g)), t);
                 return false;
             case "VSYNC": await al("@@VSYNC"); return false;
             case "REFRESH": g.Refresh(); og(); return false;
-            case "END": return true;
-            default: 
-                if (!string.IsNullOrWhiteSpace(cmd))
-                {
-                    throw new Exception($"Syntax Error in IF-THEN: Unknown command '{cmd}' at line {ln}");
+            case "SAM":
+                var sa = SplitCsvOrSpaces(arg);
+                if (sa.Count >= 2 && sa[0].ToUpperInvariant() == "PLAY") {
+                    PlayEffect(Unquote(sa[1]));
                 }
-                return false;
+                return false; // VIKTIGT: Lägg till denna rad!
+            case "END": return true;
+            default: if (!string.IsNullOrWhiteSpace(cmd)) throw new Exception($"Syntax Error in IF-THEN: Unknown command '{cmd}' at line {ln}"); return false;
         }
     }
 
-    private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd)
+    private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
     {
-        // Om villkoret bara är en funktion som returnerar 0 eller 1 (som KEYSTATE)
-        if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>'))
-        {
-            var val = EvalValue(c, v, ln, gk, ikd);
-            return Convert.ToInt32(val) != 0;
-        }
-
+        if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>')) return Convert.ToInt32(EvalValue(c, v, ln, gk, ikd, g)) != 0;
         var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
         foreach (var op in ops) {
             var i = c.IndexOf(op); if (i < 0) continue;
-            var lV = EvalValue(c[..i].Trim(), v, ln, gk, ikd); var rV = EvalValue(c[(i + op.Length)..].Trim(), v, ln, gk, ikd);
+            var lV = EvalValue(c[..i].Trim(), v, ln, gk, ikd, g); var rV = EvalValue(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
             if (lV is string || rV is string) { var ls = ValueToString(lV); var rs = ValueToString(rV); return op == "=" ? ls == rs : ls != rs; }
             var li = Convert.ToInt32(lV); var ri = Convert.ToInt32(rV);
             return op switch { "=" => li == ri, "<>" => li != ri, "<" => li < ri, ">" => li > ri, "<=" => li <= ri, ">=" => li >= ri, _ => false };
         }
-        
         return false;
     }
-    
 
-    private static string StripComments(string l)
-    {
-        bool inQuotes = false;
-        for (int i = 0; i < l.Length; i++)
-        {
-            if (l[i] == '\"') inQuotes = !inQuotes;
-            if (!inQuotes && l[i] == ';') return l[..i].Trim();
+    private static string StripComments(string l) {
+        bool q = false;
+        for (int i = 0; i < l.Length; i++) {
+            if (l[i] == '\"') q = !q;
+            if (!q && l[i] == ';') return l[..i].Trim();
         }
         return l;
     }
-    private static object EvalValue(string t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd)
-    {
+
+    private static object EvalValue(string t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         t = t.Trim();
         if (t.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
-        
-        if (t.StartsWith("KEYSTATE(", StringComparison.OrdinalIgnoreCase)) {
-            var k = t.Substring(9).TrimEnd(')').Trim('"');
-            // Anropa ikd (isKeyDown) med tangentnamnet
-            return ikd(k) ? 1 : 0;
-        }
+        if (t.StartsWith("KEYSTATE(", StringComparison.OrdinalIgnoreCase)) return ikd(t.Substring(9).TrimEnd(')').Trim('\"')) ? 1 : 0;
         if (IsQuotedString(t)) return Unquote(t);
-        return EvalInt(t, v, ln, gk, ikd);
+        return EvalInt(t, v, ln, gk, ikd, g);
     }
 
-    private static int EvalInt(string val, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd) { var t = new Tokenizer(val); return ParseExpr(ref t, v, ln, gk, ikd); }
-    private static int ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd) {
-        var res = ParseTerm(ref t, v, ln, gk, ikd);
-        while (true) { if (t.TryConsume('+')) res += ParseTerm(ref t, v, ln, gk, ikd); else if (t.TryConsume('-')) res -= ParseTerm(ref t, v, ln, gk, ikd); else break; }
+    private static int EvalInt(string val, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) { 
+        if (string.IsNullOrWhiteSpace(val)) return 0;
+        var t = new Tokenizer(val); return ParseExpr(ref t, v, ln, gk, ikd, g); 
+    }
+
+    private static int ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        var res = ParseTerm(ref t, v, ln, gk, ikd, g);
+        while (true) { if (t.TryConsume('+')) res += ParseTerm(ref t, v, ln, gk, ikd, g); else if (t.TryConsume('-')) res -= ParseTerm(ref t, v, ln, gk, ikd, g); else break; }
         return res;
     }
-    private static int ParseTerm(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd) {
-        var res = ParseFactor(ref t, v, ln, gk, ikd);
-        while (true) { if (t.TryConsume('*')) res *= ParseFactor(ref t, v, ln, gk, ikd); else if (t.TryConsume('/')) res /= ParseFactor(ref t, v, ln, gk, ikd); else break; }
+
+    private static int ParseTerm(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        var res = ParseFactor(ref t, v, ln, gk, ikd, g);
+        while (true) { 
+            if (t.TryConsume('*')) res *= ParseFactor(ref t, v, ln, gk, ikd, g); 
+            else if (t.TryConsume('/')) {
+                var d = ParseFactor(ref t, v, ln, gk, ikd, g);
+                res = (d == 0) ? 0 : res / d;
+            } else break; 
+        }
         return res;
     }
-    private static int ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd) {
+
+    private static int ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         t.SkipWs();
-        if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd); t.TryConsume(')'); return res; }
+        if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
         if (t.TryReadInt(out var n)) return n;
         if (t.TryReadIdentifier(out var id)) {
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk().Length;
+            if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('('); var id1 = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(','); var id2 = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')');
+                return g.SpriteHit(id1, id2) ? 1 : 0;
+            }
             if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); 
-                var max = ParseExpr(ref t, v, ln, gk, ikd); 
-                t.TryConsume(')'); 
-                return _rng.Next(max + 1); 
+                t.TryConsume('('); var m = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return _rng.Next(m + 1); 
             }
             if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var k = Unquote(t.ReadUntil(')')); t.TryConsume(')'); return ikd(k) ? 1 : 0;
@@ -271,14 +343,70 @@ public static class AmosRunner
 
     private static string ValueToString(object? v) => v?.ToString() ?? "";
     private static bool IsQuotedString(string t) => t.Length >= 2 && t.StartsWith("\"") && t.EndsWith("\"");
-    private static string Unquote(string t) => t.Trim('"');
+    private static string Unquote(string t) => t.Trim('\"');
     private static int GetIntVar(string n, Dictionary<string, object> v, int ln) => v.TryGetValue(n, out var val) ? Convert.ToInt32(val) : 0;
     private static (string n, string v) SplitAssignment(string t) { var i = t.IndexOf('='); return (t[..i].Trim(), t[(i + 1)..].Trim()); }
-    private static (string c, string a) SplitCommand(string l) { var i = l.IndexOf(' '); return i < 0 ? (l.ToUpperInvariant(), "") : (l[..i].ToUpperInvariant(), l[(i + 1)..].Trim()); }
+    private static (string c, string a) SplitCommand(string l) { 
+        // 1. Trimma bort mellanslag i början och slutet direkt!
+        l = l.Trim();
+        if (string.IsNullOrWhiteSpace(l)) return ("", "");
+        
+        var i = l.IndexOf(' '); 
+        if (i < 0) return (l.ToUpperInvariant(), "");
+        
+        // 2. Ta ut kommandot och argumentet, och trimma igen
+        string cmd = l[..i].ToUpperInvariant().Trim();
+        string arg = l[(i + 1)..].Trim();
+        
+        return (cmd, arg); 
+    }
+    
+    private static void PlayEffect(string file) {
+        try {
+            // Starta afplay snabbt för ljudeffekter
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = "afplay",
+                Arguments = $"\"{file}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            });
+        } catch {}
+    }
+
+    private static void PlayMusic(string file) {
+        try {
+            StopMusic(); // Stoppa föregående låt innan ny startar
+            _currentMusicProcess = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = "xmp",
+                Arguments = $"\"{file}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            });
+        } catch {}
+    }
+
+    public static void StopMusic() {
+        try {
+            if (_currentMusicProcess != null && !_currentMusicProcess.HasExited) {
+                _currentMusicProcess.Kill();
+                _currentMusicProcess = null;
+            }
+        } catch {}
+    }
+
+    public static void StopAllSounds() {
+        StopMusic();
+        // För att vara helt säkra vid STOP-knappen dödar vi alla afplay
+        try { System.Diagnostics.Process.Start("killall", "afplay"); } catch {}
+    }
+    
     private static string StripLeadingLineNumber(string l) { var i = 0; while (i < l.Length && char.IsDigit(l[i])) i++; return l[i..].Trim(); }
-    private static List<string> SplitCsvOrSpaces(string a) => new List<string>(a.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries));
+    private static List<string> SplitCsvOrSpaces(string a) {
+        if (string.IsNullOrWhiteSpace(a)) return new List<string>();
+        return a.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
     private static Color ParseColor(string t) { try { return Color.Parse(t); } catch { return Colors.White; } }
-    private static int IndexOfWord(string t, string w) { var i = t.ToUpperInvariant().IndexOf(w.ToUpperInvariant()); return i; }
+    private static int IndexOfWord(string t, string w) => t.ToUpperInvariant().IndexOf(w.ToUpperInvariant());
 
     private ref struct Tokenizer {
         private readonly string _s; private int _i;

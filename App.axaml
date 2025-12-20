@@ -28,12 +28,16 @@
         </Style>
 
         <Style Selector="TextBox.amos-console">
-            <Setter Property="FontFamily" Value="Menlo, Consolas, Courier New"/>
+            <Setter Property="FontFamily" Value="Courier New, Monospace"/>
             <Setter Property="FontSize" Value="16"/>
-            <Setter Property="Background" Value="#010C33"/>
-            <Setter Property="Foreground" Value="#B7FFB7"/>
-            <Setter Property="CaretBrush" Value="White"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="White"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+            <!-- Tvinga bort scrollbarer helt -->
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled"/>
         </Style>
 
         <Style Selector="Button.amos-button">

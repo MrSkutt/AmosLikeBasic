@@ -19,7 +19,7 @@ public partial class MainWindow : Window
 
     private readonly TextScreen _textScreen = new(rows: 30, cols: 80);
     private bool _uiReady;
-
+    private IStorageFile? _currentProjectFile;
     private string _lastInkey = ""; // Track keyboard input for BASIC
     //private readonly System.Collections.Generic.HashSet<string> _pressedKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _pressedKeys = new(StringComparer.OrdinalIgnoreCase);
@@ -70,7 +70,22 @@ public partial class MainWindow : Window
 
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
-        
+        if (e.Key == Key.F5) { RunButton_OnClick(null, new RoutedEventArgs()); e.Handled = true; return; }
+        if (e.Key == Key.Escape) 
+        { 
+            // 1. Stoppa programmet
+            StopButton_OnClick(null, new RoutedEventArgs()); 
+            
+            // 2. Om vi är i fullskärm, gå tillbaka till fönsterläge
+            if (WindowState == WindowState.FullScreen)
+            {
+                ToggleFullscreen();
+            }
+            
+            e.Handled = true; 
+            return; 
+        }
+ 
         // Växla fullskärm med F11
         if (e.Key == Key.F10)
         {
@@ -300,34 +315,56 @@ public partial class MainWindow : Window
 
     // ... keep your Save/Open/Run/Stop methods as they are (but do not duplicate console helpers) ...
 
+    private void NewProject_OnClick(object? sender, RoutedEventArgs e)
+    {
+        // 1. Rensa editorn
+        Editor.Text = "";
+        
+        // 2. Glöm den aktuella filen (så nästa SAVE frågar efter namn igen)
+        _currentProjectFile = null;
+        
+        // 3. Nollställ grafikmotorn helt
+        _gfx.Clear(Avalonia.Media.Colors.Black);
+        
+        // 4. Rensa konsolerna
+        _textScreen.Clear();
+        if (Console is not null) Console.Text = "";
+        if (LogBox is not null) LogBox.Text = "New project started.\n";
+        
+        // 5. Gå till EDITOR-fliken
+        MainTabs.SelectedIndex = 0;
+    }
     
     private async void SaveProject_OnClick(object? sender, RoutedEventArgs e)
     {
         var sp = StorageProvider;
         if (sp is null) return;
 
-        var file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+        IStorageFile? file = _currentProjectFile;
+
+        // Om vi inte har en fil sedan tidigare, eller om vi håller ner Shift (Save As), fråga efter namn
+        if (file == null)
         {
-            Title = "Save AMOS Project",
-            SuggestedFileName = "project.amosproj",
-            FileTypeChoices = [ new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] } ]
-        });
+            file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Save AMOS Project",
+                SuggestedFileName = "project.amosproj",
+                FileTypeChoices = [new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }]
+            });
+        }
 
         if (file is null) return;
 
         try 
         {
             var project = _gfx.ExportProject(Editor.Text ?? string.Empty);
-            // Öppna strömmen direkt för att skriva
             using var stream = await file.OpenWriteAsync();
             await AmosProjectSerializer.SaveAsync(stream, project);
             
+            _currentProjectFile = file; // Kom ihåg filen
             await AppendConsoleLineAsync($"Saved: {file.Name}");
         }
-        catch (Exception ex)
-        {
-            await AppendConsoleLineAsync($"ERROR saving: {ex.Message}");
-        }
+        catch (Exception ex) { await AppendConsoleLineAsync($"ERROR saving: {ex.Message}"); }
     }
 
     private async void OpenProject_OnClick(object? sender, RoutedEventArgs e)
@@ -350,31 +387,21 @@ public partial class MainWindow : Window
         });
 
         var file = files.FirstOrDefault();
-        if (file is null)
-            return;
+        if (file is null) return;
 
         try 
         {
-            // Öppna strömmen direkt istället för att använda TryGetLocalPath
             using var stream = await file.OpenReadAsync();
             var project = await AmosProjectSerializer.LoadAsync(stream);
 
-            // Apply graphics + sprites
             _gfx.ImportProject(project);
-
-            // Update UI screen
             ScreenImage.Source = _gfx.Bitmap;
-            ScreenImage.InvalidateVisual();
-
-            // Load program text
             Editor.Text = project.ProgramText ?? string.Empty;
-
+            
+            _currentProjectFile = file; // Kom ihåg filen!
             await AppendConsoleLineAsync($"Opened: {file.Name}");
         }
-        catch (Exception ex)
-        {
-            await AppendConsoleLineAsync($"ERROR loading: {ex.Message}");
-        }
+        catch (Exception ex) { await AppendConsoleLineAsync($"ERROR loading: {ex.Message}"); }
     }
 
     // ... existing code (Run/Stop/console helpers) ...
@@ -390,10 +417,15 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
 
     private async void RunButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        // Switch to SCREEN tab when running
+        // 1. Förbered UI
         MainTabs.SelectedIndex = 1;
-
         ScreenImage.Focus();
+        
+        // 2. Rensa allt gammalt skräp
+        _gfx.Clear(Avalonia.Media.Colors.Black); // Rensa grafik
+        _textScreen.Clear();                     // Rensa text-buffer
+        if (Console is not null) Console.Text = ""; // Rensa text-skärm
+        if (LogBox is not null) LogBox.Text = "";   // Rensa loggen under editorn
         
         _runCts?.Cancel();
         _runCts = new CancellationTokenSource();
@@ -417,10 +449,11 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
                     clearAsync: ClearConsoleAsync,
                     graphics: _gfx,
                     onGraphicsChanged: () => {
-                        Dispatcher.UIThread.Post(() => {
+                        // Använd Render-prioritet för att inte störa timingen
+                        Dispatcher.UIThread.InvokeAsync(() => {
                             ScreenImage.Source = _gfx.Bitmap;
                             ScreenImage.InvalidateVisual();
-                        });
+                        }, DispatcherPriority.Render);
                     },
                     getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
                     isKeyDown: (k) => _pressedKeys.Contains(k),
@@ -436,6 +469,11 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
         catch (Exception ex)
         {
             await AppendConsoleLineAsync($"ERROR: {ex.Message}");
+            Dispatcher.UIThread.Post(() => {
+                MainTabs.SelectedIndex = 0; // Hoppa till EDITOR
+                if (WindowState == WindowState.FullScreen) WindowState = WindowState.Normal; // Gå ur fullskärm
+                AmosRunner.StopAllSounds();
+            });
         }
         finally
         {
@@ -448,6 +486,9 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         MainTabs.SelectedIndex = 0;
         _runCts?.Cancel();
+        
+        // Tysta musiken/ljudet direkt!
+        AmosRunner.StopAllSounds();
     }
     
 }
