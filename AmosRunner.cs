@@ -23,12 +23,38 @@ public static class AmosRunner
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         
         var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var ifJumps = new Dictionary<int, int>(); // PC -> PC (Vart IF hoppar om falskt)
+        var elseJumps = new Dictionary<int, int>(); // PC -> PC (Vart ELSE hoppar för att skippa till ENDIF)
+        var controlStack = new Stack<int>();
+
+        // Pre-scan: Labels OCH IF/ELSE/ENDIF logik
         for (int i = 0; i < lines.Length; i++) {
             var rawLine = lines[i].Trim();
             if (string.IsNullOrWhiteSpace(rawLine)) continue;
+                
+            // Labels
             var firstWord = rawLine.Split(' ')[0];
             if (int.TryParse(firstWord, out _)) labels[firstWord] = i;
             if (rawLine.EndsWith(':')) labels[rawLine.TrimEnd(':').Trim()] = i;
+
+            // IF/ELSE/ENDIF Mapping
+            var lineForScan = StripLeadingLineNumber(StripComments(rawLine)).ToUpperInvariant();
+            if (lineForScan.StartsWith("IF ") && !lineForScan.Contains("THEN")) {
+                controlStack.Push(i);
+            } else if (lineForScan == "ELSE") {
+                if (controlStack.Count > 0) {
+                    int ifPc = controlStack.Pop();
+                    ifJumps[ifPc] = i;
+                    controlStack.Push(i);
+                }
+            } else if (lineForScan == "ENDIF") {
+                if (controlStack.Count > 0) {
+                    int sourcePc = controlStack.Pop();
+                    var sourceLine = StripLeadingLineNumber(StripComments(lines[sourcePc].Trim())).ToUpperInvariant();
+                    if (sourceLine.StartsWith("IF ")) ifJumps[sourcePc] = i;
+                    else elseJumps[sourcePc] = i;
+                }
+            }
         }
 
         int pc = 0;
@@ -87,24 +113,42 @@ public static class AmosRunner
                             await Task.Delay(16, token);
                         } else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics)), token);
                         break;
-                    case "IF":
-                        var tIdx = IndexOfWord(arg, "THEN");
-                        if (tIdx >= 0 && EvalCondition(arg[..tIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics)) {
-                            var restOfLine = arg[(tIdx + 4)..].Trim();
-                            var thenCmds = SplitMultipleCommands(restOfLine);
-                            foreach (var tc in thenCmds) {
-                                // Trimma här också för säkerhets skull
-                                var trimmedTc = tc.Trim();
-                                if (string.IsNullOrEmpty(trimmedTc)) continue;
-                                
-                                var (tc_cmd, tc_arg) = SplitCommand(trimmedTc);
-                                if (await ExecuteSingleStatementAsync(tc_cmd, tc_arg, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, token, ln)) { 
-                                    jumpHappened = true; 
-                                    break; 
+                        case "IF":
+                            var tIdx = IndexOfWord(arg, "THEN");
+                            if (tIdx >= 0) {
+                                // Gammal Single-line IF: IF condition THEN command
+                                if (EvalCondition(arg[..tIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics)) {
+                                    var restOfLine = arg[(tIdx + 4)..].Trim();
+                                    var thenCmds = SplitMultipleCommands(restOfLine);
+                                    foreach (var tc in thenCmds) {
+                                        var trimmedTc = tc.Trim();
+                                        if (string.IsNullOrEmpty(trimmedTc)) continue;
+                                        var (tc_cmd, tc_arg) = SplitCommand(trimmedTc);
+                                        if (await ExecuteSingleStatementAsync(tc_cmd, tc_arg, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, token, ln)) { 
+                                            jumpHappened = true; break; 
+                                        }
+                                    }
+                                }
+                                goto next_line;
+                            } else {
+                                // Ny Multi-line IF
+                                if (!EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics)) {
+                                    if (ifJumps.TryGetValue(pc, out var target)) {
+                                        pc = target;
+                                        jumpHappened = true;
+                                    }
                                 }
                             }
-                        }
-                        goto next_line;
+                            break;
+                        case "ELSE":
+                            if (elseJumps.TryGetValue(pc, out var eTarget)) {
+                                pc = eTarget;
+                                jumpHappened = true;
+                            }
+                            break;
+                        case "ENDIF":
+                            // Gör ingenting, bara en markör
+                            break;
                     case "FOR":
                         var eq = arg.IndexOf('='); 
                         if (eq < 0) throw new Exception($"Syntax Error in FOR: Missing '=' at line {ln}");
@@ -348,6 +392,22 @@ public static class AmosRunner
             if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var id1 = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(','); var id2 = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')');
                 return g.SpriteHit(id1, id2) ? 1 : 0;
+            }
+            if (id.Equals("TILE", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('(');
+                var layer = ParseExpr(ref t, v, ln, gk, ikd, g); 
+                t.TryConsume(',');
+                var px = ParseExpr(ref t, v, ln, gk, ikd, g); 
+                t.TryConsume(',');
+                var py = ParseExpr(ref t, v, ln, gk, ikd, g);
+                t.TryConsume(')');
+                    
+                // Omvandla pixel-koordinater (px, py) till tile-index (tx, ty)
+                // Vi antar 32x32 tiles som standard
+                int tx = px / 32;
+                int ty = py / 32;
+                    
+                return g.GetMapTile(tx, ty); // Returnerar -1 om det är tomt eller utanför
             }
             if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var m = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return _rng.Next(m + 1); 
