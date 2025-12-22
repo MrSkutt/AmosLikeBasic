@@ -116,24 +116,47 @@ public static class AmosRunner
                             await Task.Delay(16, token);
                         } else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics)), token);
                         break;
-                    case "IF":
-                        var tIdx = IndexOfWord(arg, "THEN");
-                        if (tIdx >= 0) {
-                            // ... befintlig single-line IF logik ...
-                            if (EvalCondition(arg[..tIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics)) {
-                                // ...
+                        case "IF":
+                            var tIdx = IndexOfWord(arg, "THEN");
+                            string condition;
+                            string? remainingCmds = null;
+
+                            if (tIdx >= 0) {
+                                condition = arg[..tIdx].Trim();
+                                var thenContent = arg[(tIdx + 4)..].Trim();
+                                if (!string.IsNullOrEmpty(thenContent)) remainingCmds = thenContent;
+                            } else {
+                                // Om det inte finns THEN, kollar vi om det finns kommandon direkt efter villkoret
+                                condition = arg;
+                                // EvalCondition kommer att försöka tolka så mycket den kan.
                             }
-                            goto next_line;
-                        } else {
-                            // Ny Multi-line IF
-                            if (!EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics)) {
+
+                            if (EvalCondition(condition, vars, ln, getInkey, isKeyDown, graphics)) {
+                                if (remainingCmds != null) {
+                                    var thenCmds = SplitMultipleCommands(remainingCmds);
+                                    foreach (var tc in thenCmds) {
+                                        var (tc_cmd, tc_arg) = SplitCommand(tc);
+                                        if (await ExecuteSingleStatementAsync(tc_cmd, tc_arg, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, token, ln)) { 
+                                            jumpHappened = true; break; 
+                                        }
+                                    }
+                                    // Om vi har ett tillhörande ELSE/ENDIF block, hoppa över det
+                                    if (ifJumps.TryGetValue(pc, out var target)) {
+                                        pc = target; 
+                                        jumpHappened = true;
+                                    } else {
+                                        goto next_line;
+                                    }
+                                }
+                            } else {
                                 if (ifJumps.TryGetValue(pc, out var target)) {
-                                    pc = target; 
+                                    pc = target;
                                     jumpHappened = true;
+                                } else {
+                                    goto next_line;
                                 }
                             }
-                        }
-                        break;
+                            break;
                     case "ELSE":
                         if (elseJumps.TryGetValue(pc, out var eTarget)) {
                             pc = eTarget;
@@ -277,6 +300,13 @@ public static class AmosRunner
 
     private static async Task<bool> ExecuteSingleStatementAsync(string cmd, string arg, Dictionary<string, object> vars, Func<string, Task> al, Func<Task> cl, AmosGraphics g, Action og, Func<string> gk, Func<string, bool> ikd, CancellationToken t, int ln)
     {
+        // Om kommandot innehåller ett '=', är det förmodligen en tilldelning (t.ex. SX = SX + 8)
+        if (cmd.Contains('=') || arg.StartsWith("=")) {
+            string assignment = cmd + " " + arg;
+            var (n, vt) = SplitAssignment(assignment);
+            vars[n] = EvalValue(vt, vars, ln, gk, ikd, g);
+            return false;
+        }
         switch (cmd) {
             case "PRINT": await al("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, gk, ikd, g))); return false;
             case "LOCATE": var p = SplitCsvOrSpaces(arg); await al($"@@LOCATE {EvalInt(p[0], vars, ln, gk, ikd, g)} {EvalInt(p[1], vars, ln, gk, ikd, g)}"); return false;
@@ -398,12 +428,10 @@ public static class AmosRunner
                 }
                 t.TryConsume(')');
                     
-                // Om BASIC-användaren skriver 1 för första skärmen, mappar vi det till index 0
-                int screenIdx = Math.Max(0, layer - 1);
-                var offset = g.GetScreenOffset(screenIdx);
-                    
-                int tx = (px + (int)offset.X) / 32;
-                int ty = (py + (int)offset.Y) / 32;
+                // VIKTIGT: Vi ska INTE använda offset (scroll) här. 
+                // TILE ska returnera vad som finns på en specifik position i mappen.
+                int tx = px / 32;
+                int ty = py / 32;
                     
                 return g.GetMapTile(tx, ty);
             }
