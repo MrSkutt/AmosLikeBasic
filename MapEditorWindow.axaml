@@ -29,6 +29,8 @@
                     <TextBlock Text="FILE" Classes="amos-title" HorizontalAlignment="Center"/>
                     <Button Content="Save Map..." Click="SaveMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
                     <Button Content="Load Map..." Click="LoadMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
+                    <Button Content="Clear Map" Click="OnClearMapClick" Background="DarkRed" Foreground="White" />
+
 
                     
                     <TextBlock Text="TILES" Classes="amos-title" HorizontalAlignment="Center"/>

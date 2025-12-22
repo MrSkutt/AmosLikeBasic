@@ -249,7 +249,10 @@ public sealed class AmosGraphics
     }
 
     public void Scroll(int sid, int x, int y) { if (sid < _screenOffsets.Count) _screenOffsets[sid] = new Point(x, y); }
-
+    public Point GetScreenOffset(int sid) {
+        if (sid >= 0 && sid < _screenOffsets.Count) return _screenOffsets[sid];
+        return new Point(0, 0);
+    }
     // ---------------- Drawing ----------------
     public void Plot(int x, int y) => Plot(x, y, Ink);
     public void Plot(int x, int y, Color c) {
@@ -370,7 +373,12 @@ public sealed class AmosGraphics
             _map[x, y] = tileId;
         }
     }
-   
+    public void ClearMap()
+    {
+        for (int y = 0; y < _map.GetLength(1); y++)
+        for (int x = 0; x < _map.GetLength(0); x++)
+            _map[x, y] = -1;
+    } 
     public void DrawMap(int ox, int oy) {
         if (_map.GetLength(0) == 0 || _tiles.Count == 0) return;
         

@@ -67,7 +67,8 @@ public partial class MapEditorWindow : Window
     private void MapCanvas_OnPointerMoved(object? sender, PointerEventArgs e) 
     {
         if (e.GetCurrentPoint(MapCanvas).Properties.IsLeftButtonPressed) PaintTile(e);
-   }
+        if (e.GetCurrentPoint(MapCanvas).Properties.IsRightButtonPressed) RemoveTile(e); 
+    }
 
     
     private void ResizeMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -85,23 +86,45 @@ public partial class MapEditorWindow : Window
     
     private void PaintTile(PointerEventArgs e)
     {
+        if (e.GetCurrentPoint(MapCanvas).Properties.IsLeftButtonPressed)
+        {
+            var pos = e.GetPosition(MapCanvas);
+            int tx = (int)(pos.X / 32);
+            int ty = (int)(pos.Y / 32);
+
+            _selectedTileIndex = TileList.SelectedIndex;
+
+            if (_selectedTileIndex >= 0 && tx >= 0 && tx < _gfx.GetMapWidth() && ty >= 0 && ty < _gfx.GetMapHeight())
+            {
+                if (_gfx.GetMapTile(tx, ty) != _selectedTileIndex)
+                {
+                    _gfx.SetMapTile(tx, ty, _selectedTileIndex);
+                    // Istället för att rita om hela banan, rita bara den nya tilen för snabbhet
+                    UpdateSingleTileOnCanvas(tx, ty, _selectedTileIndex);
+                }
+            }
+        }
+    }
+
+    private void RemoveTile(PointerEventArgs e)
+    {
         var pos = e.GetPosition(MapCanvas);
         int tx = (int)(pos.X / 32);
         int ty = (int)(pos.Y / 32);
         
-        _selectedTileIndex = TileList.SelectedIndex;
+        _selectedTileIndex = -1;
         
-        if (_selectedTileIndex >= 0 && tx >= 0 && tx < _gfx.GetMapWidth() && ty >= 0 && ty < _gfx.GetMapHeight())
+        if (tx >= 0 && tx < _gfx.GetMapWidth() && ty >= 0 && ty < _gfx.GetMapHeight())
         {
             if (_gfx.GetMapTile(tx, ty) != _selectedTileIndex)
             {
                 _gfx.SetMapTile(tx, ty, _selectedTileIndex);
                 // Istället för att rita om hela banan, rita bara den nya tilen för snabbhet
-                UpdateSingleTileOnCanvas(tx, ty, _selectedTileIndex);
+                RemoveSingleTileOnCanvas(tx, ty, _selectedTileIndex);
             }
         }
     }
-
+    
     private void RedrawMap()
     {
         MapCanvas.Children.Clear();
@@ -143,7 +166,16 @@ public partial class MapEditorWindow : Window
         RenderOptions.SetBitmapInterpolationMode(img, BitmapInterpolationMode.None);
         MapCanvas.Children.Add(img);
     }
-    // ... inuti MapEditorWindow.axaml.cs ...
+
+    private void RemoveSingleTileOnCanvas(int x, int y, int tid)
+    {
+        var tiles = _gfx.GetTileBitmaps();
+        if (tid >= tiles.Count) return;
+        
+        var existing = MapCanvas.Children
+            .FirstOrDefault(c => Canvas.GetLeft(c) == x * 32 && Canvas.GetTop(c) == y * 32);
+        if (existing != null) MapCanvas.Children.Remove(existing);
+    }
 
     private async void SaveMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
@@ -196,6 +228,12 @@ public partial class MapEditorWindow : Window
         }
     }
 
+    private void OnClearMapClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        _gfx.ClearMap();
+        RedrawMap();
+    }
+    
     // En liten hjälp-klass för laddning
     private record MapDto(int Width, int Height, List<int> Data);
 }
