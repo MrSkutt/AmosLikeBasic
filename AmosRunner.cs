@@ -124,11 +124,15 @@ public static class AmosRunner
                             if (tIdx >= 0) {
                                 condition = arg[..tIdx].Trim();
                                 var thenContent = arg[(tIdx + 4)..].Trim();
-                                if (!string.IsNullOrEmpty(thenContent)) remainingCmds = thenContent;
+                                if (!string.IsNullOrEmpty(thenContent)) {
+                                    remainingCmds = thenContent;
+                                    var currentIdx = commands.IndexOf(fullCmd);
+                                    if (currentIdx < commands.Count - 1) {
+                                        remainingCmds += " : " + string.Join(" : ", commands.Skip(currentIdx + 1));
+                                    }
+                                }
                             } else {
-                                // Om det inte finns THEN, kollar vi om det finns kommandon direkt efter villkoret
                                 condition = arg;
-                                // EvalCondition kommer att försöka tolka så mycket den kan.
                             }
 
                             if (EvalCondition(condition, vars, ln, getInkey, isKeyDown, graphics)) {
@@ -140,16 +144,17 @@ public static class AmosRunner
                                             jumpHappened = true; break; 
                                         }
                                     }
-                                    // Om vi har ett tillhörande ELSE/ENDIF block, hoppa över det
-                                    if (ifJumps.TryGetValue(pc, out var target)) {
-                                        pc = target; 
-                                        jumpHappened = true;
-                                    } else {
-                                        goto next_line;
-                                    }
+                                    jumpHappened = true; 
+                                    if (ifJumps.TryGetValue(pc, out var target)) pc = target; 
+                                    else pc++;
                                 }
+                                // Om sant och multi-line: fortsätt bara till nästa rad
                             } else {
-                                if (ifJumps.TryGetValue(pc, out var target)) {
+                                if (remainingCmds != null) {
+                                    jumpHappened = true; 
+                                    if (ifJumps.TryGetValue(pc, out var target)) pc = target; 
+                                    else pc++;
+                                } else if (ifJumps.TryGetValue(pc, out var target)) {
                                     pc = target;
                                     jumpHappened = true;
                                 } else {
@@ -157,12 +162,12 @@ public static class AmosRunner
                                 }
                             }
                             break;
-                    case "ELSE":
-                        if (elseJumps.TryGetValue(pc, out var eTarget)) {
-                            pc = eTarget;
-                            jumpHappened = true;
-                        }
-                        break;
+                        case "ELSE":
+                            if (elseJumps.TryGetValue(pc, out var eTarget)) {
+                                pc = eTarget;
+                                jumpHappened = true;
+                            }
+                            break;
                     case "ENDIF":
                         // Bara en markör, gå till nästa rad
                         break;
