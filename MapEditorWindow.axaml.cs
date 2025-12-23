@@ -14,6 +14,7 @@ public partial class MapEditorWindow : Window
 {
     private readonly AmosGraphics _gfx;
     private int _selectedTileIndex = 0;
+    private TilePaletteWindow? _paletteWin;
 
     public MapEditorWindow(AmosGraphics gfx)
     {
@@ -28,6 +29,20 @@ public partial class MapEditorWindow : Window
         RedrawMap();
     }
 
+    private void ShowPalette_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var tiles = _gfx.GetTileBitmaps();
+        if (tiles.Count == 0) return;
+
+        if (_paletteWin != null) _paletteWin.Close();
+            
+        _paletteWin = new TilePaletteWindow(tiles, _gfx.GetTilesInWidth());
+        _paletteWin.TileSelected += (idx) => {
+            _selectedTileIndex = idx;
+        };
+        _paletteWin.Show(this);
+    }
+
     private async void LoadTiles_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         var sp = StorageProvider;
@@ -39,28 +54,22 @@ public partial class MapEditorWindow : Window
 
         if (files.Count > 0)
         {
-            try {
-                // VIKTIGT: Använd Stream för macOS-kompatibilitet
-                using var stream = await files[0].OpenReadAsync();
+            using var stream = await files[0].OpenReadAsync();
+            _gfx.LoadTileBank(stream, 32, 32); 
                 
-                // Vi behöver uppdatera LoadTileBank i AmosGraphics att ta emot Stream
-                _gfx.LoadTileBank(stream, 32, 32); 
-                
-                RefreshTileList();
-            } catch (Exception ex) {
-                System.Diagnostics.Debug.WriteLine($"Tile error: {ex.Message}");
-            }
+            // Öppna paletten automatiskt efter laddning
+            ShowPalette_OnClick(null, new Avalonia.Interactivity.RoutedEventArgs());
         }
     }
 
     private void RefreshTileList()
     {
         // För att ListBox ska fatta att den ska rita om, nollställer vi den först
-        TileList.ItemsSource = null;
+        //TileList.ItemsSource = null;
         var tiles = _gfx.GetTileBitmaps();
         
         // Skapa en kopia av listan så att Avalonia ser den som "ny"
-        TileList.ItemsSource = new List<WriteableBitmap>(tiles);
+        //TileList.ItemsSource = new List<WriteableBitmap>(tiles);
     }
 
     private void MapCanvas_OnPointerPressed(object? sender, PointerPressedEventArgs e) => PaintTile(e);
@@ -91,9 +100,7 @@ public partial class MapEditorWindow : Window
             var pos = e.GetPosition(MapCanvas);
             int tx = (int)(pos.X / 32);
             int ty = (int)(pos.Y / 32);
-
-            _selectedTileIndex = TileList.SelectedIndex;
-
+            
             if (_selectedTileIndex >= 0 && tx >= 0 && tx < _gfx.GetMapWidth() && ty >= 0 && ty < _gfx.GetMapHeight())
             {
                 if (_gfx.GetMapTile(tx, ty) != _selectedTileIndex)

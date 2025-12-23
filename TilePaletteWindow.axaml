@@ -1,0 +1,13 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AmosLikeBasic.TilePaletteWindow"
+        Title="Tile Palette" Width="300" Height="600"
+        Background="#00134D" WindowStartupLocation="CenterOwner"
+        Topmost="True">
+    <Border Margin="2" BorderBrush="#7FB2FF" BorderThickness="1">
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+            <!-- Vi skapar ett rutnät som vi fyller helt manuellt från C# -->
+            <Canvas Name="PaletteCanvas" Background="#000A26" />
+        </ScrollViewer>
+    </Border>
+</Window>

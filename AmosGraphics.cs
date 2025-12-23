@@ -43,6 +43,7 @@ public sealed class AmosGraphics
 
     private readonly Dictionary<int, Sprite> _sprites = new();
     private readonly List<WriteableBitmap> _tiles = new();
+    private int _tilesInWidth = 0; 
     private int[,] _map = new int[0, 0];
     private int _tileWidth = 32;
     private int _tileHeight = 32;
@@ -307,7 +308,8 @@ public sealed class AmosGraphics
     }
 
     // ---------------- Tiles ----------------
-
+    public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
+    
     public void LoadTileBank(string f, int tw, int th) {
         try {
             using var b = new Bitmap(f); _tileWidth = tw; _tileHeight = th; _tiles.Clear();
@@ -327,13 +329,27 @@ public sealed class AmosGraphics
         try {
             using var b = new Bitmap(stream); 
             _tileWidth = tw; _tileHeight = th; _tiles.Clear();
-            int cs = (int)b.Size.Width / tw, rs = (int)b.Size.Height / th;
-            for (int y = 0; y < rs; y++) {
-                for (int x = 0; x < cs; x++) {
+                
+            // Deklarera tilesInWidth här och spara den i klassvariabeln _tilesInWidth
+            int tilesInWidth = (int)b.Size.Width / tw;
+            _tilesInWidth = tilesInWidth; 
+                
+            int tilesInHeight = (int)b.Size.Height / th;
+
+            for (int y = 0; y < tilesInHeight; y++) {
+                for (int x = 0; x < tilesInWidth; x++) {
                     var t = CreateEmptyBitmap(tw, th);
                     using (var fb = t.Lock()) {
-                        b.CopyPixels(new PixelRect(x*tw, y*th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
-                        unsafe { var p = (byte*)fb.Address; for (int i = 0; i < tw*th; i++) { byte temp = p[i*4+0]; p[i*4+0]=p[i*4+2]; p[i*4+2]=temp; } }
+                        // Kopiera exakt den rutan från källbilden
+                        b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
+                        unsafe { 
+                            var p = (byte*)fb.Address; 
+                            for (int i = 0; i < tw * th; i++) { 
+                                byte temp = p[i * 4 + 0]; 
+                                p[i * 4 + 0] = p[i * 4 + 2]; 
+                                p[i * 4 + 2] = temp; 
+                            } 
+                        }
                     }
                     _tiles.Add(t);
                 }
