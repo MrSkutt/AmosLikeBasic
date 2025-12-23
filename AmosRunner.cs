@@ -346,6 +346,21 @@ public static class AmosRunner
 
     private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
     {
+        // 1. Hantera OR (Lägst prioritet, kollas först)
+        var orIdx = IndexOfWord(c, " OR ");
+        if (orIdx >= 0) {
+            return EvalCondition(c[..orIdx].Trim(), v, ln, gk, ikd, g) || 
+                   EvalCondition(c[(orIdx + 4)..].Trim(), v, ln, gk, ikd, g);
+        }
+
+        // 2. Hantera AND
+        var andIdx = IndexOfWord(c, " AND ");
+        if (andIdx >= 0) {
+            return EvalCondition(c[..andIdx].Trim(), v, ln, gk, ikd, g) && 
+                   EvalCondition(c[(andIdx + 5)..].Trim(), v, ln, gk, ikd, g);
+        }
+
+        // 3. Befintlig logik för jämförelser (=, <, >, etc.)
         if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>')) return Convert.ToInt32(EvalValue(c, v, ln, gk, ikd, g)) != 0;
         var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
         foreach (var op in ops) {
