@@ -12,12 +12,15 @@ public static class AmosRunner
 {
     private sealed class ForFrame { public required string VarName; public required int EndValue; public required int StepValue; public required int LineAfterForPc; public required int ForLineNumber; }
     private static readonly Random _rng = new();
+    private static IntPtr _currentXmpContext = IntPtr.Zero;
+
     private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
 
     
-    public static async Task ExecuteAsync(string programText, Func<string, Task> appendLineAsync, Func<Task> clearAsync, AmosGraphics graphics, Action onGraphicsChanged, Func<string> getInkey, Func<string, bool> isKeyDown, CancellationToken token)
+    public static async Task ExecuteAsync(string programText, Func<string, Task> appendLineAsync, Func<Task> clearAsync, AmosGraphics graphics, Action onGraphicsChanged, Func<string> getInkey, Func<string, bool> isKeyDown, AudioEngine? audioEngine, CancellationToken token)
     {
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
         var forStack = new Stack<ForFrame>();
         var gosubStack = new Stack<int>();
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
@@ -254,10 +257,11 @@ public static class AmosRunner
                     case "MUSIC":
                         var musArgs = SplitCsvOrSpaces(arg);
                         if (musArgs.Count >= 2 && musArgs[0].ToUpperInvariant() == "PLAY") {
-                            PlayMusic(Unquote(musArgs[1])); // Bakgrundsmusik
+                            PlayMusic(Unquote(musArgs[1]), audioEngine); 
                         } else if (musArgs.Count >= 1 && musArgs[0].ToUpperInvariant() == "STOP") {
-                            StopMusic();
+                            StopMusic(audioEngine);
                         }
+                        break;
                         break;;
                     case "TILE":
                         var tArgs = SplitCsvOrSpaces(arg);
@@ -458,6 +462,23 @@ public static class AmosRunner
             if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var m = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return _rng.Next(m + 1); 
             }
+            // NYTT: Implementera SIN (returnerar värdet * 100 för att behålla precision i heltal)
+            if (id.Equals("SIN", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('('); 
+                var angle = ParseExpr(ref t, v, ln, gk, ikd, g); 
+                t.TryConsume(')');
+                // Omvandla grader till radianer och multiplicera med 100
+                return (int)(Math.Sin(angle * Math.PI / 180.0) * 100);
+            }
+            
+            // NYTT: Implementera COS
+            if (id.Equals("COS", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('('); 
+                var angle = ParseExpr(ref t, v, ln, gk, ikd, g); 
+                t.TryConsume(')');
+                return (int)(Math.Cos(angle * Math.PI / 180.0) * 100);
+            }
+
             if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var k = Unquote(t.ReadUntil(')')); t.TryConsume(')'); return ikd(k) ? 1 : 0;
             }
@@ -498,23 +519,29 @@ public static class AmosRunner
         } catch {}
     }
 
-    private static void PlayMusic(string file) {
+    private static void PlayMusic(string file, AudioEngine? engine) {
+        if (engine == null) return;
         try {
-            StopMusic(); // Stoppa föregående låt innan ny startar
-            _currentMusicProcess = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
-                FileName = "xmp",
-                Arguments = $"\"{file}\"",
-                CreateNoWindow = true,
-                UseShellExecute = false
-            });
+            StopMusic(engine); 
+
+            IntPtr ctx = LibXmp.xmp_create_context();
+            if (LibXmp.xmp_load_module(ctx, file) == 0)
+            {
+                LibXmp.xmp_start_player(ctx, 44100, 0);
+                _currentXmpContext = ctx;
+                engine.PlayMod(ctx);
+            }
         } catch {}
     }
 
-    public static void StopMusic() {
+    public static void StopMusic(AudioEngine? engine = null) {
         try {
-            if (_currentMusicProcess != null && !_currentMusicProcess.HasExited) {
-                _currentMusicProcess.Kill();
-                _currentMusicProcess = null;
+            if (_currentXmpContext != IntPtr.Zero) {
+                // Vi låter AudioEngine sluta läsa först
+                engine?.StopMod();
+                LibXmp.xmp_release_module(_currentXmpContext);
+                LibXmp.xmp_free_context(_currentXmpContext);
+                _currentXmpContext = IntPtr.Zero;
             }
         } catch {}
     }

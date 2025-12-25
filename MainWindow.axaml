@@ -59,17 +59,25 @@
                 <Button Classes="amos-button" Content="CONSOLE" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White"/>
             </StackPanel>
         </Border>
-
-        <!-- Main Workspace -->
-<!-- ... existing code (Top Bar and Toolbar remain the same) ... -->
+        
         <!-- Main Workspace -->
         <Grid>
             <TabControl x:Name="MainTabs" BorderThickness="0" Padding="0">
                 <TabItem Header="[ EDITOR ]" Foreground="#7FB2FF" FontWeight="Bold">
                     <Grid RowDefinitions="*, 4, 150">
-                        <TextBox Grid.Row="0" x:Name="Editor" Classes="amos-editor" AcceptsReturn="True" BorderThickness="0" Padding="10"/>
+                        <!-- Vi använder en Grid här för att editorn ska fylla ut hela rad 0 -->
+                        <Grid Grid.Row="0" RowDefinitions="*, Auto">
+                            <TextBox Grid.Row="0" x:Name="Editor" Classes="amos-editor" AcceptsReturn="True" BorderThickness="0" Padding="10"/>
+                            <TextBlock Grid.Row="1" Name="CursorPosText" 
+                                       Text="Line: 1, Col: 1" 
+                                       Foreground="#7FB2FF" 
+                                       Padding="10,2" 
+                                       Background="#06206F" 
+                                       FontSize="12"
+                                       FontFamily="Courier New"/>
+                        </Grid>
                         <GridSplitter Grid.Row="1" Background="#7FB2FF" ResizeDirection="Rows" HorizontalAlignment="Stretch"/>
-                        
+                                              
                         <!-- Denna används för systemmeddelanden -->
                         <Border Grid.Row="2" Background="#000A26" BorderBrush="#7FB2FF" BorderThickness="0,2,0,0">
                             <TextBox x:Name="LogBox" 

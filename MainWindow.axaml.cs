@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,7 +17,8 @@ public partial class MainWindow : Window
 {
     private CancellationTokenSource? _runCts;
     private readonly AmosGraphics _gfx = new();
-
+    private AudioEngine? _audioEngine = new(); 
+    
     private readonly TextScreen _textScreen = new(rows: 30, cols: 80);
     private bool _uiReady;
     private IStorageFile? _currentProjectFile;
@@ -34,7 +36,12 @@ public partial class MainWindow : Window
         this.AddHandler(KeyDownEvent, MainWindow_OnKeyDown, RoutingStrategies.Tunnel);
         this.AddHandler(KeyUpEvent, MainWindow_OnKeyUp, RoutingStrategies.Tunnel);
 
-
+        Editor.PropertyChanged += (s, e) => {
+            if (e.Property.Name == nameof(TextBox.CaretIndex)) {
+                UpdateCursorPosition();
+            }
+        };
+        
         _gfx.Screen(640, 480);
         _gfx.Clear(Avalonia.Media.Colors.Black);
 
@@ -48,6 +55,25 @@ public partial class MainWindow : Window
             "END\n";
     }
 
+    private void Editor_SelectionChanged(object? sender, RoutedEventArgs e)
+    {
+        UpdateCursorPosition();
+    }
+
+    private void UpdateCursorPosition()
+    {
+        if (Editor.Text == null) return;
+
+        int caretIndex = Editor.CaretIndex;
+        string text = Editor.Text.Substring(0, Math.Min(caretIndex, Editor.Text.Length));
+            
+        int line = text.Count(c => c == '\n') + 1;
+        int lastNewLine = text.LastIndexOf('\n');
+        int col = caretIndex - lastNewLine;
+
+        CursorPosText.Text = $"Line: {line}, Col: {col}";
+    }
+    
     private void MainWindow_OnOpened(object? sender, EventArgs e)
     {
         if (_uiReady)
@@ -457,6 +483,7 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
                     },
                     getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
                     isKeyDown: (k) => _pressedKeys.Contains(k),
+                    audioEngine: _audioEngine,
                     token: token);
             }, token);
 
@@ -481,16 +508,25 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
             RunButton.IsEnabled = true;
         }
     }
-    
+
     private void StopButton_OnClick(object? sender, RoutedEventArgs e)
     {
         MainTabs.SelectedIndex = 0;
         _runCts?.Cancel();
-        
-        // Tysta musiken/ljudet direkt!
         AmosRunner.StopAllSounds();
+
+        //_audioEngine?.Dispose();
+        //_audioEngine = new AudioEngine();
+
+//        IntPtr ctx = LibXmp.xmp_create_context();
+  //      if (LibXmp.xmp_load_module(ctx, "music.mod") == 0)
+    //    {
+      //      LibXmp.xmp_start_player(ctx, 44100, 0);
+        //    _audioEngine.PlayMod(ctx);
+       // }
     }
-    
+
+
     private void MapButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var win = new MapEditorWindow(_gfx);
