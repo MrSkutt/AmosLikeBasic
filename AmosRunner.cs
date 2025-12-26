@@ -237,19 +237,27 @@ public static class AmosRunner
                         if (tP.Count >= 3) graphics.DrawText(EvalInt(tP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tP[1], vars, ln, getInkey, isKeyDown, graphics), ValueToString(EvalValue(string.Join(" ", tP.Skip(2)), vars, ln, getInkey, isKeyDown, graphics)));
                         onGraphicsChanged(); break;
                     case "REFRESH": graphics.Refresh(); onGraphicsChanged(); break;
-                    case "SPRITE":
-                        var ss = SplitCsvOrSpaces(arg);
-                        if (!int.TryParse(ss[0], out var sid)) {
-                            var sub = ss[0].ToUpperInvariant();
-                            if (sub=="POS") graphics.SpritePos(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[3],vars,ln,getInkey,isKeyDown, graphics));
-                            else if (sub=="LOAD") graphics.LoadSprite(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
-                            else if (sub=="ADDFRAME") graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
-                            else if (sub=="FRAME") graphics.SetSpriteFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
-                            else if (sub=="HANDLE") graphics.SpriteHandle(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[3],vars,ln,getInkey,isKeyDown, graphics));
-                            else if (sub=="ON") graphics.SpriteOn(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics));
-                            else if (sub=="OFF") graphics.SpriteOff(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics));
-                        } else graphics.CreateSprite(sid, EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics)); 
-                        break;
+                        case "SPRITE":
+                            var ss = SplitCsvOrSpaces(arg);
+                            if (ss.Count == 0) break;
+                            if (!int.TryParse(ss[0], out var sid)) {
+                                var sub = ss[0].ToUpperInvariant();
+                                if (sub=="POS") graphics.SpritePos(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[3],vars,ln,getInkey,isKeyDown, graphics));
+                                else if (sub=="LOAD") graphics.LoadSprite(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
+                                else if (sub=="ADDFRAME") graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
+                                else if (sub=="FRAME") graphics.SetSpriteFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (sub=="HANDLE") graphics.SpriteHandle(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[3],vars,ln,getInkey,isKeyDown, graphics));
+                                else if (sub=="ROTATE") graphics.SpriteRotate(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (sub=="ZOOM") {
+                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    double zx = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics) / 100.0;
+                                    double zy = (ss.Count >= 4) ? EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics) / 100.0 : zx;
+                                    graphics.SpriteZoom(id, zx, zy);
+                                }
+                                else if (sub=="ON") graphics.SpriteOn(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics));
+                                else if (sub=="OFF") graphics.SpriteOff(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics));
+                            } else graphics.CreateSprite(sid, EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics)); 
+                            break;
                     case "SAM":
                         var samArgs = SplitCsvOrSpaces(arg);
                         if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "PLAY") {
@@ -326,13 +334,20 @@ public static class AmosRunner
                 return false;
             case "PLOT": var pp = SplitCsvOrSpaces(arg); g.Plot(EvalInt(pp[0], vars, ln, gk, ikd, g), EvalInt(pp[1], vars, ln, gk, ikd, g)); og(); return false;
             case "SPRITE":
-                var ss = SplitCsvOrSpaces(arg);
-                if (ss.Count >= 2) {
-                    var sub = ss[0].ToUpperInvariant();
-                    if (sub == "POS") g.SpritePos(EvalInt(ss[1], vars, ln, gk, ikd, g), EvalInt(ss[2], vars, ln, gk, ikd, g), EvalInt(ss[3], vars, ln, gk, ikd, g));
-                    else if (sub == "FRAME") g.SetSpriteFrame(EvalInt(ss[1], vars, ln, gk, ikd, g), EvalInt(ss[2], vars, ln, gk, ikd, g));
-                    else if (sub == "ON") g.SpriteOn(EvalInt(ss[1], vars, ln, gk, ikd, g));
-                    else if (sub == "OFF") g.SpriteOff(EvalInt(ss[1], vars, ln, gk, ikd, g));
+                var ssa = SplitCsvOrSpaces(arg);
+                if (ssa.Count >= 2) {
+                    var sub = ssa[0].ToUpperInvariant();
+                    if (sub == "POS") g.SpritePos(EvalInt(ssa[1], vars, ln, gk, ikd, g), EvalInt(ssa[2], vars, ln, gk, ikd, g), EvalInt(ssa[3], vars, ln, gk, ikd, g));
+                    else if (sub == "FRAME") g.SetSpriteFrame(EvalInt(ssa[1], vars, ln, gk, ikd, g), EvalInt(ssa[2], vars, ln, gk, ikd, g));
+                    else if (sub == "ROTATE") g.SpriteRotate(EvalInt(ssa[1], vars, ln, gk, ikd, g), EvalInt(ssa[2], vars, ln, gk, ikd, g));
+                    else if (sub == "ZOOM") {
+                        int id = EvalInt(ssa[1], vars, ln, gk, ikd, g);
+                        double zx = EvalInt(ssa[2], vars, ln, gk, ikd, g) / 100.0;
+                        double zy = (ssa.Count >= 4) ? EvalInt(ssa[3], vars, ln, gk, ikd, g) / 100.0 : zx;
+                        g.SpriteZoom(id, zx, zy);
+                    }
+                    else if (sub == "ON") g.SpriteOn(EvalInt(ssa[1], vars, ln, gk, ikd, g));
+                    else if (sub == "OFF") g.SpriteOff(EvalInt(ssa[1], vars, ln, gk, ikd, g));
                 }
                 return false;
             case "WAIT":
