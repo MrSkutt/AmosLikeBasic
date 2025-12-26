@@ -1,104 +1,116 @@
 using System;
-using System.Runtime.InteropServices; 
-using System.Collections.Generic;
-using System.Threading;
-using OpenTK.Audio.OpenAL;
+using System.IO;
+using ManagedBass;
+using ManagedBass.Mix;
 
 public sealed class AudioEngine : IDisposable
 {
-    private readonly ALDevice _device;
-    private readonly ALContext _context;
-
-    private readonly int _source;
-    private readonly Queue<int> _buffers = new();
-
-    private Thread? _thread;
-    private bool _running;
-
-    private const int SampleRate = 44100;
-    private const int FramesPerChunk = 1024;
+    private readonly int _mixer;
+    private int _musicStream; 
+    private bool _isDisposed;
 
     public AudioEngine()
     {
-        _device = ALC.OpenDevice(null);
-        if (_device == ALDevice.Null)
-            throw new Exception("Failed to open OpenAL device");
+        Bass.Configure(Configuration.PlaybackBufferLength, 200);
 
-        _context = ALC.CreateContext(_device, (int[])null!);
-        ALC.MakeContextCurrent(_context);
 
-        _source = AL.GenSource();
 
-        for (int i = 0; i < 4; i++)
-            _buffers.Enqueue(AL.GenBuffer());
-    }
 
-    public void PlayMod(IntPtr xmpContext)
-    {
-        _running = true;
-        _thread = new Thread(() =>
+        if (!Bass.Init(-1, 44100))
         {
-            byte[] pcm = new byte[FramesPerChunk * 4]; // 16-bit stereo = 4 bytes per frame
-            GCHandle handle = GCHandle.Alloc(pcm, GCHandleType.Pinned);
+            throw new Exception($"Kunde inte initiera BASS: {Bass.LastError}");
+        }
 
-            while (_running)
-            {
-                int processed;
-                AL.GetSource(_source, ALGetSourcei.BuffersProcessed, out processed);
-                while (processed-- > 0)
-                {
-                    int buf = AL.SourceUnqueueBuffer(_source);
-                    _buffers.Enqueue(buf);
-                }
-
-                if (_buffers.Count == 0)
-                {
-                    Thread.Sleep(1);
-                    continue;
-                }
-
-                // Be LibXmp fylla vår buffer med ljuddata
-                int ret = LibXmp.xmp_play_buffer(xmpContext, handle.AddrOfPinnedObject(), pcm.Length, 0);
-                if (ret != 0) break; // Slut på låten
-
-                int buffer = _buffers.Dequeue();
-
-                // Skicka bytedatan till OpenAL
-                AL.BufferData(buffer, ALFormat.Stereo16, pcm, SampleRate);
-                AL.SourceQueueBuffer(_source, buffer);
-
-                AL.GetSource(_source, ALGetSourcei.SourceState, out int stateInt);
-                if ((ALSourceState)stateInt != ALSourceState.Playing)
-                    AL.SourcePlay(_source);
-            }
-
-            handle.Free();
-        });
-        _thread.IsBackground = true;
-        _thread.Start();
+        _mixer = BassMix.CreateMixerStream(44100, 2, BassFlags.Default | BassFlags.Float);
+        Bass.ChannelPlay(_mixer);
     }
-    
-    
+
+    public void PlayMod(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            Console.WriteLine($"Fil saknas: {filePath}");
+            return;
+        }
+
+        if (_musicStream != 0)
+        {
+            BassMix.MixerRemoveChannel(_musicStream);
+            Bass.StreamFree(_musicStream);
+        }
+
+        // Vi laddar MOD-filen med standardinställningar + Decode
+        // MusicRamp tar bort "knäppar" i ljudet.
+        _musicStream = Bass.MusicLoad(filePath, 0, 0, BassFlags.MusicRamp | BassFlags.Decode | BassFlags.Float);
+        
+        if (_musicStream != 0)
+        {
+            // Vi använder standardvolym till att börja med.
+            // Om det är tyst, kan vi justera volymen på mixernivå istället.
+                
+            // Lägg till i mixern. 
+            // Flaggan 0x2000 (NORAMPIN) förhindrar en mjukstart (fade-in).
+            bool added = BassMix.MixerAddChannel(_mixer, _musicStream, BassFlags.Default | (BassFlags)0x2000);
+            
+            if (added)
+            {
+                // Trigga igång uppspelningen i mixern
+                Bass.ChannelSetPosition(_musicStream, 0);
+                Console.WriteLine($"Nu spelas: {filePath}");
+            }
+            else
+            {
+                Console.WriteLine($"Mixer-fel: {Bass.LastError}");
+            }
+        }
+        else
+        {
+            Console.WriteLine($"Kunde inte ladda MOD-fil ({Bass.LastError})");
+        }
+    }
+
+    public void PlaySample(string filePath)
+    {
+        if (!File.Exists(filePath)) return;
+
+        // Vi skapar en vanlig stream som INTE går via mixern. 
+        // Utan BassFlags.Decode spelas den direkt på ljudkortet.
+        int effectStream = Bass.CreateStream(filePath, 0, 0, BassFlags.Default);
+        
+        if (effectStream != 0)
+        {
+            // Sätt volymen lite högre för effekter om det behövs
+            Bass.ChannelSetAttribute(effectStream, ChannelAttribute.Volume, 1.0);
+                
+            // Spela direkt! Detta går förbi mixern och har minimal latency.
+            Bass.ChannelPlay(effectStream);
+                
+            // Vi flaggar inte för AutoFree här eftersom det är en direkt-stream, 
+            // men BASS städar oftast upp ändå. För korta SAM-klipp är detta säkrast.
+        }
+        else
+        {
+            Console.WriteLine($"BASS Error {Bass.LastError} vid laddning av: {filePath}");
+        }
+    }
+
+    // Fix för felet i AmosRunner: Lägg till StopMod som anropas därifrån
     public void StopMod()
     {
-        //_isPlaying = false;
-        //_xmpContext = IntPtr.Zero;
+        if (_musicStream != 0)
+        {
+            Bass.ChannelStop(_musicStream);
+            Bass.StreamFree(_musicStream);
+            _musicStream = 0;
+        }
     }
 
     public void Dispose()
     {
-        _running = false;
-        _thread?.Join();
-
-        AL.SourceStop(_source);
-
-        foreach (var b in _buffers)
-            AL.DeleteBuffer(b);
-
-        AL.DeleteSource(_source);
-
-        ALC.MakeContextCurrent(ALContext.Null);
-        ALC.DestroyContext(_context);
+        if (_isDisposed) return;
+        StopMod();
+        Bass.StreamFree(_mixer);
+        Bass.Free();
+        _isDisposed = true;
     }
 }
-   

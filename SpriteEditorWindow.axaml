@@ -7,10 +7,8 @@
 
     <!-- Top controls -->
     <Border Background="#06206F" BorderBrush="#7FB2FF" BorderThickness="2" Padding="10">
-      <Grid ColumnDefinitions="Auto,110,Auto,110,Auto,110,Auto,*"
-            RowDefinitions="Auto,Auto"
-            ColumnSpacing="10"
-            RowSpacing="10">
+      <Grid ColumnDefinitions="Auto,110,Auto,110,Auto,110,Auto,* "
+            RowDefinitions="Auto,Auto">
 
         <TextBlock Grid.Row="0" Grid.Column="0" Foreground="#7FB2FF" FontWeight="Bold" Text="Sprite ID"/>
         <NumericUpDown Grid.Row="0" Grid.Column="1" Name="SpriteIdUpDown"

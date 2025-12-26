@@ -16,6 +16,7 @@ public static class AmosRunner
 
     private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
 
+
     
     public static async Task ExecuteAsync(string programText, Func<string, Task> appendLineAsync, Func<Task> clearAsync, AmosGraphics graphics, Action onGraphicsChanged, Func<string> getInkey, Func<string, bool> isKeyDown, AudioEngine? audioEngine, CancellationToken token)
     {
@@ -29,7 +30,7 @@ public static class AmosRunner
         var ifJumps = new Dictionary<int, int>(); // PC -> PC (Vart IF hoppar om falskt)
         var elseJumps = new Dictionary<int, int>(); // PC -> PC (Vart ELSE hoppar för att skippa till ENDIF)
         var controlStack = new Stack<int>();
-
+        
         // Pre-scan: Labels OCH IF/ELSE/ENDIF logik
         for (int i = 0; i < lines.Length; i++) {
             var rawLine = lines[i].Trim();
@@ -143,7 +144,8 @@ public static class AmosRunner
                                     var thenCmds = SplitMultipleCommands(remainingCmds);
                                     foreach (var tc in thenCmds) {
                                         var (tc_cmd, tc_arg) = SplitCommand(tc);
-                                        if (await ExecuteSingleStatementAsync(tc_cmd, tc_arg, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, token, ln)) { 
+                                        // Här skickar vi med audioEngine (parameter nummer 10)
+                                        if (await ExecuteSingleStatementAsync(tc_cmd, tc_arg, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, audioEngine, token, ln)) { 
                                             jumpHappened = true; break; 
                                         }
                                     }
@@ -251,7 +253,7 @@ public static class AmosRunner
                     case "SAM":
                         var samArgs = SplitCsvOrSpaces(arg);
                         if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "PLAY") {
-                            PlayEffect(Unquote(samArgs[1])); // Ljudeffekt
+                            PlayEffect(Unquote(samArgs[1]), audioEngine); 
                         }
                         break;
                     case "MUSIC":
@@ -262,7 +264,6 @@ public static class AmosRunner
                             StopMusic(audioEngine);
                         }
                         break;
-                        break;;
                     case "TILE":
                         var tArgs = SplitCsvOrSpaces(arg);
                         if (tArgs.Count > 0) {
@@ -307,7 +308,7 @@ public static class AmosRunner
         res.Add(l[s..].Trim()); return res;
     }
 
-    private static async Task<bool> ExecuteSingleStatementAsync(string cmd, string arg, Dictionary<string, object> vars, Func<string, Task> al, Func<Task> cl, AmosGraphics g, Action og, Func<string> gk, Func<string, bool> ikd, CancellationToken t, int ln)
+    private static async Task<bool> ExecuteSingleStatementAsync(string cmd, string arg, Dictionary<string, object> vars, Func<string, Task> al, Func<Task> cl, AmosGraphics g, Action og, Func<string> gk, Func<string, bool> ikd, AudioEngine? audioEngine, CancellationToken t, int ln)
     {
         // Om kommandot innehåller ett '=', är det förmodligen en tilldelning (t.ex. SX = SX + 8)
         if (cmd.Contains('=') || arg.StartsWith("=")) {
@@ -345,9 +346,9 @@ public static class AmosRunner
             case "SAM":
                 var sa = SplitCsvOrSpaces(arg);
                 if (sa.Count >= 2 && sa[0].ToUpperInvariant() == "PLAY") {
-                    PlayEffect(Unquote(sa[1]));
+                    PlayEffect(Unquote(sa[1]), audioEngine);
                 }
-                return false; // VIKTIGT: Lägg till denna rad!
+                return false;
             case "END": return true;
             default: if (!string.IsNullOrWhiteSpace(cmd)) throw new Exception($"Syntax Error in IF-THEN: Unknown command '{cmd}' at line {ln}"); return false;
         }
@@ -507,16 +508,9 @@ public static class AmosRunner
         return (cmd, arg); 
     }
     
-    private static void PlayEffect(string file) {
-        try {
-            // Starta afplay snabbt för ljudeffekter
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
-                FileName = "afplay",
-                Arguments = $"\"{file}\"",
-                CreateNoWindow = true,
-                UseShellExecute = false
-            });
-        } catch {}
+    private static void PlayEffect(string file, AudioEngine? engine) {
+        if (engine == null) return;
+        engine.PlaySample(file);
     }
 
     private static void PlayMusic(string file, AudioEngine? engine) {
@@ -529,7 +523,7 @@ public static class AmosRunner
             {
                 LibXmp.xmp_start_player(ctx, 44100, 0);
                 _currentXmpContext = ctx;
-                engine.PlayMod(ctx);
+                engine.PlayMod(file);
             }
         } catch {}
     }

@@ -513,17 +513,8 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         MainTabs.SelectedIndex = 0;
         _runCts?.Cancel();
-        AmosRunner.StopAllSounds();
-
-        //_audioEngine?.Dispose();
-        //_audioEngine = new AudioEngine();
-
-//        IntPtr ctx = LibXmp.xmp_create_context();
-  //      if (LibXmp.xmp_load_module(ctx, "music.mod") == 0)
-    //    {
-      //      LibXmp.xmp_start_player(ctx, 44100, 0);
-        //    _audioEngine.PlayMod(ctx);
-       // }
+        _audioEngine?.StopMod();
+        
     }
 
 

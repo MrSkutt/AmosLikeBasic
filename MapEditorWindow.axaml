@@ -10,13 +10,13 @@
                 <StackPanel Margin="15" Spacing="15">
                     <TextBlock Text="MAP SIZE" Classes="amos-title" HorizontalAlignment="Center"/>
                     
-                    <Grid ColumnDefinitions="Auto, *" RowDefinitions="Auto, Auto" ColumnSpacing="10" RowSpacing="10">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Width:" VerticalAlignment="Center" Foreground="#7FB2FF"/>
+                    <Grid ColumnDefinitions="Auto, *" RowDefinitions="Auto, Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Width:" VerticalAlignment="Center" Foreground="#7FB2FF" Margin="0,0,10,10"/>
                         <NumericUpDown Grid.Row="0" Grid.Column="1" Name="MapWidthUpDown" 
                                        Value="20" Minimum="1" Maximum="1000" Increment="1" FormatString="0"
-                                       Foreground="White" Background="#000A26" BorderBrush="#7FB2FF"/>
+                                       Foreground="White" Background="#000A26" BorderBrush="#7FB2FF" Margin="0,0,0,10"/>
                         
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Height:" VerticalAlignment="Center" Foreground="#7FB2FF"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Height:" VerticalAlignment="Center" Foreground="#7FB2FF" Margin="0,0,10,0"/>
                         <NumericUpDown Grid.Row="1" Grid.Column="1" Name="MapHeightUpDown" 
                                        Value="15" Minimum="1" Maximum="1000" Increment="1" FormatString="0"
                                        Foreground="White" Background="#000A26" BorderBrush="#7FB2FF"/>
@@ -43,7 +43,6 @@
             </ScrollViewer>
         </Border>
 
-        <!-- Höger panel: Banan -->
         <!-- Höger panel: Banan -->
         <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
             <Border Background="Black" HorizontalAlignment="Left" VerticalAlignment="Top">

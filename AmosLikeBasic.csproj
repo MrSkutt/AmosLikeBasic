@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <OutputType>WinExe</OutputType>
         <TargetFramework>net9.0</TargetFramework>
@@ -6,18 +6,46 @@
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+        <!-- Vi använder RuntimeIdentifiers (plural) för att stödja båda plattformarna -->
+        <RuntimeIdentifiers>osx-arm64;win-x64</RuntimeIdentifiers>
+        <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx-arm64</RuntimeIdentifier>
+        <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</RuntimeIdentifier>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Avalonia" Version="11.3.9" />
-        <PackageReference Include="Avalonia.Desktop" Version="11.3.9" />
-        <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.9" />
-        <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.9" />
-        <!--Condition below is needed to remove Avalonia.Diagnostics package from build output in Release configuration.-->
-        <PackageReference Include="Avalonia.Diagnostics" Version="11.3.9">
+        <PackageReference Include="Avalonia" Version="11.2.3" />
+        <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+        <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3">
             <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
         </PackageReference>
-        <PackageReference Include="OpenTK" Version="4.8.1" />
+        <PackageReference Include="ManagedBass" Version="3.1.1" />
+        <PackageReference Include="ManagedBass.Mix" Version="3.1.1" />
+    </ItemGroup>
+
+    <!-- Resurser -->
+    <ItemGroup>
+        <None Include="Sound/**/*" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="Graphics/**/*" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="Projects/**/*" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- Native bibliotek för Windows -->
+    <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('win'))">
+        <None Include="libs/windows/*">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>%(Filename)%(Extension)</Link>
+        </None>
+    </ItemGroup>
+
+    <!-- Native bibliotek för macOS -->
+    <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+        <None Include="libs/mac/*">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Link>%(Filename)%(Extension)</Link>
+        </None>
     </ItemGroup>
 </Project>
