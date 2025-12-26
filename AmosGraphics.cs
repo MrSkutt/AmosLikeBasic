@@ -136,6 +136,9 @@ public sealed class AmosGraphics
     public void ImportProject(ProjectFile project)
     {
         if (project is null) return;
+        int screenW = project.ScreenWidth <= 0 ? 640 : project.ScreenWidth;
+        int screenH = project.ScreenHeight <= 0 ? 480 : project.ScreenHeight;
+
         Screen(project.ScreenWidth <= 0 ? 640 : project.ScreenWidth,
             project.ScreenHeight <= 0 ? 480 : project.ScreenHeight);
         _sprites.Clear();
@@ -575,6 +578,9 @@ public sealed class AmosGraphics
 
     public void SetMapSize(int newW, int newH)
     {
+        newW = Math.Max(1, newW);
+        newH = Math.Max(1, newH);
+        
         var oldMap = _map;
         _map = new int[newW, newH];
         for (int y = 0; y < newH; y++)

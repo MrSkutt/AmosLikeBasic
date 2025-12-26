@@ -1,0 +1,1 @@
+{"Version":1,"ProgramText":"BOB LOAD \u0022Graphics/hero.png\u0022\nBOB 1, 160, 100, 1\nFOR A = 0 TO 360 STEP 5\n  BOB ROTATE 1, A\n  BOB ZOOM 1, 100 \u002B SIN(A)*50, 100 \u002B SIN(A)*50\n  WAIT VBL\nNEXT A","ScreenWidth":640,"ScreenHeight":480,"Sprites":[],"MapWidth":0,"MapHeight":0,"MapData":[]}

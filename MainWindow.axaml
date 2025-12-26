@@ -27,6 +27,13 @@
                 <MenuItem Header="Toggle Fullscreen (F11)" Click="ToggleFullscreen_OnClick"/>
                 <MenuItem Header="Reset Layout"/>
             </MenuItem>
+            <MenuItem Header="Themes">
+                <MenuItem Header="Classic AMOS" Click="ChangeTheme_OnClick" Tag="Classic"/>
+                <MenuItem Header="Workbench" Click="ChangeTheme_OnClick" Tag="Workbench"/>
+                <MenuItem Header="Emerald" Click="ChangeTheme_OnClick" Tag="Emerald"/>
+                <MenuItem Header="Neon Night" Click="ChangeTheme_OnClick" Tag="NeonNight"/>
+                <MenuItem Header="Catppuccin Mocha" Click="ChangeTheme_OnClick" Tag="CatppuccinMocha"/>
+            </MenuItem>
             <MenuItem Header="_Help">
                 <MenuItem Header="About"/>
             </MenuItem>

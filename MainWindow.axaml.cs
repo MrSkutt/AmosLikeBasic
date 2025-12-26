@@ -10,6 +10,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.Media;
 
 namespace AmosLikeBasic;
 
@@ -522,5 +523,57 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var win = new MapEditorWindow(_gfx);
         win.Show();
+    }
+    
+    private void ChangeTheme_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender is MenuItem mi && mi.Tag is string themeName)
+        {
+            var theme = themeName switch
+            {
+                "Workbench" => AmosThemes.Workbench,
+                "Emerald" => AmosThemes.Emerald,
+                "NeonNight" => AmosThemes.NeonNight,
+                "CatppuccinMocha" => AmosThemes.CatppuccinMocha,
+                _ => AmosThemes.ClassicBlue
+            };
+            ApplyTheme(theme);
+        }
+    }
+
+    private void ApplyTheme(AmosTheme theme)
+    {
+        var amosFont = new FontFamily("Topaz a600a1200a400"); // Här kan du byta till "TopazPlus" senare
+
+        this.Background = new SolidColorBrush(theme.WindowBg);
+        ToolbarBorder.Background = new SolidColorBrush(theme.ToolbarBg);
+            
+        Editor.FontFamily = amosFont;
+        Editor.FontSize = 16;
+        
+        Console.FontFamily = amosFont;
+        Console.FontSize = 16;
+        
+        LogBox.FontFamily = amosFont;
+        
+        Editor.Background = new SolidColorBrush(theme.EditorBg);
+        Editor.Foreground = new SolidColorBrush(theme.EditorFg);
+            
+        CursorPosText.Background = new SolidColorBrush(theme.EditorCursorPosBg);
+        CursorPosText.Foreground = new SolidColorBrush(theme.AccentColor);
+            
+        AmosTitleBar.Background = new SolidColorBrush(theme.TitleBarBg);
+        // Om du har textblock inuti titlebar, kan du hitta dem via namn eller Grid.Children
+        foreach (var child in ((Grid)AmosTitleBar.Child).Children) {
+            if (child is StackPanel sp) {
+                foreach (var inner in sp.Children)
+                    if (inner is TextBlock tb) tb.Foreground = new SolidColorBrush(theme.TitleBarFg);
+            }
+        }
+
+        LogBox.Foreground = new SolidColorBrush(theme.AccentColor);
+        ToolbarBorder.BorderBrush = new SolidColorBrush(theme.AccentColor);
+            
+        // Uppdatera flikarnas utseende om möjligt, eller spara temat i en variabel
     }
 }
