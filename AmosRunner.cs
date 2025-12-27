@@ -286,6 +286,33 @@ public static class AmosRunner
                                 graphics.DrawMap(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
                         }
                         break;
+                    case "FONT":
+                            var fArgs = SplitCsvOrSpaces(arg);
+                            if (fArgs.Count > 0) {
+                                var fSub = fArgs[0].ToUpperInvariant();
+                                if (fSub == "LOAD" && fArgs.Count >= 5)
+                                    graphics.FontLoad(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(fArgs[2]), EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics), EvalInt(fArgs[4], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (fSub == "MAP" && fArgs.Count >= 3)
+                                    graphics.FontMap(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(string.Join(" ", fArgs.Skip(2))));
+                                else if (fSub == "PRINT" && fArgs.Count >= 4)
+                                    graphics.FontPrint(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics), ValueToString(EvalValue(string.Join(" ", fArgs.Skip(4)), vars, ln, getInkey, isKeyDown, graphics)));
+                                else if (fSub == "CHAR" && fArgs.Count >= 5)
+                                    graphics.FontChar(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics), ValueToString(EvalValue(fArgs[4], vars, ln, getInkey, isKeyDown, graphics)));
+                                else if (fSub == "ROTATE" && fArgs.Count >= 3)
+                                    graphics.FontRotate(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (fSub == "ZOOM" && fArgs.Count >= 3) {
+                                    int fid = EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    double fzx = EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics) / 100.0;
+                                    double fzy = (fArgs.Count >= 4) ? EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics) / 100.0 : fzx;
+                                    graphics.FontZoom(fid, fzx, fzy);
+                                }
+                                else if (fSub == "CLEAR")
+                                {
+                                    graphics.FontClear();
+                                }
+                            }
+                            onGraphicsChanged();
+                            break;
                     case "MAP":
                         var mArgs = SplitCsvOrSpaces(arg);
                         if (mArgs.Count >= 2 && mArgs[0].ToUpperInvariant() == "LOAD") {
@@ -297,7 +324,17 @@ public static class AmosRunner
                         }
                         break;
                     case "END": return;
-                    default: if (!string.IsNullOrWhiteSpace(cmd)) throw new Exception($"Syntax Error: '{cmd}' at line {ln}"); break;
+                    default: 
+                        if (!string.IsNullOrWhiteSpace(cmd)) {
+                            // Vi lägger till måsvingar här för att skapa ett eget scope
+                            if (fullCmd.Contains('=')) {
+                                var (varName, varValue) = SplitAssignment(fullCmd);
+                                vars[varName] = EvalValue(varValue, vars, ln, getInkey, isKeyDown, graphics);
+                            } else {
+                                throw new Exception($"Syntax Error: '{cmd}' at line {ln}");
+                            }
+                        }
+                        break;
                 }
                 if (jumpHappened) break;
             }

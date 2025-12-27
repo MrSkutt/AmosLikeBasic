@@ -18,7 +18,18 @@ public sealed class AmosGraphics
     private int _currentScreen = 0;
 
     public List<WriteableBitmap> GetTileBitmaps() => _tiles;
-
+    
+    private sealed class Font
+    {
+        public List<WriteableBitmap> CharBitmaps { get; } = new();
+        public int CharWidth { get; set; }
+        public int CharHeight { get; set; }
+        public double Angle { get; set; } = 0;
+        public double ZoomX { get; set; } = 1.0;
+        public double ZoomY { get; set; } = 1.0;
+        public string CharMap { get; set; } = ""; 
+    }
+    
     private sealed class Sprite
     {
         public Sprite(int width, int height, WriteableBitmap firstFrame)
@@ -49,6 +60,17 @@ public sealed class AmosGraphics
     }
 
     private readonly Dictionary<int, Sprite> _sprites = new();
+    private readonly Dictionary<int, Font> _fonts = new();
+    
+    private sealed class QueuedFontText
+    {
+        public int FontId { get; set; }
+        public int X { get; set; }
+        public int Y { get; set; }
+        public string Text { get; set; } = "";
+    }
+    private readonly List<QueuedFontText> _fontTexts = new(); 
+    
     private readonly List<WriteableBitmap> _tiles = new();
     private int _tilesInWidth = 0;
     private int[,] _map = new int[0, 0];
@@ -214,6 +236,7 @@ public sealed class AmosGraphics
         ClearBitmap(_bmp!, color);
         foreach (var s in _screens) ClearBitmap(s, color);
         for (int i = 0; i < _screenOffsets.Count; i++) _screenOffsets[i] = new Point(0, 0);
+        _fontTexts.Clear(); 
         Refresh();
     }
 
@@ -300,6 +323,12 @@ public sealed class AmosGraphics
                         if (!s.Visible || s.Frames.Count == 0) continue;
                         RenderSpriteInternal(dp, rb, s);
                     }
+                    
+                    foreach (var ft in _fontTexts)
+                    {
+                        RenderFontTextInternal(dp, rb, ft);
+                    }
+                    
                 }
             }
         }
@@ -462,6 +491,179 @@ public sealed class AmosGraphics
         });
     }
 
+            public void FontLoad(int id, string file, int tw, int th)
+        {
+            try
+            {
+                using var b = new Bitmap(file);
+                var font = new Font { CharWidth = tw, CharHeight = th };
+                int cols = (int)b.Size.Width / tw;
+                int rows = (int)b.Size.Height / th;
+
+                for (int y = 0; y < rows; y++)
+                {
+                    for (int x = 0; x < cols; x++)
+                    {
+                        var t = CreateEmptyBitmap(tw, th);
+                        using (var fb = t.Lock())
+                        {
+                            b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
+                            unsafe
+                            {
+                                var p = (byte*)fb.Address;
+                                for (int i = 0; i < tw * th; i++)
+                                {
+                                    byte temp = p[i * 4 + 0];
+                                    p[i * 4 + 0] = p[i * 4 + 2];
+                                    p[i * 4 + 2] = temp;
+                                }
+                            }
+                        }
+                        font.CharBitmaps.Add(t);
+                    }
+                }
+                _fonts[id] = font;
+            }
+            catch { }
+        }
+
+        public void FontRotate(int id, double angle) { if (_fonts.TryGetValue(id, out var f)) f.Angle = angle; }
+        public void FontZoom(int id, double zx, double zy) { if (_fonts.TryGetValue(id, out var f)) { f.ZoomX = zx; f.ZoomY = zy; } }
+        public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
+
+        public void FontPrint(int id, int x, int y, string text)
+        {
+            if (!_fonts.TryGetValue(id, out var f)) return;
+            // Istället för att rita direkt, sparar vi texten för att ritas vid Refresh
+            _fontTexts.Add(new QueuedFontText { FontId = id, X = x, Y = y, Text = text });
+        }
+
+        public void FontClear() => _fontTexts.Clear();
+        
+                private unsafe void RenderFontTextInternal(byte* dp, int rb, QueuedFontText qt)
+        {
+            if (!_fonts.TryGetValue(qt.FontId, out var f)) return;
+            int curX = qt.X;
+            foreach (var c in qt.Text)
+            {
+                RenderFontCharInternal(dp, rb, f, curX, qt.Y, c);
+                curX += (int)(f.CharWidth * f.ZoomX);
+            }
+        }
+
+        private unsafe void RenderFontCharInternal(byte* dp, int rb, Font f, int x, int y, char c)
+        {
+            string map = string.IsNullOrEmpty(f.CharMap) ? "" : f.CharMap;
+            int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
+            if (charIdx < 0 || charIdx >= f.CharBitmaps.Count) return;
+
+            var charBmp = f.CharBitmaps[charIdx];
+            using var src = charBmp.Lock();
+            byte* sp = (byte*)src.Address;
+            int srb = src.RowBytes;
+
+            double angleRad = f.Angle * Math.PI / 180.0;
+            double cosA = Math.Cos(angleRad), sinA = Math.Sin(angleRad);
+            double invZx = 1.0 / f.ZoomX, invZy = 1.0 / f.ZoomY;
+            int hx = f.CharWidth / 2, hy = f.CharHeight / 2;
+
+            double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(f.ZoomX, f.ZoomY);
+            int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(Width - 1, (int)(x + radius));
+            int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(Height - 1, (int)(y + radius));
+
+            for (int py = minY; py <= maxY; py++)
+            {
+                byte* rowPtr = dp + py * rb;
+                double dy = py - y;
+                for (int px = minX; px <= maxX; px++)
+                {
+                    double dx = px - x;
+                    double lx = (dx * cosA + dy * sinA) * invZx + hx;
+                    double ly = (dy * cosA - dx * sinA) * invZy + hy;
+                    int ilx = (int)lx, ily = (int)ly;
+
+                    if (ilx >= 0 && ilx < f.CharWidth && ily >= 0 && ily < f.CharHeight)
+                    {
+                        byte* srcPx = sp + ily * srb + ilx * 4;
+                        if (srcPx[3] == 0 || (srcPx[0] == 0 && srcPx[1] == 0 && srcPx[2] == 0)) continue;
+                        int di = px * 4;
+                        rowPtr[di + 0] = srcPx[0];
+                        rowPtr[di + 1] = srcPx[1];
+                        rowPtr[di + 2] = srcPx[2];
+                        rowPtr[di + 3] = 255;
+                    }
+                }
+            }
+        }
+        
+        public void FontChar(int id, int x, int y, string c)
+        {
+            if (!_fonts.TryGetValue(id, out var f) || string.IsNullOrEmpty(c)) return;
+            
+            // Justering: Ditt ark verkar börja på 'A' (ASCII 65). 
+            // Om vi vill ha siffror och tecken som i din bild behöver vi mappa rätt.
+            int charIdx = -1;
+            if (!string.IsNullOrEmpty(f.CharMap))
+            {
+                // Om vi har en karta, använd den
+                charIdx = f.CharMap.IndexOf(char.ToUpper(c[0]));
+            }
+            else
+            {
+                // Annars kör vi standard ASCII-offset (börjar på space)
+                charIdx = c[0] - 32;
+            }
+            
+            if (charIdx < 0 || charIdx >= f.CharBitmaps.Count) return;
+
+            var charBmp = f.CharBitmaps[charIdx];
+            var target = GetActiveScreen();
+            
+            // Vi använder en förenklad RenderSprite-logik här för att stödja Zoom/Rotate
+            using var dst = target.Lock();
+            using var src = charBmp.Lock();
+            unsafe
+            {
+                byte* dp = (byte*)dst.Address;
+                byte* sp = (byte*)src.Address;
+                int rb = dst.RowBytes;
+                int srb = src.RowBytes;
+                
+                double angleRad = f.Angle * Math.PI / 180.0;
+                double cosA = Math.Cos(angleRad), sinA = Math.Sin(angleRad);
+                double invZx = 1.0 / f.ZoomX, invZy = 1.0 / f.ZoomY;
+                int hx = f.CharWidth / 2, hy = f.CharHeight / 2;
+
+                double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(f.ZoomX, f.ZoomY);
+                int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(target.PixelSize.Width - 1, (int)(x + radius));
+                int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(target.PixelSize.Height - 1, (int)(y + radius));
+
+                for (int py = minY; py <= maxY; py++)
+                {
+                    byte* rowPtr = dp + py * rb;
+                    double dy = py - y;
+                    for (int px = minX; px <= maxX; px++)
+                    {
+                        double dx = px - x;
+                        double lx = (dx * cosA + dy * sinA) * invZx + hx;
+                        double ly = (dy * cosA - dx * sinA) * invZy + hy;
+                        int ilx = (int)lx, ily = (int)ly;
+
+                        if (ilx >= 0 && ilx < f.CharWidth && ily >= 0 && ily < f.CharHeight)
+                        {
+                            byte* srcPx = sp + ily * srb + ilx * 4;
+                            if (srcPx[3] == 0 || (srcPx[0] == 0 && srcPx[1] == 0 && srcPx[2] == 0)) continue; 
+                            int di = px * 4;
+                            rowPtr[di + 0] = srcPx[0];
+                            rowPtr[di + 1] = srcPx[1];
+                            rowPtr[di + 2] = srcPx[2];
+                            rowPtr[di + 3] = 255;
+                        }
+                    }
+                }
+            }
+        }
+    
     public void LoadBackground(string f)
     {
         try
@@ -495,39 +697,39 @@ public sealed class AmosGraphics
     // ---------------- Tiles ----------------
     public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
 
-    public void LoadTileBank(string f, int tw, int th)
-    {
-        try
-        {
-            using var b = new Bitmap(f);
-            _tileWidth = tw;
-            _tileHeight = th;
+    public void LoadTileBank(string f, int tw, int th) {
+        try {
+            using var b = new Bitmap(f); 
+            _tileWidth = tw; 
+            _tileHeight = th; 
             _tiles.Clear();
-            int cs = (int)b.Size.Width / tw, rs = (int)b.Size.Height / th;
-            for (int y = 0; y < rs; y++)
-            for (int x = 0; x < cs; x++)
-            {
-                var t = CreateEmptyBitmap(tw, th);
-                using (var fb = t.Lock())
-                {
-                    b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
-                    unsafe
-                    {
-                        var p = (byte*)fb.Address;
-                        for (int i = 0; i < tw * th; i++)
-                        {
-                            byte temp = p[i * 4 + 0];
-                            p[i * 4 + 0] = p[i * 4 + 2];
-                            p[i * 4 + 2] = temp;
+            
+            // Uppdatera klassvariabeln för att undvika division med noll i paletten
+            _tilesInWidth = (int)b.Size.Width / tw;
+            
+            int cs = _tilesInWidth; 
+            int rs = (int)b.Size.Height / th;
+
+            for (int y = 0; y < rs; y++) {
+                for (int x = 0; x < cs; x++) {
+                    var t = CreateEmptyBitmap(tw, th);
+                    using (var fb = t.Lock()) {
+                        b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
+                        unsafe {
+                            var p = (byte*)fb.Address;
+                            for (int i = 0; i < tw * th; i++) {
+                                byte temp = p[i * 4 + 0];
+                                p[i * 4 + 0] = p[i * 4 + 2];
+                                p[i * 4 + 2] = temp;
+                            }
                         }
                     }
+                    _tiles.Add(t);
                 }
-
-                _tiles.Add(t);
             }
         }
-        catch
-        {
+        catch {
+            // Logga gärna felet här om du vill, t.ex. Console.WriteLine(ex.Message);
         }
     }
 

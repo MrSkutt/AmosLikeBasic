@@ -14,6 +14,13 @@ public partial class TilePaletteWindow : Window
     public TilePaletteWindow(List<WriteableBitmap> tiles, int tilesInWidth)
     {
         InitializeComponent();
+            
+        // Säkerhetskontroll: tilesInWidth får inte vara 0 eller mindre
+        if (tilesInWidth <= 0) tilesInWidth = 1;
+
+        int rows = (int)Math.Ceiling((double)tiles.Count / tilesInWidth);
+        this.Width = tilesInWidth * 32 + 40;
+        this.Height = rows * 32 + 60;
 
         double tileSide = 32.0;
         PaletteCanvas.Width = tilesInWidth * tileSide;
