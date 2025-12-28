@@ -207,8 +207,19 @@ public static class AmosRunner
                         break;
                     case "NEXT":
                         if (forStack.Count == 0) break;
-                        var f = forStack.Peek(); var cur = GetIntVar(f.VarName, vars, ln) + f.StepValue; vars[f.VarName] = cur;
-                        if (f.StepValue > 0 ? cur <= f.EndValue : cur >= f.EndValue) { pc = f.LineAfterForPc; jumpHappened = true; } else forStack.Pop();
+                        var f = forStack.Peek(); 
+                        var cur = GetDoubleVar(f.VarName, vars, ln) + f.StepValue; 
+                        vars[f.VarName] = cur;
+                            
+                        // Lägg till en liten marginal (0.000001) för att undvika att flyttalsfel kör loopen en gång för mycket
+                        bool loopDone = f.StepValue > 0 ? cur > (f.EndValue + 0.000001) : cur < (f.EndValue - 0.000001);
+                            
+                        if (!loopDone) { 
+                            pc = f.LineAfterForPc; 
+                            jumpHappened = true; 
+                        } else { 
+                            forStack.Pop(); 
+                        }
                         break;
                     case "SCREEN":
                         var screenArgs = SplitCsvOrSpaces(arg);
@@ -544,106 +555,93 @@ public static class AmosRunner
         return res;
     }
 
-    private static double ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
-        t.SkipWs();
-        if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
-        if (t.TryReadDouble(out var n)) return n; // Vi behöver en TryReadDouble i Tokenizer
-        if (t.TryReadIdentifier(out var id)) {
-            if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk().Length;
-            
-            // NYTT: Hämta banans storlek i pixlar
-            if (id.Equals("MAP", StringComparison.OrdinalIgnoreCase)) {
+// ... befintlig kod ...
+        private static double ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+            t.SkipWs();
+            if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
+            if (t.TryReadDouble(out var n)) return n; 
+            if (t.TryReadIdentifier(out var id)) {
                 t.SkipWs();
-                if (t.TryReadIdentifier(out var sub)) {
-                    if (sub.Equals("WIDTH", StringComparison.OrdinalIgnoreCase)) return g.GetMapWidth() * 32; 
-                    if (sub.Equals("HEIGHT", StringComparison.OrdinalIgnoreCase)) return g.GetMapHeight() * 32;
+                
+                // 1. Hantera specialfall UTAN parenteser
+                if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk().Length;
+                if (id.Equals("MAP", StringComparison.OrdinalIgnoreCase)) {
+                    t.SkipWs();
+                    if (t.TryReadIdentifier(out var sub)) {
+                        if (sub.Equals("WIDTH", StringComparison.OrdinalIgnoreCase)) return g.GetMapWidth() * 32; 
+                        if (sub.Equals("HEIGHT", StringComparison.OrdinalIgnoreCase)) return g.GetMapHeight() * 32;
+                    }
                 }
-            }
-            if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); 
-                var id1 = (int)ParseExpr(ref t, v, ln, gk, ikd, g); // Cast till int
-                t.TryConsume(','); 
-                var id2 = (int)ParseExpr(ref t, v, ln, gk, ikd, g); // Cast till int
-                t.TryConsume(')');
-                return g.SpriteHit(id1, id2) ? 1 : 0;
-            }
-            if (id.Equals("TILE", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('(');
-                var layer = (int)ParseExpr(ref t, v, ln, gk, ikd, g); 
-                t.TryConsume(',');
-                var px = (int)ParseExpr(ref t, v, ln, gk, ikd, g); 
-                var py = 0;
-                if (t.TryConsume(',')) {
-                    py = (int)ParseExpr(ref t, v, ln, gk, ikd, g);
-                }
-                t.TryConsume(')');
+
+                // 2. Om det följer en parentese, är det antingen en FUNKTION eller en ARRAY
+                if (t.TryConsume('(')) {
+                    if (id.Equals("SIN", StringComparison.OrdinalIgnoreCase)) {
+                        double a = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return Math.Sin(a * Math.PI / 180.0);
+                    }
+                    if (id.Equals("COS", StringComparison.OrdinalIgnoreCase)) {
+                        double a = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return Math.Cos(a * Math.PI / 180.0);
+                    }
+                    if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
+                        double m = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return _rng.NextDouble() * m;
+                    }
+                    if (id.Equals("INT", StringComparison.OrdinalIgnoreCase)) {
+                        double val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return Math.Floor(val + 0.000001);
+                    }
+                    if (id.Equals("INC", StringComparison.OrdinalIgnoreCase)) {
+                        double val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return val + 1; 
+                    }   
+                    if (id.Equals("DEC", StringComparison.OrdinalIgnoreCase)) {
+                        double val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return val - 1; 
+                    }
+                    if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
+                        var id1 = (int)Math.Round(ParseExpr(ref t, v, ln, gk, ikd, g)); t.TryConsume(',');
+                        var id2 = (int)Math.Round(ParseExpr(ref t, v, ln, gk, ikd, g)); t.TryConsume(')');
+                        return g.SpriteHit(id1, id2) ? 1.0 : 0.0;
+                    }
+                    if (id.Equals("TILE", StringComparison.OrdinalIgnoreCase)) {
+                        // 1. Läs layer
+                        var layer = (int)Math.Round(ParseExpr(ref t, v, ln, gk, ikd, g));
+                        t.TryConsume(',');
+                        
+                        // 2. Läs X-koordinat
+                        var px = (int)Math.Round(ParseExpr(ref t, v, ln, gk, ikd, g));
+                        
+                        // 3. Kolla om det finns en Y-koordinat (valfritt)
+                        var py = 0;
+                        if (t.TryConsume(',')) {
+                            py = (int)Math.Round(ParseExpr(ref t, v, ln, gk, ikd, g));
+                        }
+                        
+                        t.TryConsume(')');
+                        
+                        // Returnera tilen på den pixel-positionen (dividerat med tile-storlek 32)
+                        return g.GetMapTile(px / 32, py / 32);
+                    }
+                    if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
+                        var k = Unquote(t.ReadUntil(')')); t.TryConsume(')'); return ikd(k) ? 1.0 : 0.0;
+                    }
+
+                    // ARRAY-KOLL (Om det inte var en funktion ovan)
+                    if (v.TryGetValue(id, out var arrayObj) && arrayObj is AmosArray arr) {
+                        double rawIdx = ParseExpr(ref t, v, ln, gk, ikd, g);
+                        t.TryConsume(')');
+                        int aIdx = (int)Math.Floor(rawIdx + 0.000001);
+                        if (aIdx >= 0 && aIdx < arr.Data.Length) return arr.Data[aIdx];
+                        throw new Exception($"Array index out of bounds: {id}({aIdx}) at line {ln}");
+                    }
                     
-                int tx = px / 32;
-                int ty = py / 32;
-                return g.GetMapTile(tx, ty);
+                    throw new Exception($"Unknown function or array: {id} at line {ln}");
+                }
+                
+                // 3. VANLIG VARIABEL (Ingen parentes alls)
+                return GetDoubleVar(id, v, ln);
             }
-            if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); 
-                double m = ParseExpr(ref t, v, ln, gk, ikd, g); 
-                t.TryConsume(')'); 
-                // Returnerar ett flyttal mellan 0.0 och m
-                return _rng.NextDouble() * m;
-            }
-            if (id.Equals("INT", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('(');
-                double val = ParseExpr(ref t, v, ln, gk, ikd, g);
-                t.TryConsume(')');
-                return Math.Floor(val); // Math.Floor kastar bort decimalerna
-            }
-            if (id.Equals("INC", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('(');
-                double val = ParseExpr(ref t, v, ln, gk, ikd, g);
-                t.TryConsume(')');
-                return val+1; 
-            }   
-            if (id.Equals("DEC", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('(');
-                double val = ParseExpr(ref t, v, ln, gk, ikd, g);
-                t.TryConsume(')');
-                return val-1; 
-            }  
-            if (id.Equals("SIN", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); 
-                double angle = ParseExpr(ref t, v, ln, gk, ikd, g); // Ingen (int) cast här!
-                t.TryConsume(')');
-                return Math.Sin(angle * Math.PI / 180.0);
-            }
-            
-            if (id.Equals("COS", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); 
-                double angle = ParseExpr(ref t, v, ln, gk, ikd, g); // Ingen (int) cast här!
-                t.TryConsume(')');
-                return Math.Cos(angle * Math.PI / 180.0);
-            }
-
-            if (id.Equals("COS", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); 
-                var angle = ParseExpr(ref t, v, ln, gk, ikd, g); 
-                t.TryConsume(')');
-                return (int)(Math.Cos(angle * Math.PI / 180.0));
-            }
-
-            if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); var k = Unquote(t.ReadUntil(')')); t.TryConsume(')'); return ikd(k) ? 1 : 0;
-            }
-            // Kolla om det är en array
-            if (v.TryGetValue(id, out var arrayObj) && arrayObj is AmosArray arr) {
-                var idx = (int)Math.Round(ParseExpr(ref t, v, ln, gk, ikd, g));
-                t.TryConsume(')');
-                if (idx >= 0 && idx < arr.Data.Length) return arr.Data[idx];
-                throw new Exception($"Array index out of bounds: {id}({idx}) at line {ln}");
-            }
-            
-            return GetDoubleVar(id, v, ln);
+            return 0.0;
         }
+// ... befintlig kod ...
 
-        return 0.0;
-    }
+
+  
 
     private static string ValueToString(object? v)
     {
