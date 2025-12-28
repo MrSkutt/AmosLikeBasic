@@ -162,6 +162,8 @@ public partial class MainWindow : Window
             TopMenu.IsVisible = true;
             AmosTitleBar.IsVisible = true;
             ToolbarBorder.IsVisible = true;
+            FullScreenOverlay.IsVisible = false;
+            MainTabs.IsVisible = true;
         }
         else
         {
@@ -169,6 +171,16 @@ public partial class MainWindow : Window
             TopMenu.IsVisible = false;
             AmosTitleBar.IsVisible = false;
             ToolbarBorder.IsVisible = false;
+            
+            // Om vi inte redan är på Screen-fliken, växla till den
+            MainTabs.SelectedIndex = 1;
+                
+            // Dölj hela flikkontrollen (inklusive flik-raden högst upp)
+            MainTabs.IsVisible = false;
+            FullScreenOverlay.IsVisible = true;
+            
+            FullScreenImage.Focus(); // Se till att input hamnar rätt
+
         }
     }
     
@@ -176,7 +188,6 @@ public partial class MainWindow : Window
 
     private void ToggleConsole()
     {
-        // Istället för att gömma konsolen (som nu är fast), kan vi rensa den
         _textScreen.Clear();
         if (Console is not null)
             Console.Text = "";
@@ -241,7 +252,7 @@ public partial class MainWindow : Window
     {
         return Dispatcher.UIThread.InvokeAsync(() =>
         {
-            // När vi startar programmet, logga i LogBox istället för att rensa spelsidan
+            // När vi startar programmet, logga i LogBox 
             if (LogBox is not null)
                 LogBox.Text += text + Environment.NewLine;
         }).GetTask();
@@ -340,8 +351,7 @@ public partial class MainWindow : Window
         }
     }
 
-    // ... keep your Save/Open/Run/Stop methods as they are (but do not duplicate console helpers) ...
-
+    
     private void NewProject_OnClick(object? sender, RoutedEventArgs e)
     {
         // 1. Rensa editorn
@@ -409,7 +419,7 @@ public partial class MainWindow : Window
             AllowMultiple = false,
             FileTypeFilter =
             [
-                new FilePickerFileType("AMOS Project") { Patterns = ["*.*"] }
+                new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }
             ]
         });
 
@@ -476,10 +486,14 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
                     clearAsync: ClearConsoleAsync,
                     graphics: _gfx,
                     onGraphicsChanged: () => {
-                        // Använd Render-prioritet för att inte störa timingen
                         Dispatcher.UIThread.InvokeAsync(() => {
                             ScreenImage.Source = _gfx.Bitmap;
+                            // Uppdatera även fullskärmsbilden om den syns
+                            if (FullScreenOverlay.IsVisible) {
+                                FullScreenImage.Source = _gfx.Bitmap;
+                            }
                             ScreenImage.InvalidateVisual();
+                            FullScreenImage.InvalidateVisual();
                         }, DispatcherPriority.Render);
                     },
                     getInkey: () => _pressedKeys.FirstOrDefault() ?? "",

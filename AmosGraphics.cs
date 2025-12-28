@@ -68,6 +68,9 @@ public sealed class AmosGraphics
         public int X { get; set; }
         public int Y { get; set; }
         public string Text { get; set; } = "";
+        public double Angle { get; set; }
+        public double ZoomX { get; set; }
+        public double ZoomY { get; set; }
     }
     private readonly List<QueuedFontText> _fontTexts = new(); 
     
@@ -534,24 +537,38 @@ public sealed class AmosGraphics
         public void FontPrint(int id, int x, int y, string text)
         {
             if (!_fonts.TryGetValue(id, out var f)) return;
-            // Istället för att rita direkt, sparar vi texten för att ritas vid Refresh
-            _fontTexts.Add(new QueuedFontText { FontId = id, X = x, Y = y, Text = text });
+            // Spara ner nuvarande värden tillsammans med texten
+            _fontTexts.Add(new QueuedFontText { 
+                FontId = id, 
+                X = x, 
+                Y = y, 
+                Text = text,
+                Angle = f.Angle,
+                ZoomX = f.ZoomX,
+                ZoomY = f.ZoomY
+            });
         }
 
         public void FontClear() => _fontTexts.Clear();
         
-                private unsafe void RenderFontTextInternal(byte* dp, int rb, QueuedFontText qt)
+        private unsafe void RenderFontTextInternal(byte* dp, int rb, QueuedFontText qt)
         {
             if (!_fonts.TryGetValue(qt.FontId, out var f)) return;
             int curX = qt.X;
-            foreach (var c in qt.Text)
-            {
-                RenderFontCharInternal(dp, rb, f, curX, qt.Y, c);
-                curX += (int)(f.CharWidth * f.ZoomX);
+            foreach (var c in qt.Text) 
+
+            {            
+                if (c == ' ')
+                { 
+                    curX += (int)(f.CharWidth * qt.ZoomX);
+                    continue;
+                }   
+                RenderFontCharInternal(dp, rb, f, curX, qt.Y, c, qt); 
+                curX += (int)(f.CharWidth * qt.ZoomX);
             }
         }
 
-        private unsafe void RenderFontCharInternal(byte* dp, int rb, Font f, int x, int y, char c)
+        private unsafe void RenderFontCharInternal(byte* dp, int rb, Font f, int x, int y, char c, QueuedFontText qt)
         {
             string map = string.IsNullOrEmpty(f.CharMap) ? "" : f.CharMap;
             int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
@@ -562,12 +579,13 @@ public sealed class AmosGraphics
             byte* sp = (byte*)src.Address;
             int srb = src.RowBytes;
 
-            double angleRad = f.Angle * Math.PI / 180.0;
+            // Använd värdena från qt istället för f!
+            double angleRad = qt.Angle * Math.PI / 180.0;
             double cosA = Math.Cos(angleRad), sinA = Math.Sin(angleRad);
-            double invZx = 1.0 / f.ZoomX, invZy = 1.0 / f.ZoomY;
+            double invZx = 1.0 / qt.ZoomX, invZy = 1.0 / qt.ZoomY;
             int hx = f.CharWidth / 2, hy = f.CharHeight / 2;
 
-            double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(f.ZoomX, f.ZoomY);
+            double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(qt.ZoomX, qt.ZoomY);
             int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(Width - 1, (int)(x + radius));
             int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(Height - 1, (int)(y + radius));
 

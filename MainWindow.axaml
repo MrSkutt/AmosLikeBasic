@@ -126,6 +126,10 @@
                     </Grid>
                 </TabItem>
             </TabControl>
+            <Panel Name="FullScreenOverlay" IsVisible="False" Background="Black">
+                <Image Name="FullScreenImage" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
+                <!-- Om du vill ha konsolen i fullskärm också kan du lägga en kopia här -->
+            </Panel>
         </Grid>
     </DockPanel>
 </Window>
