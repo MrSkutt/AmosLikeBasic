@@ -16,7 +16,11 @@ public static class AmosRunner
 
     private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
 
-
+    private sealed class AmosArray
+    {
+        public double[] Data { get; }
+        public AmosArray(int size) { Data = new double[size + 1]; } // +1 för att AMOS ofta tillåter index upp till storleken
+    }
     
     public static async Task ExecuteAsync(string programText, Func<string, Task> appendLineAsync, Func<Task> clearAsync, AmosGraphics graphics, Action onGraphicsChanged, Func<string> getInkey, Func<string, bool> isKeyDown, AudioEngine? audioEngine, CancellationToken token)
     {
@@ -113,6 +117,16 @@ public static class AmosRunner
                     case "LET": 
                         var (n, vt) = SplitAssignment(arg); 
                         vars[n] = EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics); 
+                        break;
+                    case "DIM":
+                        // Enkel parsing av DIM A(10)
+                        var dimParts = arg.Split('(', ')');
+                        if (dimParts.Length >= 2)
+                        {
+                            var arrName = dimParts[0].Trim();
+                            var size = EvalInt(dimParts[1], vars, ln, getInkey, isKeyDown, graphics);
+                            vars[arrName] = new AmosArray(size);
+                        }
                         break;
                     case "WAIT": 
                         if (arg.ToUpperInvariant() == "VBL") {
@@ -330,17 +344,37 @@ public static class AmosRunner
                         }
                         break;
                     case "END": return;
-                    default: 
-                        if (!string.IsNullOrWhiteSpace(cmd)) {
-                            // Vi lägger till måsvingar här för att skapa ett eget scope
-                            if (fullCmd.Contains('=')) {
-                                var (varName, varValue) = SplitAssignment(fullCmd);
-                                vars[varName] = EvalValue(varValue, vars, ln, getInkey, isKeyDown, graphics);
-                            } else {
-                                throw new Exception($"Syntax Error: '{cmd}' at line {ln}");
+                        default: 
+                            if (!string.IsNullOrWhiteSpace(cmd)) {
+                                if (fullCmd.Contains('=')) {
+                                    // Vi använder SplitAssignment för att dela upp på '='
+                                    var (leftSide, varValue) = SplitAssignment(fullCmd);
+                                    var rightValue = EvalDouble(varValue, vars, ln, getInkey, isKeyDown, graphics);
+
+                                    if (leftSide.Contains('(')) {
+                                        // Hantera array-tilldelning: A(5) = 10
+                                        int openParen = leftSide.IndexOf('(');
+                                        int closeParen = leftSide.LastIndexOf(')');
+                                        if (openParen != -1 && closeParen != -1) {
+                                            var aName = leftSide[..openParen].Trim();
+                                            var idxStr = leftSide[(openParen + 1)..closeParen];
+                                            
+                                            if (vars.TryGetValue(aName, out var aVal) && aVal is AmosArray array) {
+                                                var aIdx = (int)Math.Round(EvalDouble(idxStr, vars, ln, getInkey, isKeyDown, graphics));
+                                                if (aIdx >= 0 && aIdx < array.Data.Length) {
+                                                    array.Data[aIdx] = rightValue;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Vanlig variabel
+                                        vars[leftSide] = rightValue;
+                                    }
+                                } else {
+                                    throw new Exception($"Syntax Error: '{cmd}' at line {ln}");
+                                }
                             }
-                        }
-                        break;
+                            break;
                 }
                 if (jumpHappened) break;
             }
@@ -586,8 +620,7 @@ public static class AmosRunner
                 t.TryConsume(')');
                 return Math.Cos(angle * Math.PI / 180.0);
             }
-            
-            // NYTT: Implementera COS
+
             if (id.Equals("COS", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); 
                 var angle = ParseExpr(ref t, v, ln, gk, ikd, g); 
@@ -598,9 +631,18 @@ public static class AmosRunner
             if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var k = Unquote(t.ReadUntil(')')); t.TryConsume(')'); return ikd(k) ? 1 : 0;
             }
+            // Kolla om det är en array
+            if (v.TryGetValue(id, out var arrayObj) && arrayObj is AmosArray arr) {
+                var idx = (int)Math.Round(ParseExpr(ref t, v, ln, gk, ikd, g));
+                t.TryConsume(')');
+                if (idx >= 0 && idx < arr.Data.Length) return arr.Data[idx];
+                throw new Exception($"Array index out of bounds: {id}({idx}) at line {ln}");
+            }
+            
             return GetDoubleVar(id, v, ln);
         }
-        return 0;
+
+        return 0.0;
     }
 
     private static string ValueToString(object? v)
@@ -619,7 +661,10 @@ public static class AmosRunner
     {
         if (v.TryGetValue(n, out var val))
         {
-            // Om variabeln lagrats som en int eller float, konvertera säkert till double
+            // Om det råkar vara en array vi försöker läsa som ett tal, returnera 0 eller kasta fel
+            if (val is AmosArray) return 0.0; 
+
+            // Om variabeln lagrats som en int, float eller double, konvertera säkert
             return Convert.ToDouble(val, CultureInfo.InvariantCulture);
         }
         return 0.0;
