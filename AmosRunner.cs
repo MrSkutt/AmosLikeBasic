@@ -216,6 +216,12 @@ public static class AmosRunner
                     case "CLSG": graphics.Clear(Colors.Black); onGraphicsChanged(); break;
                     case "LOAD": graphics.LoadBackground(Unquote(arg)); onGraphicsChanged(); break;
                     case "INK": graphics.Ink = ParseColor(arg); break;
+                    case "INC":
+                        vars[arg] = GetDoubleVar(arg, vars, ln) + 1.0;
+                        break;
+                    case "DEC":
+                        vars[arg] = GetDoubleVar(arg, vars, ln) - 1.0;
+                        break;
                     case "PLOT": 
                         var pP = SplitCsvOrSpaces(arg); 
                         graphics.Plot(EvalInt(pP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(pP[1], vars, ln, getInkey, isKeyDown, graphics)); 
@@ -364,6 +370,8 @@ public static class AmosRunner
         }
         switch (cmd) {
             case "PRINT": await al("@@PRINT " + ValueToString(EvalValue(arg, vars, ln, gk, ikd, g))); return false;
+            case "INC": vars[arg] = GetDoubleVar(arg, vars, ln) + 1.0; return false;
+            case "DEC": vars[arg] = GetDoubleVar(arg, vars, ln) - 1.0; return false;
             case "LOCATE": var p = SplitCsvOrSpaces(arg); await al($"@@LOCATE {EvalInt(p[0], vars, ln, gk, ikd, g)} {EvalInt(p[1], vars, ln, gk, ikd, g)}"); return false;
             case "LET": 
                 var (n, vt) = SplitAssignment(arg); 
@@ -405,35 +413,56 @@ public static class AmosRunner
             default: if (!string.IsNullOrWhiteSpace(cmd)) throw new Exception($"Syntax Error in IF-THEN: Unknown command '{cmd}' at line {ln}"); return false;
         }
     }
+        private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
+        {
+            // 1. Hantera OR (Lägst prioritet, kollas först)
+            var orIdx = IndexOfWord(c, " OR ");
+            if (orIdx >= 0) {
+                return EvalCondition(c[..orIdx].Trim(), v, ln, gk, ikd, g) || 
+                       EvalCondition(c[(orIdx + 4)..].Trim(), v, ln, gk, ikd, g);
+            }
 
-    private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
-    {
-        // 1. Hantera OR (Lägst prioritet, kollas först)
-        var orIdx = IndexOfWord(c, " OR ");
-        if (orIdx >= 0) {
-            return EvalCondition(c[..orIdx].Trim(), v, ln, gk, ikd, g) || 
-                   EvalCondition(c[(orIdx + 4)..].Trim(), v, ln, gk, ikd, g);
-        }
+            // 2. Hantera AND
+            var andIdx = IndexOfWord(c, " AND ");
+            if (andIdx >= 0) {
+                return EvalCondition(c[..andIdx].Trim(), v, ln, gk, ikd, g) && 
+                       EvalCondition(c[(andIdx + 5)..].Trim(), v, ln, gk, ikd, g);
+            }
 
-        // 2. Hantera AND
-        var andIdx = IndexOfWord(c, " AND ");
-        if (andIdx >= 0) {
-            return EvalCondition(c[..andIdx].Trim(), v, ln, gk, ikd, g) && 
-                   EvalCondition(c[(andIdx + 5)..].Trim(), v, ln, gk, ikd, g);
-        }
+            // 3. Befintlig logik för jämförelser (=, <, >, etc.)
+            if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>')) {
+                // Konvertera till double: allt utom exakt 0.0 räknas som sant
+                return Math.Abs(Convert.ToDouble(EvalValue(c, v, ln, gk, ikd, g))) > 0.000001;
+            }
 
-        // 3. Befintlig logik för jämförelser (=, <, >, etc.)
-        if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>')) return Convert.ToInt32(EvalValue(c, v, ln, gk, ikd, g)) != 0;
-        var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
-        foreach (var op in ops) {
-            var i = c.IndexOf(op); if (i < 0) continue;
-            var lV = EvalValue(c[..i].Trim(), v, ln, gk, ikd, g); var rV = EvalValue(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
-            if (lV is string || rV is string) { var ls = ValueToString(lV); var rs = ValueToString(rV); return op == "=" ? ls == rs : ls != rs; }
-            var li = Convert.ToInt32(lV); var ri = Convert.ToInt32(rV);
-            return op switch { "=" => li == ri, "<>" => li != ri, "<" => li < ri, ">" => li > ri, "<=" => li <= ri, ">=" => li >= ri, _ => false };
+            var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
+            foreach (var op in ops) {
+                var i = c.IndexOf(op); if (i < 0) continue;
+                var lV = EvalValue(c[..i].Trim(), v, ln, gk, ikd, g); 
+                var rV = EvalValue(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
+                
+                if (lV is string || rV is string) { 
+                    var ls = ValueToString(lV); 
+                    var rs = ValueToString(rV); 
+                    return op == "=" ? ls == rs : ls != rs; 
+                }
+
+                // Använd Double här för att stödja flyttalsjämförelser!
+                var li = Convert.ToDouble(lV); 
+                var ri = Convert.ToDouble(rV);
+
+                return op switch { 
+                    "=" => Math.Abs(li - ri) < 0.000001, // Säker jämförelse för flyttal
+                    "<>" => Math.Abs(li - ri) > 0.000001, 
+                    "<" => li < ri, 
+                    ">" => li > ri, 
+                    "<=" => li <= ri, 
+                    ">=" => li >= ri, 
+                    _ => false 
+                };
+            }
+            return false;
         }
-        return false;
-    }
 
     private static string StripComments(string l) {
         bool q = false;
@@ -449,36 +478,42 @@ public static class AmosRunner
         if (t.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
         if (t.StartsWith("KEYSTATE(", StringComparison.OrdinalIgnoreCase)) return ikd(t.Substring(9).TrimEnd(')').Trim('\"')) ? 1 : 0;
         if (IsQuotedString(t)) return Unquote(t);
-        return EvalInt(t, v, ln, gk, ikd, g);
+        return EvalDouble(t, v, ln, gk, ikd, g);
     }
 
     private static int EvalInt(string val, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) { 
+        // Använd din nya uträkningslogik som returnerar double och runda av
+        return (int)Math.Round(EvalDouble(val, v, ln, gk, ikd, g));
+    }
+    
+    private static double EvalDouble(string val, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) { 
         if (string.IsNullOrWhiteSpace(val)) return 0;
         var t = new Tokenizer(val); return ParseExpr(ref t, v, ln, gk, ikd, g); 
     }
 
-    private static int ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+
+    private static double ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         var res = ParseTerm(ref t, v, ln, gk, ikd, g);
         while (true) { if (t.TryConsume('+')) res += ParseTerm(ref t, v, ln, gk, ikd, g); else if (t.TryConsume('-')) res -= ParseTerm(ref t, v, ln, gk, ikd, g); else break; }
         return res;
     }
 
-    private static int ParseTerm(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+    private static double ParseTerm(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         var res = ParseFactor(ref t, v, ln, gk, ikd, g);
         while (true) { 
             if (t.TryConsume('*')) res *= ParseFactor(ref t, v, ln, gk, ikd, g); 
             else if (t.TryConsume('/')) {
                 var d = ParseFactor(ref t, v, ln, gk, ikd, g);
-                res = (d == 0) ? 0 : res / d;
+                res = (d == 0) ? 0 : res / d; // Double hanterar division med noll, men vi behåller 0 för säkerhets skull
             } else break; 
         }
         return res;
     }
 
-    private static int ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+    private static double ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         t.SkipWs();
         if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
-        if (t.TryReadInt(out var n)) return n;
+        if (t.TryReadDouble(out var n)) return n; // Vi behöver en TryReadDouble i Tokenizer
         if (t.TryReadIdentifier(out var id)) {
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk().Length;
             
@@ -491,37 +526,65 @@ public static class AmosRunner
                 }
             }
             if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); var id1 = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(','); var id2 = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')');
+                t.TryConsume('('); 
+                var id1 = (int)ParseExpr(ref t, v, ln, gk, ikd, g); // Cast till int
+                t.TryConsume(','); 
+                var id2 = (int)ParseExpr(ref t, v, ln, gk, ikd, g); // Cast till int
+                t.TryConsume(')');
                 return g.SpriteHit(id1, id2) ? 1 : 0;
             }
             if (id.Equals("TILE", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('(');
-                var layer = ParseExpr(ref t, v, ln, gk, ikd, g); 
+                var layer = (int)ParseExpr(ref t, v, ln, gk, ikd, g); 
                 t.TryConsume(',');
-                var px = ParseExpr(ref t, v, ln, gk, ikd, g); 
+                var px = (int)ParseExpr(ref t, v, ln, gk, ikd, g); 
                 var py = 0;
                 if (t.TryConsume(',')) {
-                    py = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    py = (int)ParseExpr(ref t, v, ln, gk, ikd, g);
                 }
                 t.TryConsume(')');
                     
-                // VIKTIGT: Vi ska INTE använda offset (scroll) här. 
-                // TILE ska returnera vad som finns på en specifik position i mappen.
                 int tx = px / 32;
                 int ty = py / 32;
-                    
                 return g.GetMapTile(tx, ty);
             }
             if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
-                t.TryConsume('('); var m = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return _rng.Next(m + 1); 
+                t.TryConsume('('); 
+                double m = ParseExpr(ref t, v, ln, gk, ikd, g); 
+                t.TryConsume(')'); 
+                // Returnerar ett flyttal mellan 0.0 och m
+                return _rng.NextDouble() * m;
             }
-            // NYTT: Implementera SIN (returnerar värdet * 100 för att behålla precision i heltal)
+            if (id.Equals("INT", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('(');
+                double val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                t.TryConsume(')');
+                return Math.Floor(val); // Math.Floor kastar bort decimalerna
+            }
+            if (id.Equals("INC", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('(');
+                double val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                t.TryConsume(')');
+                return val+1; 
+            }   
+            if (id.Equals("DEC", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('(');
+                double val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                t.TryConsume(')');
+                return val-1; 
+            }  
             if (id.Equals("SIN", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); 
-                var angle = ParseExpr(ref t, v, ln, gk, ikd, g); 
+                double angle = ParseExpr(ref t, v, ln, gk, ikd, g); // Ingen (int) cast här!
                 t.TryConsume(')');
-                // Omvandla grader till radianer och multiplicera med 100
-                return (int)(Math.Sin(angle * Math.PI / 180.0) * 100);
+                return Math.Sin(angle * Math.PI / 180.0);
+            }
+            
+            if (id.Equals("COS", StringComparison.OrdinalIgnoreCase)) {
+                t.TryConsume('('); 
+                double angle = ParseExpr(ref t, v, ln, gk, ikd, g); // Ingen (int) cast här!
+                t.TryConsume(')');
+                return Math.Cos(angle * Math.PI / 180.0);
             }
             
             // NYTT: Implementera COS
@@ -529,20 +592,38 @@ public static class AmosRunner
                 t.TryConsume('('); 
                 var angle = ParseExpr(ref t, v, ln, gk, ikd, g); 
                 t.TryConsume(')');
-                return (int)(Math.Cos(angle * Math.PI / 180.0) * 100);
+                return (int)(Math.Cos(angle * Math.PI / 180.0));
             }
 
             if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
                 t.TryConsume('('); var k = Unquote(t.ReadUntil(')')); t.TryConsume(')'); return ikd(k) ? 1 : 0;
             }
-            return GetIntVar(id, v, ln);
+            return GetDoubleVar(id, v, ln);
         }
         return 0;
     }
 
-    private static string ValueToString(object? v) => v?.ToString() ?? "";
+    private static string ValueToString(object? v)
+    {
+        if (v is double d) 
+        {
+            // "G10" betyder "General format" med 10 signifikanta siffror.
+            // Det rensar bort de pyttesmå avrundningsfelen i slutet.
+            return d.ToString("G10", CultureInfo.InvariantCulture);
+        }
+        return v?.ToString() ?? "";
+    }
     private static bool IsQuotedString(string t) => t.Length >= 2 && t.StartsWith("\"") && t.EndsWith("\"");
     private static string Unquote(string t) => t.Trim('\"');
+    private static double GetDoubleVar(string n, Dictionary<string, object> v, int ln) 
+    {
+        if (v.TryGetValue(n, out var val))
+        {
+            // Om variabeln lagrats som en int eller float, konvertera säkert till double
+            return Convert.ToDouble(val, CultureInfo.InvariantCulture);
+        }
+        return 0.0;
+    }
     private static int GetIntVar(string n, Dictionary<string, object> v, int ln) => v.TryGetValue(n, out var val) ? Convert.ToInt32(val) : 0;
     private static (string n, string v) SplitAssignment(string t) { var i = t.IndexOf('='); return (t[..i].Trim(), t[(i + 1)..].Trim()); }
     private static (string c, string a) SplitCommand(string l) { 
@@ -612,6 +693,12 @@ public static class AmosRunner
         public void SkipWs() { while (_i < _s.Length && char.IsWhiteSpace(_s[_i])) _i++; }
         public bool TryConsume(char c) { SkipWs(); if (_i < _s.Length && _s[_i] == c) { _i++; return true; } return false; }
         public bool TryReadInt(out int v) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsDigit(_s[_i]) || (_i == s && _s[_i] == '-'))) _i++; return int.TryParse(_s[s.._i], out v); }
+        public bool TryReadDouble(out double v) { 
+            SkipWs(); 
+            var s = _i; 
+            while (_i < _s.Length && (char.IsDigit(_s[_i]) || _s[_i] == '.' || (_i == s && _s[_i] == '-'))) _i++; 
+            return double.TryParse(_s[s.._i], CultureInfo.InvariantCulture, out v); 
+        }
         public bool TryReadIdentifier(out string n) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsLetterOrDigit(_s[_i]) || _s[_i] == '$')) _i++; n = _s[s.._i]; return n.Length > 0; }
         public string ReadUntil(char c) { var s = _i; while (_i < _s.Length && _s[_i] != c) _i++; return _s[s.._i]; }
     }
