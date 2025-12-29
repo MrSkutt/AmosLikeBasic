@@ -71,48 +71,31 @@
     
         <!-- Main Workspace -->
         <Grid ColumnDefinitions="*, Auto">
-            <!-- Left side: Editor and Screen -->
-            <Grid Grid.Column="0">
-                <TabControl x:Name="MainTabs" BorderThickness="0" Padding="0">
-                    <TabItem Header="[ EDITOR ]" Foreground="#7FB2FF" FontWeight="Bold">
-                        <Grid RowDefinitions="*, 4, 150">
-                            <Grid Grid.Row="0" RowDefinitions="*, Auto">
-                                <TextBox Grid.Row="0" x:Name="Editor" Classes="amos-editor" AcceptsReturn="True" BorderThickness="0" Padding="10"/>
-                                <TextBlock Grid.Row="1" Name="CursorPosText" 
-                                           Text="Line: 1, Col: 1" 
-                                           Foreground="#7FB2FF" 
-                                           Padding="10,2" 
-                                           Background="#06206F" 
-                                           FontSize="12"
-                                           FontFamily="Courier New"/>
-                            </Grid>
-                            <GridSplitter Grid.Row="1" Background="#7FB2FF" ResizeDirection="Rows" HorizontalAlignment="Stretch"/>
-                            <Border Grid.Row="2" Background="#000A26" BorderBrush="#7FB2FF" BorderThickness="0,2,0,0">
-                                <TextBox x:Name="LogBox" 
-                                         Foreground="#7FB2FF"
-                                         Background="Transparent"
-                                         IsReadOnly="True"
-                                         FontSize="12"
-                                         FontFamily="Courier New"
-                                         BorderThickness="0"/>
-                            </Border>
-                        </Grid>
-                    </TabItem>
-
-                    <TabItem Header="[ SCREEN ]" Foreground="#7FB2FF" FontWeight="Bold">
-                        <Grid Background="Black" ClipToBounds="True">
-                            <Viewbox Stretch="Uniform">
-                                <Grid Width="640" Height="480" Background="Black">
-                                    <Image x:Name="ScreenImage" Focusable="True" Stretch="Fill" RenderOptions.BitmapInterpolationMode="None"/>
-                                    <TextBox x:Name="Console" Classes="amos-console" Background="Transparent" Foreground="White" IsHitTestVisible="False" IsReadOnly="True" BorderThickness="0" Margin="0" Padding="0" VerticalAlignment="Stretch" HorizontalAlignment="Stretch"/>
-                                </Grid>
-                            </Viewbox>
-                        </Grid>
-                    </TabItem>
-                </TabControl>
+            <!-- Left side: Editor -->
+            <Grid Grid.Column="0" RowDefinitions="*, 4, 150">
+                <Grid Grid.Row="0" RowDefinitions="*, Auto">
+                    <TextBox Grid.Row="0" x:Name="Editor" Classes="amos-editor" AcceptsReturn="True" BorderThickness="0" Padding="10"/>
+                    <TextBlock Grid.Row="1" Name="CursorPosText" 
+                               Text="Line: 1, Col: 1" 
+                               Foreground="#7FB2FF" 
+                               Padding="10,2" 
+                               Background="#06206F" 
+                               FontSize="12"
+                               FontFamily="Courier New"/>
+                </Grid>
+                <GridSplitter Grid.Row="1" Background="#7FB2FF" ResizeDirection="Rows" HorizontalAlignment="Stretch"/>
+                <Border Grid.Row="2" Background="#000A26" BorderBrush="#7FB2FF" BorderThickness="0,2,0,0">
+                    <TextBox x:Name="LogBox" 
+                             Foreground="#7FB2FF"
+                             Background="Transparent"
+                             IsReadOnly="True"
+                             FontSize="12"
+                             FontFamily="Courier New"
+                             BorderThickness="0"/>
+                </Border>
             </Grid>
 
-            <!-- Right side: Variable Watch (Toggled with F9) -->
+            <!-- Right side: Variable Watch -->
             <Border Name="VariableWatchPanel" Grid.Column="1" Width="250" Background="#00134D" BorderBrush="#7FB2FF" BorderThickness="2,0,0,0">
                 <DockPanel>
                     <Border DockPanel.Dock="Top" Background="#06206F" Padding="5">
@@ -138,11 +121,6 @@
                     </ListBox>
                 </DockPanel>
             </Border>
-
-            <!-- Fullscreen should cover everything including the Variable Watch -->
-            <Panel Name="FullScreenOverlay" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" Background="Black">
-                <Image Name="FullScreenImage" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
-            </Panel>
         </Grid>
     </DockPanel>
 </Window>

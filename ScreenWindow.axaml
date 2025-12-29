@@ -1,0 +1,30 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AmosLikeBasic.ScreenWindow"
+        Title="AMOS Screen"
+        Width="640" Height="480"
+        Background="Black"
+        WindowStartupLocation="CenterOwner">
+    <Grid Background="Black" ClipToBounds="True">
+        <Viewbox Stretch="Uniform">
+            <Grid Width="640" Height="480" Background="Black">
+                <Image Name="ScreenImage" 
+                       Focusable="True" 
+                       Stretch="Fill"
+                       RenderOptions.BitmapInterpolationMode="None"/>
+                
+                <TextBox Name="Console" 
+                         Classes="amos-console" 
+                         Background="Transparent" 
+                         Foreground="White"
+                         IsHitTestVisible="False"
+                         IsReadOnly="True"
+                         BorderThickness="0"
+                         Margin="0"
+                         Padding="0"
+                         VerticalAlignment="Stretch"
+                         HorizontalAlignment="Stretch"/>
+            </Grid>
+        </Viewbox>
+    </Grid>
+</Window>
