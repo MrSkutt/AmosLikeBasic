@@ -10,7 +10,19 @@ namespace AmosLikeBasic;
 
 public static class AmosRunner
 {
-    private sealed class ForFrame { public required string VarName; public required int EndValue; public required int StepValue; public required int LineAfterForPc; public required int ForLineNumber; }
+    private sealed class ForFrame
+    {
+        public required string VarName; 
+        public required int EndValue; 
+        public required int StepValue; 
+        public required int LineAfterForPc; 
+        public required int ForLineNumber;
+    }
+    private sealed class WhileFrame
+    {
+        public required int WhilePc;        // Raden med WHILE
+        public required int WendPc;         // Matchande WEND
+    }
     private static readonly Random _rng = new();
     private static IntPtr _currentXmpContext = IntPtr.Zero;
 
@@ -27,6 +39,7 @@ public static class AmosRunner
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
         var forStack = new Stack<ForFrame>();
+        var whileStack = new Stack<WhileFrame>();
         var gosubStack = new Stack<int>();
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         
@@ -34,6 +47,10 @@ public static class AmosRunner
         var ifJumps = new Dictionary<int, int>(); // PC -> PC (Vart IF hoppar om falskt)
         var elseJumps = new Dictionary<int, int>(); // PC -> PC (Vart ELSE hoppar för att skippa till ENDIF)
         var controlStack = new Stack<int>();
+  
+        var whileMap = new Dictionary<int, int>(); // WHILE pc -> WEND pc
+        var wendMap  = new Dictionary<int, int>(); // WEND pc  -> WHILE pc
+        var whileScanStack = new Stack<int>();
         
         // Pre-scan: Labels OCH IF/ELSE/ENDIF logik
         for (int i = 0; i < lines.Length; i++) {
@@ -44,7 +61,23 @@ public static class AmosRunner
             var firstWord = rawLine.Split(' ')[0];
             if (int.TryParse(firstWord, out _)) labels[firstWord] = i;
             if (rawLine.EndsWith(':')) labels[rawLine.TrimEnd(':').Trim()] = i;
+            
+            // WHILE/WEND
+            var scanLine = StripLeadingLineNumber(StripComments(rawLine)).ToUpperInvariant();
+            if (scanLine.StartsWith("WHILE "))
+            {
+                whileScanStack.Push(i);
+            }
+            else if (scanLine == "WEND")
+            {
+                if (whileScanStack.Count == 0)
+                    throw new Exception($"WEND without WHILE at line {i + 1}");
 
+                var whilePc = whileScanStack.Pop();
+                whileMap[whilePc] = i;
+                wendMap[i] = whilePc;
+            }
+            
             // IF/ELSE/ENDIF Mapping
             var lineForScan = StripLeadingLineNumber(StripComments(rawLine)).ToUpperInvariant();
             if (lineForScan.StartsWith("IF ") && !lineForScan.Contains("THEN")) {
@@ -221,6 +254,59 @@ public static class AmosRunner
                             forStack.Pop(); 
                         }
                         break;
+                    case "WHILE":
+                    {
+                        bool conditionw = EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics);
+
+                        if (!conditionw)
+                        {
+                            // Hoppa direkt till raden efter WEND
+                            if (!whileMap.TryGetValue(pc, out var wendPc))
+                                throw new Exception($"WHILE without WEND at line {ln}");
+
+                            pc = wendPc + 1;
+                            jumpHappened = true;
+                        }
+                        else
+                        {
+                            // Villkoret sant → fortsätt, men kom ihåg loopen
+                            if (!whileMap.TryGetValue(pc, out var wpc))
+                                throw new Exception($"WHILE without WEND at line {ln}");
+
+                            whileStack.Push(new WhileFrame
+                            {
+                                WhilePc = pc,
+                                WendPc = wpc
+                            });
+                        }
+                        break;
+                    }
+                    case "WEND":
+                    {
+                        if (whileStack.Count == 0)
+                            throw new Exception($"WEND without WHILE at line {ln}");
+
+                        var frame = whileStack.Peek();
+
+                        // Utvärdera villkoret igen
+                        var whileLine = StripLeadingLineNumber(
+                            StripComments(lines[frame.WhilePc])
+                        );
+
+                        var conditionText = whileLine.Substring(5).Trim(); // efter "WHILE"
+
+                        if (EvalCondition(conditionText, vars, ln, getInkey, isKeyDown, graphics))
+                        {
+                            pc = frame.WhilePc;
+                            jumpHappened = true;
+                        }
+                        else
+                        {
+                            // Klart → lämna loopen
+                            whileStack.Pop();
+                        }
+                        break;
+                    }
                     case "SCREEN":
                         var screenArgs = SplitCsvOrSpaces(arg);
                         if (screenArgs.Count > 0 && screenArgs[0].Equals("SELECT", StringComparison.OrdinalIgnoreCase)) {
@@ -238,7 +324,17 @@ public static class AmosRunner
                             if (parts.Length >= 2) graphics.Scroll(0, EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics));
                         }
                         break;
-                    case "CLSG": graphics.Clear(Colors.Black); onGraphicsChanged(); break;
+                    case "CLSG": 
+                        var x = graphics.GetActiveScreenNumber();
+                        if (!string.IsNullOrWhiteSpace(arg))
+                        {
+                            // Om ett argument skickades med, välj det lagret först
+                            graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
+                        }
+                        graphics.Clear(Colors.Black); 
+                        graphics.SetDrawingScreen(x);
+                        onGraphicsChanged(); 
+                        break;
                     case "LOAD": graphics.LoadBackground(Unquote(arg)); onGraphicsChanged(); break;
                     case "INK": graphics.Ink = ParseColor(arg); break;
                     case "INC":

@@ -90,7 +90,12 @@ public sealed class AmosGraphics
         if (_screens.Count <= _currentScreen) SetDrawingScreen(_currentScreen);
         return _screens[_currentScreen];
     }
-
+    
+    public int GetActiveScreenNumber()
+    {
+        return _currentScreen;
+    }
+    
     // ---------------- Project Export/Import ----------------
 
     public sealed record ProjectFile(
@@ -233,7 +238,7 @@ public sealed class AmosGraphics
     private WriteableBitmap CreateEmptyBitmap(int w, int h) => new WriteableBitmap(new PixelSize(w, h),
         new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
 
-    public void Clear(Color color)
+    public void Clear_old(Color color)
     {
         EnsureScreen();
         ClearBitmap(_bmp!, color);
@@ -242,7 +247,19 @@ public sealed class AmosGraphics
         _fontTexts.Clear(); 
         Refresh();
     }
-
+    
+    public void Clear(Color color)
+    {
+        EnsureScreen();
+        // Rensa bara den nuvarande aktiva skärmen/lagret
+        ClearBitmap(GetActiveScreen(), color);
+            
+        // Om det är lager 0 vi rensar, kan vi även nollställa texter
+        if (_currentScreen == 0) _fontTexts.Clear(); 
+            
+        Refresh();
+    }
+    
     private void ClearBitmap(WriteableBitmap bmp, Color c)
     {
         using var fb = bmp.Lock();
