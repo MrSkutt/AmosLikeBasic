@@ -20,9 +20,19 @@ public static class AmosRunner
     }
     private sealed class WhileFrame
     {
-        public required int WhilePc;        // Raden med WHILE
-        public required int WendPc;         // Matchande WEND
+        public required int WhilePc;     // Program counter för WHILE-raden
+        public int WendPc;                // Program counter för WEND (fylls senare)
+        public required int Line;         // Källrad (för felmeddelanden)
+        public required string Condition; // WHILE-villkoret
     }
+
+    private sealed class RepeatFrame
+    {
+        public int RepeatPc;
+        public int UntilPc;   // <-- ny
+        public int RepeatLine;
+    }
+
     private static readonly Random _rng = new();
     private static IntPtr _currentXmpContext = IntPtr.Zero;
 
@@ -40,6 +50,8 @@ public static class AmosRunner
 
         var forStack = new Stack<ForFrame>();
         var whileStack = new Stack<WhileFrame>();
+        var repeatStack = new Stack<RepeatFrame>();
+
         var gosubStack = new Stack<int>();
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         
@@ -276,7 +288,9 @@ public static class AmosRunner
                             whileStack.Push(new WhileFrame
                             {
                                 WhilePc = pc,
-                                WendPc = wpc
+                                WendPc = whileMap[pc],
+                                Line = ln,
+                                Condition = arg
                             });
                         }
                         break;
@@ -307,6 +321,89 @@ public static class AmosRunner
                         }
                         break;
                     }
+                    case "REPEAT":
+                    {
+                        // Lägg till repeat frame utan UNTILPc
+                        repeatStack.Push(new RepeatFrame
+                        {
+                            RepeatPc = pc,
+                            RepeatLine = ln,
+                            UntilPc = 0 // sätts senare när vi hittar UNTIL
+                        });
+                        break;
+                    }
+
+                    case "UNTIL":
+                    {
+                        if (repeatStack.Count == 0)
+                            throw new Exception($"UNTIL without REPEAT at line {ln}");
+
+                        var rf = repeatStack.Peek();
+
+                        // Spara UNTILPc om det inte redan finns
+                        if (rf.UntilPc == 0)
+                            rf.UntilPc = pc;
+
+                        if (EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics))
+                        {
+                            // Villkor sant → avsluta loop
+                            repeatStack.Pop();
+                        }
+                        else
+                        {
+                            // Villkor falskt → hoppa tillbaka till REPEAT
+                            pc = rf.RepeatPc;
+                            jumpHappened = true;
+                        }
+                        break;
+                    }
+
+                    case "EXIT":
+                    {
+                        var what = arg.ToUpperInvariant();
+
+                        if (what == "REPEAT")
+                        {
+                            if (repeatStack.Count == 0)
+                                throw new Exception($"EXIT REPEAT without REPEAT at line {ln}");
+
+                            var rf = repeatStack.Pop();
+
+                            // Om UNTILPc inte är satt, skanna programmet framåt
+                            if (rf.UntilPc == 0)
+                            {
+                                int searchPc = rf.RepeatPc + 1;
+                                while (searchPc < lines.Length)
+                                {
+                                    var lSearch = StripComments(StripLeadingLineNumber(lines[searchPc])).Trim().ToUpperInvariant();
+                                    if (lSearch.StartsWith("UNTIL "))
+                                    {
+                                        rf.UntilPc = searchPc;
+                                        break;
+                                    }
+                                    searchPc++;
+                                }
+                                if (rf.UntilPc == 0)
+                                    throw new Exception($"EXIT REPEAT before matching UNTIL at line {ln}");
+                            }
+
+                            pc = rf.UntilPc + 1;
+                            jumpHappened = true;
+                        }
+                        else if (what == "WHILE")
+                        {
+                            // Befintlig WHILE-logik
+                            if (whileStack.Count == 0)
+                                throw new Exception($"EXIT WHILE without WHILE at line {ln}");
+                            var wf = whileStack.Pop();
+                            if (wf.WendPc == 0)
+                                throw new Exception($"EXIT WHILE before matching WEND at line {ln}");
+                            pc = wf.WendPc + 1;
+                            jumpHappened = true;
+                        }
+                        break;
+                    }
+
                     case "SCREEN":
                         var screenArgs = SplitCsvOrSpaces(arg);
                         if (screenArgs.Count > 0 && screenArgs[0].Equals("SELECT", StringComparison.OrdinalIgnoreCase)) {
@@ -556,6 +653,14 @@ public static class AmosRunner
     }
         private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
         {
+            c = c.Trim();
+
+            // NOT (hög prioritet)
+            if (c.StartsWith("NOT ", StringComparison.OrdinalIgnoreCase))
+            {
+                return !EvalCondition(c.Substring(4).Trim(), v, ln, gk, ikd, g);
+            }
+            
             // 1. Hantera OR (Lägst prioritet, kollas först)
             var orIdx = IndexOfWord(c, " OR ");
             if (orIdx >= 0) {
