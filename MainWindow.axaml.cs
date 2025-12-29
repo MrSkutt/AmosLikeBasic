@@ -17,6 +17,8 @@ namespace AmosLikeBasic;
 public partial class MainWindow : Window
 {
     private CancellationTokenSource? _runCts;
+    private TaskCompletionSource<bool>? _stepSignal; // Signalen för stepping
+    private bool _isPaused = false;
     private readonly AmosGraphics _gfx = new();
     private AudioEngine? _audioEngine = new(); 
     
@@ -98,6 +100,13 @@ public partial class MainWindow : Window
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.F5) { RunButton_OnClick(null, new RoutedEventArgs()); e.Handled = true; return; }
+
+        if (e.Key == Key.F9)
+        {
+            VariableWatchPanel.IsVisible = !VariableWatchPanel.IsVisible;
+            e.Handled = true;
+            return;
+        }
         if (e.Key == Key.Escape) 
         { 
             // 1. Stoppa programmet
@@ -139,6 +148,9 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
         }
+        _isPaused = false;
+        StatusText.Text = "Status: RUNNING";
+        CurrentLineText.Text = "Line: -";
     }
 
     private void MainWindow_OnKeyUp(object? sender, KeyEventArgs e)
@@ -455,6 +467,12 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
     private async void RunButton_OnClick(object? sender, RoutedEventArgs e)
     {
         // 1. Förbered UI
+        _isPaused = false;
+        PauseButton.Content = "[ PAUSE ]";
+        PauseButton.IsEnabled = true;
+        StepButton.IsEnabled = false;
+        RunButton.IsEnabled = false;
+        StopButton.IsEnabled = true;
         MainTabs.SelectedIndex = 1;
         ScreenImage.Focus();
         
@@ -488,7 +506,6 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
                     onGraphicsChanged: () => {
                         Dispatcher.UIThread.InvokeAsync(() => {
                             ScreenImage.Source = _gfx.Bitmap;
-                            // Uppdatera även fullskärmsbilden om den syns
                             if (FullScreenOverlay.IsVisible) {
                                 FullScreenImage.Source = _gfx.Bitmap;
                             }
@@ -499,7 +516,48 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
                     getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
                     isKeyDown: (k) => _pressedKeys.Contains(k),
                     audioEngine: _audioEngine,
-                    token: token);
+                    token: token,
+                    onVariablesChanged: (vars) => {
+                        Dispatcher.UIThread.Post(() => {
+                            VariableListBox.ItemsSource = vars.OrderBy(v => v.Key).ToList();
+                        });
+                    },
+                    waitForStep: async (pc) => {
+                        int currentLine = pc + 1;
+
+                        if (_isPaused)
+                        {
+                            Dispatcher.UIThread.Post(() => {
+                                StatusText.Text = "Status: PAUSED";
+                                CurrentLineText.Text = $"Line: {currentLine}";
+
+                                if (Editor.Text != null)
+                                {
+                                    var textLines = Editor.Text.Replace("\r\n", "\n").Split('\n');
+                                    int charIndex = 0;
+                                    for (int i = 0; i < pc && i < textLines.Length; i++)
+                                    {
+                                        charIndex += textLines[i].Length + 1;
+                                    }
+
+                                    // Växla till EDITOR-fliken så vi faktiskt ser markeringen
+                                    MainTabs.SelectedIndex = 0;
+
+                                    // Markera hela raden
+                                    int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
+                                    Editor.SelectionStart = charIndex;
+                                    Editor.SelectionEnd = charIndex + lineLength;
+                                    Editor.CaretIndex = charIndex; // Sätt även caret i början av raden
+
+                                    // Tvinga fokus så markeringen syns (blir blå/markerad)
+                                    Editor.Focus();
+                                }
+                            });
+
+                            _stepSignal = new TaskCompletionSource<bool>();
+                            await _stepSignal.Task;
+                        }
+                    });
             }, token);
 
             await AppendConsoleLineAsync("OK");
@@ -524,12 +582,29 @@ private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
         }
     }
 
+    private void PauseButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        _isPaused = !_isPaused;
+        PauseButton.Content = _isPaused ? "[ RESUME ]" : "[ PAUSE ]";
+        StepButton.IsEnabled = _isPaused;
+            
+        if (!_isPaused) _stepSignal?.TrySetResult(true); // Släpp lös runnern om vi kör RESUME
+    }
+
+    private void StepButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        _stepSignal?.TrySetResult(true); // Släpp igenom exakt EN rad
+    }
+
     private void StopButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        _isPaused = false;
+        _stepSignal?.TrySetResult(false); // Avbryt eventuell väntan
         MainTabs.SelectedIndex = 0;
         _runCts?.Cancel();
         _audioEngine?.StopMod();
-        
+        PauseButton.IsEnabled = false;
+        StepButton.IsEnabled = false;
     }
 
 

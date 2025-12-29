@@ -44,10 +44,25 @@ public static class AmosRunner
         public AmosArray(int size) { Data = new double[size + 1]; } // +1 för att AMOS ofta tillåter index upp till storleken
     }
     
-    public static async Task ExecuteAsync(string programText, Func<string, Task> appendLineAsync, Func<Task> clearAsync, AmosGraphics graphics, Action onGraphicsChanged, Func<string> getInkey, Func<string, bool> isKeyDown, AudioEngine? audioEngine, CancellationToken token)
+    public static async Task ExecuteAsync(
+        string programText, 
+        Func<string, Task> appendLineAsync, 
+        Func<Task> clearAsync, 
+        AmosGraphics graphics, 
+        Action onGraphicsChanged, 
+        Func<string> getInkey, 
+        Func<string, bool> isKeyDown, 
+        AudioEngine? audioEngine, 
+        CancellationToken token,
+        Action<Dictionary<string, object>> onVariablesChanged,
+        Func<int, Task> waitForStep) // <-- NY PARAMETER: skickar PC, väntar på signal
     {
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-
+        // En lokal hjälpfunktion för att uppdatera variabler och trigga UI
+        var setVar = (string name, object value) => {
+            vars[name] = value;
+            onVariablesChanged(new Dictionary<string, object>(vars)); // Skicka en kopia
+        };
         var forStack = new Stack<ForFrame>();
         var whileStack = new Stack<WhileFrame>();
         var repeatStack = new Stack<RepeatFrame>();
@@ -58,64 +73,76 @@ public static class AmosRunner
         var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var ifJumps = new Dictionary<int, int>(); // PC -> PC (Vart IF hoppar om falskt)
         var elseJumps = new Dictionary<int, int>(); // PC -> PC (Vart ELSE hoppar för att skippa till ENDIF)
-        var controlStack = new Stack<int>();
-  
+            
         var whileMap = new Dictionary<int, int>(); // WHILE pc -> WEND pc
         var wendMap  = new Dictionary<int, int>(); // WEND pc  -> WHILE pc
         var whileScanStack = new Stack<int>();
+        var ifStack = new Stack<int>();
         
-        // Pre-scan: Labels OCH IF/ELSE/ENDIF logik
-        for (int i = 0; i < lines.Length; i++) {
-            var rawLine = lines[i].Trim();
-            if (string.IsNullOrWhiteSpace(rawLine)) continue;
+            // Pre-scan: Labels, WHILE/WEND OCH IF/ELSE/ENDIF logik
+            for (int i = 0; i < lines.Length; i++) {
+                var rawLine = lines[i].Trim();
+                if (string.IsNullOrWhiteSpace(rawLine)) continue;
                 
-            // Labels
-            var firstWord = rawLine.Split(' ')[0];
-            if (int.TryParse(firstWord, out _)) labels[firstWord] = i;
-            if (rawLine.EndsWith(':')) labels[rawLine.TrimEnd(':').Trim()] = i;
+                // Labels
+                var firstWord = rawLine.Split(' ')[0];
+                if (int.TryParse(firstWord, out _)) labels[firstWord] = i;
+                if (rawLine.EndsWith(':')) labels[rawLine.TrimEnd(':').Trim()] = i;
             
-            // WHILE/WEND
-            var scanLine = StripLeadingLineNumber(StripComments(rawLine)).ToUpperInvariant();
-            if (scanLine.StartsWith("WHILE "))
-            {
-                whileScanStack.Push(i);
-            }
-            else if (scanLine == "WEND")
-            {
-                if (whileScanStack.Count == 0)
-                    throw new Exception($"WEND without WHILE at line {i + 1}");
+                // WHILE/WEND scan
+                var scanLine = StripLeadingLineNumber(StripComments(rawLine)).Trim();
+                var upperScan = scanLine.ToUpperInvariant();
 
-                var whilePc = whileScanStack.Pop();
-                whileMap[whilePc] = i;
-                wendMap[i] = whilePc;
-            }
-            
-            // IF/ELSE/ENDIF Mapping
-            var lineForScan = StripLeadingLineNumber(StripComments(rawLine)).ToUpperInvariant();
-            if (lineForScan.StartsWith("IF ") && !lineForScan.Contains("THEN")) {
-                controlStack.Push(i);
-            } else if (lineForScan == "ELSE") {
-                if (controlStack.Count > 0) {
-                    int ifPc = controlStack.Pop();
-                    ifJumps[ifPc] = i + 1; // IF hoppar till raden EFTER ELSE om falskt
-                    controlStack.Push(i);  // ELSE väntar på ENDIF
+                if (upperScan.StartsWith("WHILE "))
+                {
+                    whileScanStack.Push(i);
                 }
-            } else if (lineForScan == "ENDIF") {
-                if (controlStack.Count > 0) {
-                    int sourcePc = controlStack.Pop();
-                    var sourceLine = StripLeadingLineNumber(StripComments(lines[sourcePc].Trim())).ToUpperInvariant();
-                    if (sourceLine.StartsWith("IF ")) {
-                        ifJumps[sourcePc] = i + 1; // IF utan ELSE hoppar till raden EFTER ENDIF
-                    } else {
-                        elseJumps[sourcePc] = i + 1; // ELSE hoppar till raden EFTER ENDIF
+                else if (upperScan == "WEND")
+                {
+                    if (whileScanStack.Count == 0)
+                        throw new Exception($"WEND without WHILE at line {i + 1}");
+
+                    var whilePc = whileScanStack.Pop();
+                    whileMap[whilePc] = i;
+                    wendMap[i] = whilePc;
+                }
+            
+                // IF/ELSE/ENDIF Mapping
+                if (upperScan.StartsWith("IF "))
+                {
+                    int thenIdx = upperScan.IndexOf("THEN");
+                    if (thenIdx >= 0)
+                    {
+                        var afterThen = scanLine[(thenIdx + 4)..].Trim();
+                        if (!string.IsNullOrEmpty(afterThen)) continue; // Inline-IF, ignorera i stacken
                     }
+                    ifStack.Push(i);
+                }
+                else if (upperScan == "ELSE")
+                {
+                    if (ifStack.Count == 0) throw new Exception($"ELSE without IF at line {i + 1}");
+                    var ifPc = ifStack.Pop();
+                    ifJumps[ifPc] = i + 1; 
+                    ifStack.Push(i); 
+                }
+                else if (upperScan == "ENDIF")
+                {
+                    if (ifStack.Count == 0) throw new Exception($"ENDIF without IF at line {i + 1}");
+                    var sourcePc = ifStack.Pop();
+                    if (StripLeadingLineNumber(StripComments(lines[sourcePc])).Trim().ToUpperInvariant() == "ELSE")
+                        elseJumps[sourcePc] = i + 1;
+                    else
+                        ifJumps[sourcePc] = i + 1;
                 }
             }
-        }
 
-        int pc = 0;
+            if (ifStack.Count > 0)
+                throw new Exception("IF without ENDIF detected at end of program");
+
+            int pc = 0;
         while (pc < lines.Length) {
             token.ThrowIfCancellationRequested();
+            await waitForStep(pc);
             var ln = pc + 1; 
             var line = StripComments((lines[pc] ?? "").Trim());
             if (string.IsNullOrWhiteSpace(line) || line.EndsWith(':')) { pc++; continue; }
@@ -161,7 +188,7 @@ public static class AmosRunner
                         break;
                     case "LET": 
                         var (n, vt) = SplitAssignment(arg); 
-                        vars[n] = EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics); 
+                        setVar(n, EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics)); 
                         break;
                     case "DIM":
                         // Enkel parsing av DIM A(10)
@@ -179,62 +206,66 @@ public static class AmosRunner
                             await Task.Delay(16, token);
                         } else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics)), token);
                         break;
-                        case "IF":
-                            var tIdx = IndexOfWord(arg, "THEN");
-                            string condition;
-                            string? remainingCmds = null;
+                    case "IF":
+                    {
+                        int tIdx = IndexOfWord(arg, "THEN");
+                        string condition;
+                        string? inlineCmd = null;
 
-                            if (tIdx >= 0) {
-                                condition = arg[..tIdx].Trim();
-                                var thenContent = arg[(tIdx + 4)..].Trim();
-                                if (!string.IsNullOrEmpty(thenContent)) {
-                                    remainingCmds = thenContent;
-                                    var currentIdx = commands.IndexOf(fullCmd);
-                                    if (currentIdx < commands.Count - 1) {
-                                        remainingCmds += " : " + string.Join(" : ", commands.Skip(currentIdx + 1));
+                        if (tIdx >= 0)
+                        {
+                            condition = arg[..tIdx].Trim();
+                            var thenContent = arg[(tIdx + 4)..].Trim();
+                            if (!string.IsNullOrEmpty(thenContent)) inlineCmd = thenContent;
+                        }
+                        else condition = arg;
+
+                        bool cond = EvalCondition(condition, vars, ln, getInkey, isKeyDown, graphics);
+
+                        if (inlineCmd != null)
+                        {
+                            if (cond)
+                            {
+                                var cmds = SplitMultipleCommands(inlineCmd);
+                                foreach (var c in cmds)
+                                {
+                                    var (cmd2, arg2) = SplitCommand(c);
+                                    // Vi kollar om kommandot returnerar en ny PC (t.ex. vid EXIT)
+                                    var (isJump, jumpPc) = await ExecuteInlineStatementAsync(cmd2, arg2, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, audioEngine, token, ln, repeatStack, whileStack, lines);
+                                    if (isJump)
+                                    {
+                                        pc = jumpPc;
+                                        jumpHappened = true;
+                                        break;
                                     }
                                 }
-                            } else {
-                                condition = arg;
                             }
-
-                            if (EvalCondition(condition, vars, ln, getInkey, isKeyDown, graphics)) {
-                                if (remainingCmds != null) {
-                                    var thenCmds = SplitMultipleCommands(remainingCmds);
-                                    foreach (var tc in thenCmds) {
-                                        var (tc_cmd, tc_arg) = SplitCommand(tc);
-                                        // Här skickar vi med audioEngine (parameter nummer 10)
-                                        if (await ExecuteSingleStatementAsync(tc_cmd, tc_arg, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, audioEngine, token, ln)) { 
-                                            jumpHappened = true; break; 
-                                        }
-                                    }
-                                    jumpHappened = true; 
-                                    if (ifJumps.TryGetValue(pc, out var target)) pc = target; 
-                                    else pc++;
-                                }
-                                // Om sant och multi-line: fortsätt bara till nästa rad
-                            } else {
-                                if (remainingCmds != null) {
-                                    jumpHappened = true; 
-                                    if (ifJumps.TryGetValue(pc, out var target)) pc = target; 
-                                    else pc++;
-                                } else if (ifJumps.TryGetValue(pc, out var target)) {
+                        }
+                        else
+                        {
+                                if (!cond)
+                                {
+                                    if (!ifJumps.TryGetValue(pc, out var target))
+                                        throw new Exception($"ENDIF not found for IF at line {ln}");
                                     pc = target;
                                     jumpHappened = true;
-                                } else {
-                                    goto next_line;
                                 }
                             }
                             break;
-                        case "ELSE":
-                            if (elseJumps.TryGetValue(pc, out var eTarget)) {
-                                pc = eTarget;
-                                jumpHappened = true;
-                            }
-                            break;
-                    case "ENDIF":
-                        // Bara en markör, gå till nästa rad
+                        }
+                    case "ELSE":
+                    {
+                        if (!elseJumps.TryGetValue(pc, out var target))
+                            throw new Exception($"ENDIF not found for ELSE at line {ln}");
+                        pc = target;
+                        jumpHappened = true;
                         break;
+                    }
+                    case "ENDIF":
+                    {
+                        // Bara markör, gå vidare
+                        break;
+                    }
                     case "FOR":
                         var eq = arg.IndexOf('='); 
                         if (eq < 0) throw new Exception($"Syntax Error in FOR: Missing '=' at line {ln}");
@@ -435,10 +466,10 @@ public static class AmosRunner
                     case "LOAD": graphics.LoadBackground(Unquote(arg)); onGraphicsChanged(); break;
                     case "INK": graphics.Ink = ParseColor(arg); break;
                     case "INC":
-                        vars[arg] = GetDoubleVar(arg, vars, ln) + 1.0;
+                        setVar(arg, GetDoubleVar(arg, vars, ln) + 1.0);
                         break;
                     case "DEC":
-                        vars[arg] = GetDoubleVar(arg, vars, ln) - 1.0;
+                        setVar(arg, GetDoubleVar(arg, vars, ln) - 1.0);
                         break;
                     case "PLOT": 
                         var pP = SplitCsvOrSpaces(arg); 
@@ -596,7 +627,37 @@ public static class AmosRunner
         }
         res.Add(l[s..].Trim()); return res;
     }
+    private static async Task<(bool isJump, int jumpPc)> ExecuteInlineStatementAsync(string cmd, string arg, Dictionary<string, object> vars, Func<string, Task> al, Func<Task> cl, AmosGraphics g, Action og, Func<string> gk, Func<string, bool> ikd, AudioEngine? audioEngine, CancellationToken t, int ln, Stack<RepeatFrame> repeatStack, Stack<WhileFrame> whileStack, string[] lines)
+    {
+        if (cmd == "EXIT")
+        {
+            var what = arg.ToUpperInvariant();
+            if (what == "REPEAT")
+            {
+                if (repeatStack.Count == 0) throw new Exception($"EXIT REPEAT without REPEAT at line {ln}");
+                var rf = repeatStack.Pop();
+                if (rf.UntilPc == 0)
+                {
+                    // Enkel sökning framåt efter UNTIL om den inte är mappad
+                    for (int i = rf.RepeatPc; i < lines.Length; i++) {
+                        if (StripComments(lines[i]).Trim().ToUpperInvariant().StartsWith("UNTIL ")) { rf.UntilPc = i; break; }
+                    }
+                }
+                return (true, rf.UntilPc + 1);
+            }
+            if (what == "WHILE")
+            {
+                if (whileStack.Count == 0) throw new Exception($"EXIT WHILE without WHILE at line {ln}");
+                var wf = whileStack.Pop();
+                return (true, wf.WendPc + 1);
+            }
+        }
 
+        // För alla andra kommandon, kör den gamla logiken
+        await ExecuteSingleStatementAsync(cmd, arg, vars, al, cl, g, og, gk, ikd, audioEngine, t, ln);
+        return (false, 0);
+    }
+    
     private static async Task<bool> ExecuteSingleStatementAsync(string cmd, string arg, Dictionary<string, object> vars, Func<string, Task> al, Func<Task> cl, AmosGraphics g, Action og, Func<string> gk, Func<string, bool> ikd, AudioEngine? audioEngine, CancellationToken t, int ln)
     {
         // Om kommandot innehåller ett '=', är det förmodligen en tilldelning (t.ex. SX = SX + 8)

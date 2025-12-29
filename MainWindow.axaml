@@ -56,6 +56,8 @@
         <Border Name="ToolbarBorder" DockPanel.Dock="Top" Background="#0A2D8F" Padding="5" BorderBrush="#7FB2FF" BorderThickness="0,0,0,2">
             <StackPanel Orientation="Horizontal" Spacing="10">
                 <Button x:Name="RunButton" Classes="amos-button" Content="[ RUN ]" Background="#00CC00" Foreground="White" Click="RunButton_OnClick"/>
+                <Button x:Name="PauseButton" Classes="amos-button" Content="[ PAUSE ]" Background="#CC6600" Foreground="White" Click="PauseButton_OnClick" IsEnabled="False"/>
+                <Button x:Name="StepButton" Classes="amos-button" Content="[ STEP ]" Background="#0066CC" Foreground="White" Click="StepButton_OnClick" IsEnabled="False"/>
                 <Button x:Name="StopButton" Classes="amos-button" Content="[ STOP ]" Background="#CC0000" Foreground="White" Click="StopButton_OnClick" IsEnabled="False"/>
                 <Separator Background="#7FB2FF" Width="2"/>
                 <Button Classes="amos-button" Content="LOAD" Click="OpenProject_OnClick" Background="#0A2D8F" Foreground="White"/>
@@ -66,69 +68,80 @@
                 <Button Classes="amos-button" Content="CONSOLE" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White"/>
             </StackPanel>
         </Border>
-        
+    
         <!-- Main Workspace -->
-        <Grid>
-            <TabControl x:Name="MainTabs" BorderThickness="0" Padding="0">
-                <TabItem Header="[ EDITOR ]" Foreground="#7FB2FF" FontWeight="Bold">
-                    <Grid RowDefinitions="*, 4, 150">
-                        <!-- Vi använder en Grid här för att editorn ska fylla ut hela rad 0 -->
-                        <Grid Grid.Row="0" RowDefinitions="*, Auto">
-                            <TextBox Grid.Row="0" x:Name="Editor" Classes="amos-editor" AcceptsReturn="True" BorderThickness="0" Padding="10"/>
-                            <TextBlock Grid.Row="1" Name="CursorPosText" 
-                                       Text="Line: 1, Col: 1" 
-                                       Foreground="#7FB2FF" 
-                                       Padding="10,2" 
-                                       Background="#06206F" 
-                                       FontSize="12"
-                                       FontFamily="Courier New"/>
-                        </Grid>
-                        <GridSplitter Grid.Row="1" Background="#7FB2FF" ResizeDirection="Rows" HorizontalAlignment="Stretch"/>
-                                              
-                        <!-- Denna används för systemmeddelanden -->
-                        <Border Grid.Row="2" Background="#000A26" BorderBrush="#7FB2FF" BorderThickness="0,2,0,0">
-                            <TextBox x:Name="LogBox" 
-                                     Foreground="#7FB2FF"
-                                     Background="Transparent"
-                                     IsReadOnly="True"
-                                     FontSize="12"
-                                     FontFamily="Courier New"
-                                     BorderThickness="0"/>
-                        </Border>
-                    </Grid>
-                </TabItem>
-
-                <!-- Screen Tab -->
-                <TabItem Header="[ SCREEN ]" Foreground="#7FB2FF" FontWeight="Bold">
-                    <Grid Background="Black" ClipToBounds="True"> <!-- ClipToBounds tar bort spill -->
-                        <Viewbox Stretch="Uniform">
-                            <Grid Width="640" Height="480" Background="Black">
-                                <Image x:Name="ScreenImage" 
-                                       Focusable="True" 
-                                       Stretch="Fill"
-                                       RenderOptions.BitmapInterpolationMode="None"/>
-                                
-                                
-                                <!-- Denna används för BASIC PRINT-kommandon -->
-                                <TextBox x:Name="Console" 
-                                         Classes="amos-console" 
-                                         Background="Transparent" 
-                                         Foreground="White"
-                                         IsHitTestVisible="False"
-                                         IsReadOnly="True"
-                                         BorderThickness="0"
-                                         Margin="0"
-                                         Padding="0"
-                                         VerticalAlignment="Stretch"
-                                         HorizontalAlignment="Stretch"/>
+        <Grid ColumnDefinitions="*, Auto">
+            <!-- Left side: Editor and Screen -->
+            <Grid Grid.Column="0">
+                <TabControl x:Name="MainTabs" BorderThickness="0" Padding="0">
+                    <TabItem Header="[ EDITOR ]" Foreground="#7FB2FF" FontWeight="Bold">
+                        <Grid RowDefinitions="*, 4, 150">
+                            <Grid Grid.Row="0" RowDefinitions="*, Auto">
+                                <TextBox Grid.Row="0" x:Name="Editor" Classes="amos-editor" AcceptsReturn="True" BorderThickness="0" Padding="10"/>
+                                <TextBlock Grid.Row="1" Name="CursorPosText" 
+                                           Text="Line: 1, Col: 1" 
+                                           Foreground="#7FB2FF" 
+                                           Padding="10,2" 
+                                           Background="#06206F" 
+                                           FontSize="12"
+                                           FontFamily="Courier New"/>
                             </Grid>
-                        </Viewbox>
-                    </Grid>
-                </TabItem>
-            </TabControl>
-            <Panel Name="FullScreenOverlay" IsVisible="False" Background="Black">
+                            <GridSplitter Grid.Row="1" Background="#7FB2FF" ResizeDirection="Rows" HorizontalAlignment="Stretch"/>
+                            <Border Grid.Row="2" Background="#000A26" BorderBrush="#7FB2FF" BorderThickness="0,2,0,0">
+                                <TextBox x:Name="LogBox" 
+                                         Foreground="#7FB2FF"
+                                         Background="Transparent"
+                                         IsReadOnly="True"
+                                         FontSize="12"
+                                         FontFamily="Courier New"
+                                         BorderThickness="0"/>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
+                    <TabItem Header="[ SCREEN ]" Foreground="#7FB2FF" FontWeight="Bold">
+                        <Grid Background="Black" ClipToBounds="True">
+                            <Viewbox Stretch="Uniform">
+                                <Grid Width="640" Height="480" Background="Black">
+                                    <Image x:Name="ScreenImage" Focusable="True" Stretch="Fill" RenderOptions.BitmapInterpolationMode="None"/>
+                                    <TextBox x:Name="Console" Classes="amos-console" Background="Transparent" Foreground="White" IsHitTestVisible="False" IsReadOnly="True" BorderThickness="0" Margin="0" Padding="0" VerticalAlignment="Stretch" HorizontalAlignment="Stretch"/>
+                                </Grid>
+                            </Viewbox>
+                        </Grid>
+                    </TabItem>
+                </TabControl>
+            </Grid>
+
+            <!-- Right side: Variable Watch (Toggled with F9) -->
+            <Border Name="VariableWatchPanel" Grid.Column="1" Width="250" Background="#00134D" BorderBrush="#7FB2FF" BorderThickness="2,0,0,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Background="#06206F" Padding="5">
+                        <StackPanel>
+                            <TextBlock Text="VARIABLE WATCH [F9]" Foreground="Yellow" FontWeight="Bold"/>
+                            <TextBlock Name="StatusText" Text="Status: Idle" Foreground="#7FB2FF" FontSize="11" Margin="0,5,0,0"/>
+                            <TextBlock Name="CurrentLineText" Text="Line: -" Foreground="Lime" FontWeight="Bold" FontSize="14" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <ListBox Name="VariableListBox" 
+                             Background="Transparent" 
+                             Foreground="#7FB2FF"
+                             FontFamily="Courier New"
+                             FontSize="12">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:CompileBindings="False">
+                                <Grid ColumnDefinitions="*, Auto">
+                                    <TextBlock Text="{Binding Key}" FontWeight="Bold"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Value}" Foreground="White" Margin="10,0,0,0"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+
+            <!-- Fullscreen should cover everything including the Variable Watch -->
+            <Panel Name="FullScreenOverlay" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False" Background="Black">
                 <Image Name="FullScreenImage" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="None"/>
-                <!-- Om du vill ha konsolen i fullskärm också kan du lägga en kopia här -->
             </Panel>
         </Grid>
     </DockPanel>
