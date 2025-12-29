@@ -2,12 +2,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="AmosLikeBasic.ScreenWindow"
         Title="AMOS Screen"
-        Width="640" Height="480"
+        Width="1280" Height="960"
         Background="Black"
         WindowStartupLocation="CenterOwner">
     <Grid Background="Black" ClipToBounds="True">
         <Viewbox Stretch="Uniform">
-            <Grid Width="640" Height="480" Background="Black">
+            <Grid Width="1280" Height="960" Background="Black">
                 <Image Name="ScreenImage" 
                        Focusable="True" 
                        Stretch="Fill"

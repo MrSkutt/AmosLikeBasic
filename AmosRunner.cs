@@ -278,14 +278,14 @@ public static class AmosRunner
                         var stIdx = IndexOfWord(rest, "STEP");
                         var end = EvalInt(stIdx < 0 ? rest : rest[..stIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics);
                         var step = stIdx < 0 ? 1 : EvalInt(rest[(stIdx + 4)..].Trim(), vars, ln, getInkey, isKeyDown, graphics);
-                        vars[fV] = start; 
+                        setVar(fV, start); 
                         forStack.Push(new ForFrame { VarName = fV, EndValue = end, StepValue = step, LineAfterForPc = pc + 1, ForLineNumber = ln });
                         break;
                     case "NEXT":
                         if (forStack.Count == 0) break;
                         var f = forStack.Peek(); 
                         var cur = GetDoubleVar(f.VarName, vars, ln) + f.StepValue; 
-                        vars[f.VarName] = cur;
+                        setVar(f.VarName, cur);
                             
                         // Lägg till en liten marginal (0.000001) för att undvika att flyttalsfel kör loopen en gång för mycket
                         bool loopDone = f.StepValue > 0 ? cur > (f.EndValue + 0.000001) : cur < (f.EndValue - 0.000001);
@@ -603,7 +603,7 @@ public static class AmosRunner
                                         }
                                     } else {
                                         // Vanlig variabel
-                                        vars[leftSide] = rightValue;
+                                        setVar(leftSide, rightValue);
                                     }
                                 } else {
                                     throw new Exception($"Syntax Error: '{cmd}' at line {ln}");

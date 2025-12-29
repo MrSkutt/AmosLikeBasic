@@ -24,7 +24,7 @@
                 <MenuItem Header="Paste"/>
             </MenuItem>
             <MenuItem Header="_View">
-                <MenuItem Header="Toggle Fullscreen (F11)" Click="ToggleFullscreen_OnClick"/>
+                <MenuItem Header="Toggle Fullscreen (F10)" Click="ToggleFullscreen_OnClick"/>
                 <MenuItem Header="Reset Layout"/>
             </MenuItem>
             <MenuItem Header="Themes">
@@ -42,7 +42,7 @@
         <Border Name="AmosTitleBar" DockPanel.Dock="Top" Background="#FFD400" Height="30" VerticalAlignment="Top">
             <Grid ColumnDefinitions="Auto, *, Auto">
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" Margin="10,0">
-                    <TextBlock Text="AMOS Professional" Foreground="Black" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Name="FileNameText" Text="Untitled" Foreground="Black" FontWeight="Bold" VerticalAlignment="Center"/>
                     <TextBlock Text="v1.0" Foreground="#666" VerticalAlignment="Center" FontSize="10"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="20" Margin="10,0">

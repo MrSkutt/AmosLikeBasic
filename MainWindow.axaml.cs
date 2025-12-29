@@ -74,11 +74,40 @@ public partial class MainWindow : Window
 
     private void HandleGlobalKeyDown(object? sender, KeyEventArgs e)
     {
-        // F-tangenter sköts fortfarande av MainWindow (men vi tillåter dem från Screen också)
-        if (e.Key == Key.F5) { RunButton_OnClick(null, new RoutedEventArgs()); e.Handled = true; return; }
-        if (e.Key == Key.F9) { VariableWatchPanel.IsVisible = !VariableWatchPanel.IsVisible; e.Handled = true; return; }
-        if (e.Key == Key.Escape) { StopButton_OnClick(null, new RoutedEventArgs()); e.Handled = true; return; }
+        // F5 - RUN / DEBUG
+        if (e.Key == Key.F5) 
+        { 
+            bool debug = (e.KeyModifiers & KeyModifiers.Shift) != 0;
+            _ = StartProgramAsync(debug); 
+            e.Handled = true; 
+            return; 
+        }
 
+        // F6 - PAUSE / RESUME
+        if (e.Key == Key.F6)
+        {
+            PauseButton_OnClick(null, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        // F7 - STEP
+        if (e.Key == Key.F7)
+        {
+            if (_isPaused) StepButton_OnClick(null, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        // F9 - VARIABLE WATCH
+        if (e.Key == Key.F9) 
+        { 
+            VariableWatchPanel.IsVisible = !VariableWatchPanel.IsVisible; 
+            e.Handled = true; 
+            return; 
+        }
+        
+        // F10 - FULLSCREEN
         if (e.Key == Key.F10)
         {
             var win = (Window?)sender ?? this;
@@ -87,8 +116,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (e.Key == Key.Escape) { StopButton_OnClick(null, new RoutedEventArgs()); e.Handled = true; return; }
-
+        // ESC - STOP
+        if (e.Key == Key.Escape) 
+        { 
+            StopButton_OnClick(null, new RoutedEventArgs()); 
+            e.Handled = true; 
+            return; 
+        }
         _pressedKeys.Add(e.Key.ToString());
     }
 
@@ -162,33 +196,31 @@ public partial class MainWindow : Window
         }).GetTask();
     }
 
-    private async void RunButton_OnClick(object? sender, RoutedEventArgs e)
+    private async Task StartProgramAsync(bool startPaused)
     {
         if (_screenWindow == null || !_screenWindow.IsVisible)
         {
             _screenWindow = new ScreenWindow();
-            
-            // 1. Stoppa programmet om fönstret stängs
             _screenWindow.Closed += (s, ev) => {
                 StopButton_OnClick(null, new RoutedEventArgs());
                 _screenWindow = null;
             };
-
-            // 2. Koppla tangentbordet från det nya fönstret
             _screenWindow.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
             _screenWindow.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
-
             _screenWindow.Show();
         }
         _screenWindow.Activate();
 
-        _isPaused = false;
-        PauseButton.Content = "[ PAUSE ]";
-        PauseButton.IsEnabled = true;
-        StepButton.IsEnabled = false;
-        RunButton.IsEnabled = false;
-        StopButton.IsEnabled = true;
-        StatusText.Text = "Status: RUNNING";
+        _isPaused = startPaused; // Sätt paus-läget direkt här
+        
+        Dispatcher.UIThread.Post(() => {
+            PauseButton.Content = _isPaused ? "[ RESUME ]" : "[ PAUSE ]";
+            PauseButton.IsEnabled = true;
+            StepButton.IsEnabled = _isPaused;
+            RunButton.IsEnabled = false;
+            StopButton.IsEnabled = true;
+            StatusText.Text = _isPaused ? "Status: DEBUG (Paused)" : "Status: RUNNING";
+        });
 
         _gfx.Clear(Colors.Black);
         _textScreen.Clear();
@@ -266,6 +298,15 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void RunButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        // Vi kollar om Shift var nedtryckt när vi klickade, eller anropar med true från kod
+        bool startPaused = (sender == null && e == null) || 
+                           (e is KeyEventArgs ke && (ke.KeyModifiers & KeyModifiers.Shift) != 0);
+        
+        await StartProgramAsync(startPaused);
+    }
+    
     private void PauseButton_OnClick(object? sender, RoutedEventArgs e)
     {
         _isPaused = !_isPaused;
@@ -329,14 +370,24 @@ public partial class MainWindow : Window
         if (_screenWindow?.Console != null) _screenWindow.Console.Text = "";
     }
 
+    private void UpdateTitleBar()
+    {
+        string name = _currentProjectFile?.Name ?? "Untitled";
+        FileNameText.Text = name;
+        // Valfritt: Uppdatera även fönstertiteln (det som syns i Windows/macOS-listen)
+        this.Title = $"AMOS Professional IDE - [{name}]";
+    }
+
     private void NewProject_OnClick(object? sender, RoutedEventArgs e)
     {
         Editor.Text = "";
-        _currentProjectFile = null;
+        _currentProjectFile = null; // Nollställ filreferensen
         _gfx.Clear(Colors.Black);
         _textScreen.Clear();
         if (_screenWindow?.Console != null) _screenWindow.Console.Text = "";
         LogBox.Text = "New project started.\n";
+        
+        UpdateTitleBar(); // Uppdatera till "Untitled"
     }
 
     private async void SaveProject_OnClick(object? sender, RoutedEventArgs e)
@@ -354,12 +405,15 @@ public partial class MainWindow : Window
             });
         }
         if (file is null) return;
+
         try 
         {
             var project = _gfx.ExportProject(Editor.Text ?? string.Empty);
             using var stream = await file.OpenWriteAsync();
             await AmosProjectSerializer.SaveAsync(stream, project);
             _currentProjectFile = file;
+            
+            UpdateTitleBar(); // Visa det nya namnet
             await AppendConsoleLineAsync($"Saved: {file.Name}");
         }
         catch (Exception ex) { await AppendConsoleLineAsync($"ERROR saving: {ex.Message}"); }
@@ -383,7 +437,9 @@ public partial class MainWindow : Window
             var project = await AmosProjectSerializer.LoadAsync(stream);
             _gfx.ImportProject(project);
             Editor.Text = project.ProgramText ?? string.Empty;
-            _currentProjectFile = file;
+            _currentProjectFile = file; // Spara referensen
+            
+            UpdateTitleBar(); // Visa namnet på filen vi öppnade
             await AppendConsoleLineAsync($"Opened: {file.Name}");
         }
         catch (Exception ex) { await AppendConsoleLineAsync($"ERROR loading: {ex.Message}"); }
