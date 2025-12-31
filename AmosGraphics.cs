@@ -16,6 +16,15 @@ public sealed class AmosGraphics
     private readonly List<WriteableBitmap> _screens = new();
     private readonly List<Point> _screenOffsets = new();
     private int _currentScreen = 0;
+    
+    private sealed class Rainbow
+    {
+        public int PaletteIndex; // I en modern motor använder vi detta som ett ID eller färg-filter
+        public int Offset;
+        public int Height;
+        public List<Color> Colors { get; } = new();
+    }
+    private readonly Dictionary<int, Rainbow> _rainbows = new();
 
     public List<WriteableBitmap> GetTileBitmaps() => _tiles;
     
@@ -202,8 +211,56 @@ public sealed class AmosGraphics
             if (idx < project.MapData.Count)
                 _map[x, y] = project.MapData[idx++];
 
+        for (int y = 0; y < project.MapHeight; y++)
+        for (int x = 0; x < project.MapWidth; x++)
+            if (idx < project.MapData.Count)
+                _map[x, y] = project.MapData[idx++];
     }
 
+    // ---------------- Rainbows ----------------
+
+    public void SetRainbow(int num, int paletteIdx, int offset, int height)
+    {
+        if (!_rainbows.TryGetValue(num, out var rb))
+        {
+            rb = new Rainbow();
+            _rainbows[num] = rb;
+        }
+        rb.PaletteIndex = paletteIdx;
+        rb.Offset = offset;
+        rb.Height = height;
+    }
+
+    public void SetRainbowColors(int num, List<Color> colors)
+    {
+        if (_rainbows.TryGetValue(num, out var rb))
+        {
+            rb.Colors.Clear();
+            rb.Colors.AddRange(colors);
+        }
+    }
+
+    public int GetRainbowHeight(int num) => _rainbows.TryGetValue(num, out var rb) ? rb.Height : 0;
+
+    public void SetRainbowGradient(int num, Color start, Color end, int steps)
+    {
+        if (!_rainbows.TryGetValue(num, out var rb)) return;
+
+        rb.Colors.Clear();
+        if (steps <= 1) { rb.Colors.Add(start); return; }
+
+        for (int i = 0; i < steps; i++)
+        {
+            double t = (double)i / (steps - 1);
+            byte r = (byte)(start.R + (end.R - start.R) * t);
+            byte g = (byte)(start.G + (end.G - start.G) * t);
+            byte b = (byte)(start.B + (end.B - start.B) * t);
+            rb.Colors.Add(Color.FromArgb(255, r, g, b));
+        }
+    }
+
+    public void DelRainbow(int num) => _rainbows.Remove(num);
+    
     // ---------------- Screen & Core ----------------
 
     public void Screen(int w, int h)
@@ -244,7 +301,11 @@ public sealed class AmosGraphics
         ClearBitmap(_bmp!, color);
         foreach (var s in _screens) ClearBitmap(s, color);
         for (int i = 0; i < _screenOffsets.Count; i++) _screenOffsets[i] = new Point(0, 0);
-        _fontTexts.Clear(); 
+        if (_currentScreen == 0) 
+        {
+            _fontTexts.Clear();
+            _rainbows.Clear(); // <--- Lägg till denna rad!
+        }
         Refresh();
     }
     
@@ -255,7 +316,12 @@ public sealed class AmosGraphics
         ClearBitmap(GetActiveScreen(), color);
             
         // Om det är lager 0 vi rensar, kan vi även nollställa texter
-        if (_currentScreen == 0) _fontTexts.Clear(); 
+        if (_currentScreen == 0) 
+        {
+            _fontTexts.Clear();
+            _rainbows.Clear(); // <--- Lägg till denna rad!
+        }
+
             
         Refresh();
     }
@@ -343,7 +409,54 @@ public sealed class AmosGraphics
                         if (!s.Visible || s.Frames.Count == 0) continue;
                         RenderSpriteInternal(dp, rb, s);
                     }
-                    
+
+                    foreach (var ft in _fontTexts)
+                    {
+                        RenderFontTextInternal(dp, rb, ft);
+                    }
+
+                    // Applicera RAINBOWS (Copper-liknande effekter)
+                    foreach (var kvp in _rainbows.OrderBy(x => x.Key))
+                    {
+                        var rainbow = kvp.Value;
+                        if (rainbow.Colors.Count == 0) continue;
+
+                        for (int y = 0; y < rainbow.Height; y++)
+                        {
+                            int screenY = rainbow.Offset + y;
+                            if (screenY < 0 || screenY >= Height) continue;
+
+                            var color = rainbow.Colors[y % rainbow.Colors.Count];
+                            var rowPtr = dp + screenY * rb;
+
+                            // För enkelhetens skull i början: vi ersätter ALLA pixlar på raden 
+                            // som har bakgrundsfärgen (svart) med regnbågsfärgen.
+                            // Detta liknar hur Copper ändrar färg 0.
+                            for (int x = 0; x < Width; x++)
+                            {
+                                int di = x * 4;
+                                // Ändra logiken: Om det är RAINBOW 0 (bakgrunden), rita bara på svart.
+                                // Om det är ett högre nummer, tillåt att den ritar över tidigare regnbågar.
+                                bool isBackground = kvp.Key == 0;
+                                bool isPixelEmpty = rowPtr[di + 0] == 0 && rowPtr[di + 1] == 0 && rowPtr[di + 2] == 0;
+
+                                if (isPixelEmpty || !isBackground)
+                                {
+                                    rowPtr[di + 0] = color.B;
+                                    rowPtr[di + 1] = color.G;
+                                    rowPtr[di + 2] = color.R;
+                                    rowPtr[di + 3] = 255;
+                                }
+                            }
+                        }
+                    }
+                    foreach (var kv in _sprites.OrderBy(x => x.Key))
+                    {
+                        var s = kv.Value;
+                        if (!s.Visible || s.Frames.Count == 0) continue;
+                        RenderSpriteInternal(dp, rb, s);
+                    }
+
                     foreach (var ft in _fontTexts)
                     {
                         RenderFontTextInternal(dp, rb, ft);
