@@ -246,6 +246,9 @@ public partial class MainWindow : Window
                             if (_screenWindow != null) {
                                 _screenWindow.ScreenImage.Source = _gfx.Bitmap;
                                 _screenWindow.ScreenImage.InvalidateVisual();
+                                var cpu = _gfx.LastCpuUsage;
+                                _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
+                                StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%";
                             }
                         }, DispatcherPriority.Render);
                     },

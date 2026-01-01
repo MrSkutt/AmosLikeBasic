@@ -16,6 +16,9 @@ public sealed class AmosGraphics
     private readonly List<WriteableBitmap> _screens = new();
     private readonly List<Point> _screenOffsets = new();
     private int _currentScreen = 0;
+    private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
+    public double LastCpuUsage { get; private set; }
+
     
     private sealed class Rainbow
     {
@@ -345,6 +348,7 @@ public sealed class AmosGraphics
 
     public void Refresh()
     {
+        _refreshTimer.Restart();
         EnsureScreen();
         if (_screens.Count == 0 || _bmp == null || _finalBuffer == null) return;
 
@@ -375,25 +379,26 @@ public sealed class AmosGraphics
 
                         for (var y = 0; y < Height; y++)
                         {
-                            // Beräkna rätt rad i käll-bitmappen (med wrap-around baserat på lagrets storlek)
-                            int sy = (y + sY) % sHeight;
-                            if (sy < 0) sy += sHeight;
-                            var dr = dp + y * rb;
-                            var sr = sp + sy * sRowBytes; // Använd lagrets egna RowBytes!
+                            int sy = (y + sY);
+                            while (sy < 0) sy += sHeight;
+                            if (sy >= sHeight) sy %= sHeight;
+
+                            var dr = (uint*)(dp + y * rb);
+                            var sr = (uint*)(sp + sy * sRowBytes);
 
                             for (var x = 0; x < Width; x++)
                             {
-                                // Beräkna rätt kolumn i käll-bitmappen
-                                int sx = (x + sX) % sWidth;
-                                if (sx < 0) sx += sWidth;
-                                int di = x * 4, si = sx * 4;
+                                int sx = (x + sX);
+                                if (sx < 0 || sx >= sWidth) {
+                                    sx %= sWidth;
+                                    if (sx < 0) sx += sWidth;
+                                }
 
-                                if (sIdx == 0 || (sr[si + 0] > 0 || sr[si + 1] > 0 || sr[si + 2] > 0))
+                                uint pixel = sr[sx];
+                                // Om pixeln inte är helt transparent (kolla Alpha eller RGB)
+                                if (sIdx == 0 || (pixel & 0x00FFFFFF) != 0)
                                 {
-                                    dr[di + 0] = sr[si + 0];
-                                    dr[di + 1] = sr[si + 1];
-                                    dr[di + 2] = sr[si + 2];
-                                    dr[di + 3] = 255;
+                                    dr[x] = pixel | 0xFF000000; // Sätt Alpha till 255
                                 }
                             }
                         }
@@ -476,6 +481,9 @@ public sealed class AmosGraphics
                     finalSrc.RowBytes * Height);
             }
         }
+        
+        _refreshTimer.Stop();
+        LastCpuUsage = (_refreshTimer.Elapsed.TotalMilliseconds / 16.66) * 100.0;
     }
 
     public void Scroll(int sid, int x, int y)
