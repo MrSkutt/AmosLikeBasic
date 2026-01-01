@@ -359,9 +359,21 @@ public sealed class AmosGraphics
             {
                 var dp = (byte*)dst.Address;
                 var rb = dst.RowBytes;
+                int totalBytes = rb * Height;
 
-                // Rensa till svart
-                for (var i = 0; i < rb * Height; i++) dp[i] = 0;
+                var layer0 = _screens[0];
+                var off0 = _screenOffsets[0];
+                    
+                if (off0.X == 0 && off0.Y == 0 && layer0.PixelSize.Width == Width && layer0.PixelSize.Height == Height)
+                {
+                    using var s0 = layer0.Lock();
+                    System.Buffer.MemoryCopy((void*)s0.Address, (void*)dp, totalBytes, totalBytes);
+                }
+                else
+                {
+                    // Rensa till svart om lager 0 är "komplext"
+                    System.Runtime.CompilerServices.Unsafe.InitBlock(dp, 0, (uint)totalBytes);
+                }
 
                 // Rita alla lager
                 for (int sIdx = 0; sIdx < _screens.Count; sIdx++)
@@ -408,18 +420,6 @@ public sealed class AmosGraphics
                 // Rita sprites (fortfarande inuti _finalBuffer Lock!)
                 //using (var dc = _finalBuffer.CreateDrawingContext())
                 {
-                    foreach (var kv in _sprites.OrderBy(x => x.Key))
-                    {
-                        var s = kv.Value;
-                        if (!s.Visible || s.Frames.Count == 0) continue;
-                        RenderSpriteInternal(dp, rb, s);
-                    }
-
-                    foreach (var ft in _fontTexts)
-                    {
-                        RenderFontTextInternal(dp, rb, ft);
-                    }
-
                     // Applicera RAINBOWS (Copper-liknande effekter)
                     foreach (var kvp in _rainbows.OrderBy(x => x.Key))
                     {
