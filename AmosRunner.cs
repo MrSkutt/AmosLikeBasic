@@ -42,6 +42,12 @@ public static class AmosRunner
     {
         public double[] Data { get; }
         public AmosArray(int size) { Data = new double[size + 1]; } // +1 för att AMOS ofta tillåter index upp till storleken
+        public override string ToString()
+        {
+            var content = string.Join(", ", Data.Take(5).Select(d => d.ToString("G5")));
+            if (Data.Length > 5) content += "...";
+            return $"Array({Data.Length - 1}) [{content}]";
+        }
     }
     
     public static async Task ExecuteAsync(
@@ -58,10 +64,18 @@ public static class AmosRunner
         Func<int, Task> waitForStep) // <-- NY PARAMETER: skickar PC, väntar på signal
     {
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var lastVarUpdateTime = DateTime.MinValue;
+        var updateInterval = TimeSpan.FromMilliseconds(500);
         // En lokal hjälpfunktion för att uppdatera variabler och trigga UI
         var setVar = (string name, object value) => {
             vars[name] = value;
-            onVariablesChanged(new Dictionary<string, object>(vars)); // Skicka en kopia
+                
+            var now = DateTime.Now;
+            if (now - lastVarUpdateTime > updateInterval)
+            {
+                onVariablesChanged(new Dictionary<string, object>(vars)); // Skicka en kopia
+                lastVarUpdateTime = now;
+            }
         };
         var forStack = new Stack<ForFrame>();
         var whileStack = new Stack<WhileFrame>();

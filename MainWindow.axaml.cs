@@ -236,6 +236,9 @@ public partial class MainWindow : Window
         {
             await Task.Run(async () =>
             {
+                var lastCpuUpdateTime = DateTime.MinValue;
+                var cpuUpdateInterval = TimeSpan.FromMilliseconds(500); 
+
                 await AmosRunner.ExecuteAsync(
                     programText: program,
                     appendLineAsync: AppendConsoleLineAsync,
@@ -246,9 +249,15 @@ public partial class MainWindow : Window
                             if (_screenWindow != null) {
                                 _screenWindow.ScreenImage.Source = _gfx.Bitmap;
                                 _screenWindow.ScreenImage.InvalidateVisual();
-                                var cpu = _gfx.LastCpuUsage;
-                                _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
-                                StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%";
+                                    
+                                var now = DateTime.Now;
+                                if (now - lastCpuUpdateTime > cpuUpdateInterval)
+                                {
+                                    var cpu = _gfx.LastCpuUsage;
+                                    _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
+                                    StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%";
+                                    lastCpuUpdateTime = now;
+                                }
                             }
                         }, DispatcherPriority.Render);
                     },
