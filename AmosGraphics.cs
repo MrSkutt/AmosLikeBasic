@@ -675,16 +675,30 @@ public sealed class AmosGraphics
         public void FontPrint(int id, int x, int y, string text)
         {
             if (!_fonts.TryGetValue(id, out var f)) return;
-            // Spara ner nuvarande värden tillsammans med texten
-            _fontTexts.Add(new QueuedFontText { 
-                FontId = id, 
-                X = x, 
-                Y = y, 
-                Text = text,
-                Angle = f.Angle,
-                ZoomX = f.ZoomX,
-                ZoomY = f.ZoomY
-            });
+            
+            // Om vi ritar på lager 0, behåll kö-logiken (för bakåtkompatibilitet/effekter)
+            if (_currentScreen == 0) {
+                _fontTexts.Add(new QueuedFontText { 
+                    FontId = id, X = x, Y = y, Text = text,
+                    Angle = f.Angle, ZoomX = f.ZoomX, ZoomY = f.ZoomY
+                });
+            } else {
+                // För alla andra lager, rita DIREKT in i lagrets bitmapp
+                var target = GetActiveScreen();
+                using var dst = target.Lock();
+                unsafe {
+                    byte* dp = (byte*)dst.Address;
+                    int rb = dst.RowBytes;
+                    int curX = x;
+                    var qt = new QueuedFontText { Angle = f.Angle, ZoomX = f.ZoomX, ZoomY = f.ZoomY };
+                    
+                    foreach (var c in text) {
+                        if (c == ' ') { curX += (int)(f.CharWidth * f.ZoomX); continue; }
+                        RenderFontCharInternal(dp, rb, f, curX, y, c, qt);
+                        curX += (int)(f.CharWidth * f.ZoomX);
+                    }
+                }
+            }
         }
 
         public void FontClear() => _fontTexts.Clear();
@@ -724,8 +738,12 @@ public sealed class AmosGraphics
             int hx = f.CharWidth / 2, hy = f.CharHeight / 2;
 
             double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(qt.ZoomX, qt.ZoomY);
-            int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(Width - 1, (int)(x + radius));
-            int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(Height - 1, (int)(y + radius));
+            int targetW = GetActiveScreen().PixelSize.Width;
+            int targetH = GetActiveScreen().PixelSize.Height;
+
+            int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(targetW - 1, (int)(x + radius));
+            int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(targetH - 1, (int)(y + radius));
+
 
             for (int py = minY; py <= maxY; py++)
             {
@@ -820,6 +838,7 @@ public sealed class AmosGraphics
             }
         }
     
+        
     public void LoadBackground(string f)
     {
         try

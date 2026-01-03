@@ -106,10 +106,10 @@
                         </StackPanel>
                     </Border>
                     <ListBox Name="VariableListBox" 
-                             Background="Transparent" 
-                             Foreground="#7FB2FF"
-                             FontFamily="Courier New"
-                             FontSize="12">
+                                 Background="Transparent" 
+                                 Foreground="#7FB2FF"
+                                 FontFamily="Courier New"
+                                 FontSize="12">
                         <ListBox.ItemTemplate>
                             <DataTemplate x:CompileBindings="False">
                                 <Grid ColumnDefinitions="*, Auto">
