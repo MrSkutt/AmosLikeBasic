@@ -225,7 +225,7 @@ public partial class MainWindow : Window
         _gfx.Clear(Colors.Black);
         _textScreen.Clear();
         _screenWindow.Console.Text = "";
-        _screenWindow.ScreenImage.Source = _gfx.Bitmap;
+        _screenWindow.ScreenControl.Graphics = _gfx;
     
         _runCts?.Cancel();
         _runCts = new CancellationTokenSource();
@@ -234,33 +234,38 @@ public partial class MainWindow : Window
 
         try
         {
-            await Task.Run(async () =>
-            {
-                var lastCpuUpdateTime = DateTime.MinValue;
-                var cpuUpdateInterval = TimeSpan.FromMilliseconds(500); 
+               await Task.Run(async () =>
+                {
+                    var lastCpuUpdateTime = DateTime.MinValue;
+                    var cpuUpdateInterval = TimeSpan.FromMilliseconds(500); 
 
-                await AmosRunner.ExecuteAsync(
-                    programText: program,
-                    appendLineAsync: AppendConsoleLineAsync,
-                    clearAsync: ClearConsoleAsync,
-                    graphics: _gfx,
-                    onGraphicsChanged: () => {
-                        Dispatcher.UIThread.InvokeAsync(() => {
-                            if (_screenWindow != null) {
-                                _screenWindow.ScreenImage.Source = _gfx.Bitmap;
-                                _screenWindow.ScreenImage.InvalidateVisual();
+                    await AmosRunner.ExecuteAsync(
+                        programText: program,
+                        appendLineAsync: AppendConsoleLineAsync,
+                        clearAsync: ClearConsoleAsync,
+                        graphics: _gfx,
+                        onGraphicsChanged: () => {
+                            Dispatcher.UIThread.InvokeAsync(() => {
+                                if (_screenWindow != null) {
+                                    var control = _screenWindow.FindControl<AmosGpuView>("ScreenControl");
+                                    if (control != null)
+                                    {
+                                        control.InvalidateMeasure();
+                                        control.InvalidateVisual();
+                                    }
                                     
-                                var now = DateTime.Now;
-                                if (now - lastCpuUpdateTime > cpuUpdateInterval)
-                                {
-                                    var cpu = _gfx.LastCpuUsage;
-                                    _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
-                                    StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%";
-                                    lastCpuUpdateTime = now;
+                                    var now = DateTime.Now;
+                                    if (now - lastCpuUpdateTime > cpuUpdateInterval)
+                                    {
+                                        var cpu = _gfx.LastCpuUsage;
+                                        //_screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
+                                        StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%";
+                                        lastCpuUpdateTime = now;
+                                    }
                                 }
-                            }
-                        }, DispatcherPriority.Render);
-                    },
+                            }, DispatcherPriority.Render);
+                        },
+ 
                     getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
                     isKeyDown: (k) => _pressedKeys.Contains(k),
                     audioEngine: _audioEngine,

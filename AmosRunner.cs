@@ -455,7 +455,7 @@ public static class AmosRunner
                             if (screenArgs.Count >= 2) graphics.SetDrawingScreen(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
                         } else if (screenArgs.Count >= 2) {
                             graphics.Screen(EvalInt(screenArgs[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
-                            graphics.Clear(Colors.Black);
+                            //graphics.Clear(Colors.Transparent);
                         }
                         break;
                     case "SCROLL":

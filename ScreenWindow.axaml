@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:amosLikeBasic="clr-namespace:AmosLikeBasic"
         x:Class="AmosLikeBasic.ScreenWindow"
         Title="AMOS Screen"
         Width="1280" Height="960"
@@ -7,11 +8,10 @@
         WindowStartupLocation="CenterOwner">
     <Grid Background="Black" ClipToBounds="True">
         <Viewbox Stretch="Uniform">
-            <Grid Width="1280" Height="960" Background="Black">
-                <Image Name="ScreenImage" 
-                       Focusable="True" 
-                       Stretch="Fill"
-                       RenderOptions.BitmapInterpolationMode="None"/>
+            <Grid Width="640" Height="480" Background="Black">
+                <amosLikeBasic:AmosGpuView Name="ScreenControl" 
+                                           Width="640" 
+                                           Height="480" />
                 
                 <TextBox Name="Console" 
                          Classes="amos-console" 
@@ -19,6 +19,7 @@
                          Foreground="White"
                          IsHitTestVisible="False"
                          IsReadOnly="True"
+                         Focusable="False"
                          BorderThickness="0"
                          Margin="0"
                          Padding="0"

@@ -2,25 +2,226 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
+using System.Threading;
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Media.Imaging;
 
 namespace AmosLikeBasic;
 
+public sealed class GpuLayer
+{
+    public WriteableBitmap Bitmap { get; init; } = null!;
+    
+    public Point Offset { get; set; }
+    public double Opacity { get; set; } = 1.0;
+}
+
+public sealed class AmosGpuView : Control
+{
+    private ScreenWindow? _screenWindow; 
+
+    public AmosGraphics Graphics { get; set; } = null!;
+    private RenderTargetBitmap? _framebuffer;
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        if (Graphics != null && Graphics.Width > 0) return new Size(Graphics.Width, Graphics.Height);
+        return new Size(640, 480);
+    }
+
+
+    private void EnsureFramebuffer(int w, int h)
+    {
+        if (_framebuffer != null &&
+            _framebuffer.PixelSize.Width == w &&
+            _framebuffer.PixelSize.Height == h)
+            return;
+
+        _framebuffer = new RenderTargetBitmap(
+            new PixelSize(w, h),
+            new Vector(96, 96)); // upplösning 96 DPI
+    }
+
+    public override void Render(DrawingContext ctx)
+    {
+        if (Graphics == null) return;
+        Graphics.BeginFrame();
+
+        // 1. Se till att framebuffer finns
+        EnsureFramebuffer(Graphics.Width, Graphics.Height);
+
+
+        using (var fbCtx = _framebuffer!.CreateDrawingContext())
+        {
+            lock (Graphics.LockObject)
+            {
+                var amosRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
+                fbCtx.DrawRectangle(Brushes.Transparent, null, amosRect);
+
+                // RITA RAINBOWS
+                foreach (var rb in Graphics.GetRainbows())
+                {
+                    if (rb.Colors.Count == 0) continue;
+                    for (int y = 0; y < rb.Height; y++)
+                    {
+                        int screenY = rb.Offset + y;
+                        if (screenY < 0 || screenY >= Graphics.Height) continue;
+                        var color = rb.Colors[y % rb.Colors.Count];
+                        fbCtx.DrawRectangle(new SolidColorBrush(color), null, new Rect(0, screenY, Graphics.Width, 1));
+                    }
+                }
+
+                // RITA GPU-LAGER
+                foreach (var layer in Graphics.GpuLayers)
+                {
+                    if (layer.Bitmap == null) continue;
+
+                    var bmpSize = layer.Bitmap.Size;
+                    var offset = layer.Offset;
+
+                    int w = (int)bmpSize.Width;
+                    int h = (int)bmpSize.Height;
+
+                    // Skär ut den del av lagret som syns på skärmen
+                    // Vi ritar 4 delar: original + de som "wrappar" horisontellt och/eller vertikalt
+                    for (int dx = -w; dx <= w; dx += w)
+                    {
+                        for (int dy = -h; dy <= h; dy += h)
+                        {
+                            var drawRect = new Rect(offset.X + dx, offset.Y + dy, w, h);
+
+                            // Snabb check: rita bara om den hamnar inom framebuffer
+                            if (drawRect.Right < 0 || drawRect.Bottom < 0 ||
+                                drawRect.Left > Graphics.Width || drawRect.Top > Graphics.Height)
+                                continue;
+
+                            fbCtx.DrawImage(layer.Bitmap, new Rect(bmpSize), drawRect);
+                        }
+                    }
+                }
+
+
+
+                // RITA TEXTER → loopa över en **kopierad lista**
+                foreach (var qt in Graphics.GetQueuedTexts().ToList())
+                {
+                    var f = Graphics.GetFont(qt.FontId);
+                    if (f == null)
+                        continue;
+
+                    int curX = qt.X;
+
+                    double angleRad = qt.Angle * Math.PI / 180.0;
+
+                    foreach (var c in qt.Text)
+                    {
+                        if (c == ' ')
+                        {
+                            curX += (int)(f.CharWidth * qt.ZoomX);
+                            continue;
+                        }
+
+                        var charBmp = Graphics.GetFontChar(f, c);
+                        if (charBmp == null)
+                        {
+                            curX += (int)(f.CharWidth * qt.ZoomX);
+                            continue;
+                        }
+
+                        double w = f.CharWidth * qt.ZoomX;
+                        double h = f.CharHeight * qt.ZoomY;
+
+                        // Glyphens centrum i världens koordinater
+                        double cx = curX + w / 2.0;
+                        double cy = qt.Y + h / 2.0;
+
+                        // Transform: flytta till centrum → rotera → flytta tillbaka
+                        var transform =
+                            Matrix.CreateTranslation(-cx, -cy) *
+                            Matrix.CreateRotation(angleRad) *
+                            Matrix.CreateTranslation(cx, cy);
+
+                        using (fbCtx.PushPostTransform(transform))
+                        {
+                            fbCtx.DrawImage(
+                                charBmp,
+                                new Rect(charBmp.Size),
+                                new Rect(curX, qt.Y, w, h));
+                        }
+
+                        curX += (int)w;
+                    }
+                }
+
+                // RITA SPRITES
+                foreach (var id in Graphics.GetSpriteIds())
+                {
+                    var sprite = Graphics.GetSprite(id);
+                    if (!sprite.Visible) continue;
+
+                    var bmp = Graphics.GetSpriteBitmap(id);
+
+                    var destRect = new Rect(sprite.X - sprite.HandleX, sprite.Y - sprite.HandleY,
+                        bmp.Size.Width * sprite.ZoomX, bmp.Size.Height * sprite.ZoomY);
+
+
+                    // Target position BEFORE rotation
+                    double x = sprite.X - sprite.HandleX * sprite.ZoomX;
+                    double y = sprite.Y - sprite.HandleY * sprite.ZoomY;
+
+                    // Center about which we rotate
+                    double cx = sprite.X;
+                    double cy = sprite.Y;
+
+                    // Rotation in radians
+                    double angleRad = sprite.Angle * Math.PI / 180.0;
+                    double cos = Math.Cos(angleRad);
+                    double sin = Math.Sin(angleRad);
+
+                    // Build matrix: Translate to center → rotate → translate back
+                    var matrix = new Matrix(
+                        cos, sin,
+                        -sin, cos,
+                        cx - cos * cx + sin * cy - x + cx,
+                        cy - sin * cx - cos * cy - y + cy
+                    );
+
+                    // Push transform + draw
+                    using (fbCtx.PushPostTransform(matrix))
+                    {
+                        fbCtx.DrawImage(bmp, new Rect(bmp.Size), new Rect(x, y, sprite.Width, sprite.Height));
+                    }
+                }
+            }
+        }
+        // 3. Rita sedan framebuffer till skärmen
+        ctx.DrawImage(
+            _framebuffer!,
+            new Rect(_framebuffer.Size),
+            new Rect(0, 0, Bounds.Width, Bounds.Height));
+        
+        Graphics.EndFrame();
+        //_screenWindow.Title = $"AMOS Screen | GFX: {Graphics.LastCpuUsagePercent:F1}%";
+        Console.WriteLine($"CPU % av VBL: {Graphics.LastCpuUsagePercent:F1}%");
+    }
+}
+
+
 public sealed class AmosGraphics
 {
-    private WriteableBitmap? _bmp;
-    private WriteableBitmap? _finalBuffer;
-    private readonly List<WriteableBitmap> _screens = new();
-    private readonly List<Point> _screenOffsets = new();
+    private System.Diagnostics.Stopwatch _frameTimer = new();
+    public double LastCpuUsagePercent { get; private set; } = 0;
+    public readonly object LockObject = new(); // Korrekt namn för låset
+    internal readonly List<GpuLayer> GpuLayers = new();
     private int _currentScreen = 0;
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
     public double LastCpuUsage { get; private set; }
-
+    //private List<Point> _screenOffsets = new List<Point>();
     
-    private sealed class Rainbow
+    internal sealed class Rainbow
     {
         public int PaletteIndex; // I en modern motor använder vi detta som ett ID eller färg-filter
         public int Offset;
@@ -28,10 +229,11 @@ public sealed class AmosGraphics
         public List<Color> Colors { get; } = new();
     }
     private readonly Dictionary<int, Rainbow> _rainbows = new();
-
+    internal IEnumerable<Rainbow> GetRainbows() => _rainbows.Values;
+    
     public List<WriteableBitmap> GetTileBitmaps() => _tiles;
     
-    private sealed class Font
+    internal sealed class Font
     {
         public List<WriteableBitmap> CharBitmaps { get; } = new();
         public int CharWidth { get; set; }
@@ -42,7 +244,15 @@ public sealed class AmosGraphics
         public string CharMap { get; set; } = ""; 
     }
     
-    private sealed class Sprite
+    internal Font? GetFont(int id) => _fonts.GetValueOrDefault(id);
+    internal WriteableBitmap? GetFontChar(Font f, char c)
+    {
+        string map = string.IsNullOrEmpty(f.CharMap) ? "" : f.CharMap;
+        int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
+        return (charIdx >= 0 && charIdx < f.CharBitmaps.Count) ? f.CharBitmaps[charIdx] : null;
+    }
+    
+    public sealed class Sprite
     {
         public Sprite(int width, int height, WriteableBitmap firstFrame)
         {
@@ -53,7 +263,7 @@ public sealed class AmosGraphics
             TransparentKey = Colors.Magenta;
             Visible = false;
         }
-
+        
         public int Width { get; }
         public int Height { get; }
         public List<WriteableBitmap> Frames { get; } = new();
@@ -74,7 +284,7 @@ public sealed class AmosGraphics
     private readonly Dictionary<int, Sprite> _sprites = new();
     private readonly Dictionary<int, Font> _fonts = new();
     
-    private sealed class QueuedFontText
+    public sealed class QueuedFontText
     {
         public int FontId { get; set; }
         public int X { get; set; }
@@ -84,7 +294,8 @@ public sealed class AmosGraphics
         public double ZoomX { get; set; }
         public double ZoomY { get; set; }
     }
-    private readonly List<QueuedFontText> _fontTexts = new(); 
+    public readonly List<QueuedFontText> _fontTexts = new(); 
+    public IEnumerable<QueuedFontText> GetQueuedTexts() => _fontTexts;
     
     private readonly List<WriteableBitmap> _tiles = new();
     private int _tilesInWidth = 0;
@@ -95,13 +306,10 @@ public sealed class AmosGraphics
     public int Width { get; private set; }
     public int Height { get; private set; }
     public Color Ink { get; set; } = Colors.White;
-    public WriteableBitmap? Bitmap => _bmp;
+
 
     private WriteableBitmap GetActiveScreen()
-    {
-        if (_screens.Count <= _currentScreen) SetDrawingScreen(_currentScreen);
-        return _screens[_currentScreen];
-    }
+        => (WriteableBitmap)GpuLayers[_currentScreen].Bitmap;
     
     public int GetActiveScreenNumber()
     {
@@ -213,12 +421,21 @@ public sealed class AmosGraphics
         for (int x = 0; x < project.MapWidth; x++)
             if (idx < project.MapData.Count)
                 _map[x, y] = project.MapData[idx++];
-
-        for (int y = 0; y < project.MapHeight; y++)
-        for (int x = 0; x < project.MapWidth; x++)
-            if (idx < project.MapData.Count)
-                _map[x, y] = project.MapData[idx++];
     }
+    
+    
+    public void BeginFrame()
+    {
+        _frameTimer.Restart();
+    }
+
+    public void EndFrame(double targetVblMs = 16.67) // ~60Hz = 16.67 ms per VBL
+    {
+        _frameTimer.Stop();
+        // CPU-tid som procent av VBL
+        LastCpuUsagePercent = Math.Min(100, (_frameTimer.Elapsed.TotalMilliseconds / targetVblMs) * 100);
+    }
+
 
     // ---------------- Rainbows ----------------
 
@@ -268,48 +485,77 @@ public sealed class AmosGraphics
 
     public void Screen(int w, int h)
     {
-        Width = w;
-        Height = h;
-        _bmp = CreateEmptyBitmap(w, h);
-        _finalBuffer = CreateEmptyBitmap(w, h); // Skapa den dolda buffern
-        _screens.Clear();
-        _screenOffsets.Clear();
-        _screens.Add(CreateEmptyBitmap(w, h));
-        _screenOffsets.Add(new Point(0, 0));
-        _currentScreen = 0;
+        lock (LockObject)
+        {
+            Width = w;
+            Height = h;
+            
+            GpuLayers.Clear();
+            GpuLayers.Add(new GpuLayer {
+                Bitmap = CreateEmptyBitmap(w, h),
+                Offset = new Point(0, 0)
+            });    
+            _currentScreen = 0;
+        }
+
+        // Tvinga UI-tråden att uppdatera storleken på vyn
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => {
+            // Detta tvingar Viewbox att räkna om skalningen
+            // Vi gör det via ett anrop till InvalidateMeasure i MainWindow
+        }, Avalonia.Threading.DispatcherPriority.Render);
     }
 
     public void SetDrawingScreen(int id)
     {
-        while (_screens.Count <= id)
+        lock (LockObject)
         {
-            _screens.Add(CreateEmptyBitmap(Width, Height));
-            _screenOffsets.Add(new Point(0, 0));
+            while (GpuLayers.Count <= id)
+            {
+                GpuLayers.Add(new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) });
+            }
+            _currentScreen = id;
         }
-
-        _currentScreen = id;
     }
 
     private void EnsureScreen()
     {
-        if (_bmp is null) Screen(640, 480);
+        lock (LockObject)
+        {
+            if (GpuLayers.Count == 0) Screen(640, 480);
+        }
     }
 
-    private WriteableBitmap CreateEmptyBitmap(int w, int h) => new WriteableBitmap(new PixelSize(w, h),
-        new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
-
-    public void Clear_old(Color color)
+    private WriteableBitmap CreateEmptyBitmap(int w, int h, Color? background = null)
     {
-        EnsureScreen();
-        ClearBitmap(_bmp!, color);
-        foreach (var s in _screens) ClearBitmap(s, color);
-        for (int i = 0; i < _screenOffsets.Count; i++) _screenOffsets[i] = new Point(0, 0);
-        if (_currentScreen == 0) 
+        var bmp = new WriteableBitmap(
+            new PixelSize(w, h),
+            new Vector(96, 96),
+            PixelFormat.Bgra8888,
+            AlphaFormat.Premul);
+
+        // Om ingen bakgrund anges: helt transparent
+        Color bg = background ?? Colors.Transparent;
+        
+        using (var fb = bmp.Lock())
         {
-            _fontTexts.Clear();
-            _rainbows.Clear(); // <--- Lägg till denna rad!
+            unsafe
+            {
+                uint* p = (uint*)fb.Address;
+                int count = w * h;
+
+                // Premultiplied alpha
+                uint a = bg.A;
+                uint r = (uint)(bg.R * a / 255);
+                uint g = (uint)(bg.G * a / 255);
+                uint b = (uint)(bg.B * a / 255);
+                uint val = (a << 24) | (r << 16) | (g << 8) | b;
+
+                for (int i = 0; i < count; i++)
+                    p[i] = val;
+            }
         }
-        Refresh();
+
+        return bmp;
     }
     
     public void Clear(Color color)
@@ -348,152 +594,18 @@ public sealed class AmosGraphics
 
     public void Refresh()
     {
-        _refreshTimer.Restart();
-        EnsureScreen();
-        if (_screens.Count == 0 || _bmp == null || _finalBuffer == null) return;
-
-        // 1. Slå ihop allt i den dolda _finalBuffer först
-        using (var dst = _finalBuffer.Lock())
-        {
-            unsafe
-            {
-                var dp = (byte*)dst.Address;
-                var rb = dst.RowBytes;
-                int totalBytes = rb * Height;
-
-                var layer0 = _screens[0];
-                var off0 = _screenOffsets[0];
-                    
-                if (off0.X == 0 && off0.Y == 0 && layer0.PixelSize.Width == Width && layer0.PixelSize.Height == Height)
-                {
-                    using var s0 = layer0.Lock();
-                    System.Buffer.MemoryCopy((void*)s0.Address, (void*)dp, totalBytes, totalBytes);
-                }
-                else
-                {
-                    // Rensa till svart om lager 0 är "komplext"
-                    System.Runtime.CompilerServices.Unsafe.InitBlock(dp, 0, (uint)totalBytes);
-                }
-
-                // Rita alla lager
-                for (int sIdx = 0; sIdx < _screens.Count; sIdx++)
-                {
-                    var currentScreen = _screens[sIdx];
-                    using (var src = currentScreen.Lock())
-                    {
-                        var sp = (byte*)src.Address;
-                        var sWidth = currentScreen.PixelSize.Width; // LAGRETS FAKTISKA BREDD
-                        var sHeight = currentScreen.PixelSize.Height;
-                        var sRowBytes = src.RowBytes;
-
-                        var off = _screenOffsets[sIdx];
-                        int sX = (int)off.X, sY = (int)off.Y;
-
-                        for (var y = 0; y < Height; y++)
-                        {
-                            int sy = (y + sY);
-                            while (sy < 0) sy += sHeight;
-                            if (sy >= sHeight) sy %= sHeight;
-
-                            var dr = (uint*)(dp + y * rb);
-                            var sr = (uint*)(sp + sy * sRowBytes);
-
-                            for (var x = 0; x < Width; x++)
-                            {
-                                int sx = (x + sX);
-                                if (sx < 0 || sx >= sWidth) {
-                                    sx %= sWidth;
-                                    if (sx < 0) sx += sWidth;
-                                }
-
-                                uint pixel = sr[sx];
-                                // Om pixeln inte är helt transparent (kolla Alpha eller RGB)
-                                if (sIdx == 0 || (pixel & 0x00FFFFFF) != 0)
-                                {
-                                    dr[x] = pixel | 0xFF000000; // Sätt Alpha till 255
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Rita sprites (fortfarande inuti _finalBuffer Lock!)
-                //using (var dc = _finalBuffer.CreateDrawingContext())
-                {
-                    // Applicera RAINBOWS (Copper-liknande effekter)
-                    foreach (var kvp in _rainbows.OrderBy(x => x.Key))
-                    {
-                        var rainbow = kvp.Value;
-                        if (rainbow.Colors.Count == 0) continue;
-
-                        for (int y = 0; y < rainbow.Height; y++)
-                        {
-                            int screenY = rainbow.Offset + y;
-                            if (screenY < 0 || screenY >= Height) continue;
-
-                            var color = rainbow.Colors[y % rainbow.Colors.Count];
-                            var rowPtr = dp + screenY * rb;
-
-                            // För enkelhetens skull i början: vi ersätter ALLA pixlar på raden 
-                            // som har bakgrundsfärgen (svart) med regnbågsfärgen.
-                            // Detta liknar hur Copper ändrar färg 0.
-                            for (int x = 0; x < Width; x++)
-                            {
-                                int di = x * 4;
-                                // Ändra logiken: Om det är RAINBOW 0 (bakgrunden), rita bara på svart.
-                                // Om det är ett högre nummer, tillåt att den ritar över tidigare regnbågar.
-                                bool isBackground = kvp.Key == 0;
-                                bool isPixelEmpty = rowPtr[di + 0] == 0 && rowPtr[di + 1] == 0 && rowPtr[di + 2] == 0;
-
-                                if (isPixelEmpty || !isBackground)
-                                {
-                                    rowPtr[di + 0] = color.B;
-                                    rowPtr[di + 1] = color.G;
-                                    rowPtr[di + 2] = color.R;
-                                    rowPtr[di + 3] = 255;
-                                }
-                            }
-                        }
-                    }
-                    foreach (var kv in _sprites.OrderBy(x => x.Key))
-                    {
-                        var s = kv.Value;
-                        if (!s.Visible || s.Frames.Count == 0) continue;
-                        RenderSpriteInternal(dp, rb, s);
-                    }
-
-                    foreach (var ft in _fontTexts)
-                    {
-                        RenderFontTextInternal(dp, rb, ft);
-                    }
-                    
-                }
-            }
-        }
-
-        // 2. Kopiera NU den färdiga bilden till den bitmapp som visas (Double Buffering)
-        using (var screenDst = _bmp.Lock())
-        using (var finalSrc = _finalBuffer.Lock())
-        {
-            unsafe
-            {
-                System.Buffer.MemoryCopy((void*)finalSrc.Address, (void*)screenDst.Address, finalSrc.RowBytes * Height,
-                    finalSrc.RowBytes * Height);
-            }
-        }
-        
-        _refreshTimer.Stop();
-        LastCpuUsage = (_refreshTimer.Elapsed.TotalMilliseconds / 16.66) * 100.0;
     }
 
     public void Scroll(int sid, int x, int y)
     {
-        if (sid < _screenOffsets.Count) _screenOffsets[sid] = new Point(x, y);
+        if (sid >= 0 && sid < GpuLayers.Count) 
+            GpuLayers[sid].Offset = new Point(-x, -y);
     }
 
     public Point GetScreenOffset(int sid)
     {
-        if (sid >= 0 && sid < _screenOffsets.Count) return _screenOffsets[sid];
+        if (sid >= 0 && sid < GpuLayers.Count) 
+            return GpuLayers[sid].Offset;
         return new Point(0, 0);
     }
 
@@ -502,17 +614,17 @@ public sealed class AmosGraphics
 
     public void Plot(int x, int y, Color c)
     {
-        EnsureScreen();
-        if ((uint)x >= (uint)Width || (uint)y >= (uint)Height) return;
-        using var fb = GetActiveScreen().Lock();
-        unsafe
+        lock (LockObject)
         {
-            var r = (byte*)fb.Address + y * fb.RowBytes;
-            var i = x * 4;
-            r[i + 0] = c.B;
-            r[i + 1] = c.G;
-            r[i + 2] = c.R;
-            r[i + 3] = c.A;
+            var bmp = GetActiveScreen();
+            if ((uint)x >= (uint)bmp.PixelSize.Width || (uint)y >= (uint)bmp.PixelSize.Height) return;
+            using var fb = bmp.Lock();
+            unsafe {
+                uint* p = (uint*)fb.Address;
+                uint val = (uint)((c.A << 24) | (c.R << 16) | (c.G << 8) | c.B);
+                if ((val & 0x00FFFFFF) == 0) p[y * (fb.RowBytes / 4) + x] = 0;
+                else p[y * (fb.RowBytes / 4) + x] = val | 0xFF000000;
+            }
         }
     }
 
@@ -520,62 +632,71 @@ public sealed class AmosGraphics
 
     public void Line(int x0, int y0, int x1, int y1, Color c)
     {
-        EnsureScreen();
-        int dx = Math.Abs(x1 - x0),
-            sx = x0 < x1 ? 1 : -1,
-            dy = -Math.Abs(y1 - y0),
-            sy = y0 < y1 ? 1 : -1,
-            err = dx + dy;
-        while (true)
+        lock (LockObject)
         {
-            Plot(x0, y0, c);
-            if (x0 == x1 && y0 == y1) break;
-            int e2 = 2 * err;
-            if (e2 >= dy)
+            EnsureScreen();
+            int dx = Math.Abs(x1 - x0),
+                sx = x0 < x1 ? 1 : -1,
+                dy = -Math.Abs(y1 - y0),
+                sy = y0 < y1 ? 1 : -1,
+                err = dx + dy;
+            while (true)
             {
-                err += dy;
-                x0 += sx;
-            }
+                Plot(x0, y0, c);
+                if (x0 == x1 && y0 == y1) break;
+                int e2 = 2 * err;
+                if (e2 >= dy)
+                {
+                    err += dy;
+                    x0 += sx;
+                }
 
-            if (e2 <= dx)
-            {
-                err += dx;
-                y0 += sy;
+                if (e2 <= dx)
+                {
+                    err += dx;
+                    y0 += sy;
+                }
             }
         }
     }
 
     public void Box(int x1, int y1, int x2, int y2)
     {
-        Normalize(ref x1, ref y1, ref x2, ref y2);
-        Line(x1, y1, x2, y1, Ink);
-        Line(x2, y1, x2, y2, Ink);
-        Line(x2, y2, x1, y2, Ink);
-        Line(x1, y2, x1, y1, Ink);
+        lock (LockObject)
+        {
+            Normalize(ref x1, ref y1, ref x2, ref y2);
+            Line(x1, y1, x2, y1, Ink);
+            Line(x2, y1, x2, y2, Ink);
+            Line(x2, y2, x1, y2, Ink);
+            Line(x1, y2, x1, y1, Ink);
+        }
     }
 
     public void Bar(int x1, int y1, int x2, int y2)
     {
-        EnsureScreen();
-        Normalize(ref x1, ref y1, ref x2, ref y2);
-        x1 = Math.Clamp(x1, 0, Width - 1);
-        x2 = Math.Clamp(x2, 0, Width - 1);
-        y1 = Math.Clamp(y1, 0, Height - 1);
-        y2 = Math.Clamp(y2, 0, Height - 1);
-        using var fb = GetActiveScreen().Lock();
-        unsafe
+        lock (LockObject)
         {
-            var p = (byte*)fb.Address;
-            for (var y = y1; y <= y2; y++)
+            EnsureScreen();
+            Normalize(ref x1, ref y1, ref x2, ref y2);
+            x1 = Math.Clamp(x1, 0, Width - 1);
+            x2 = Math.Clamp(x2, 0, Width - 1);
+            y1 = Math.Clamp(y1, 0, Height - 1);
+            y2 = Math.Clamp(y2, 0, Height - 1);
+            using var fb = GetActiveScreen().Lock();
+            unsafe
             {
-                var r = p + y * fb.RowBytes;
-                for (var x = x1; x <= x2; x++)
+                var p = (byte*)fb.Address;
+                for (var y = y1; y <= y2; y++)
                 {
-                    var i = x * 4;
-                    r[i + 0] = Ink.B;
-                    r[i + 1] = Ink.G;
-                    r[i + 2] = Ink.R;
-                    r[i + 3] = Ink.A;
+                    var r = p + y * fb.RowBytes;
+                    for (var x = x1; x <= x2; x++)
+                    {
+                        var i = x * 4;
+                        r[i + 0] = Ink.B;
+                        r[i + 1] = Ink.G;
+                        r[i + 2] = Ink.R;
+                        r[i + 3] = Ink.A;
+                    }
                 }
             }
         }
@@ -632,7 +753,79 @@ public sealed class AmosGraphics
         });
     }
 
-            public void FontLoad(int id, string file, int tw, int th)
+    public void FontLoad(int id, string file, int tw, int th)
+    {
+    try
+    {
+        using var b = new Bitmap(file);
+        var font = new Font { CharWidth = tw, CharHeight = th };
+        int cols = (int)b.Size.Width / tw;
+        int rows = (int)b.Size.Height / th;
+
+        for (int y = 0; y < rows; y++)
+        {
+            for (int x = 0; x < cols; x++)
+            {
+                var t = CreateEmptyBitmap(tw, th);
+
+                using (var fb = t.Lock())
+                {
+                    // 1. KOPIERA PIXLAR FRÅN FONT-ATLAS
+                    b.CopyPixels(
+                        new PixelRect(x * tw, y * th, tw, th),
+                        fb.Address,
+                        fb.RowBytes * th,
+                        fb.RowBytes);
+
+                    unsafe
+                    {
+                        uint* p = (uint*)fb.Address;
+                        int count = tw * th;
+
+                        for (int i = 0; i < count; i++)
+                        {
+                            uint pixel = p[i];
+
+                            uint a = (pixel >> 24) & 0xFF;
+                            uint r = (pixel >> 16) & 0xFF;
+                            uint g = (pixel >> 8) & 0xFF;
+                            uint bcol = pixel & 0xFF;
+
+                            // Svart = transparent
+                            if (r == 0 && g == 0 && bcol == 0)
+                            {
+                                p[i] = 0;
+                            }
+                            else
+                            {
+                                // Premultiplied alpha
+                                r = (r * a) / 255;
+                                g = (g * a) / 255;
+                                bcol = (bcol * a) / 255;
+
+                                // BGRA + Premul (Skia)
+                                p[i] =
+                                    (a << 24) |
+                                    (r << 0) |
+                                    (g << 8) |
+                                    (bcol << 16);
+                            }
+                        }
+                    }
+                }
+
+                font.CharBitmaps.Add(t);
+            }
+        }
+
+        _fonts[id] = font;
+    }
+    catch
+    {
+    }
+}
+
+        public void FontLoad2(int id, string file, int tw, int th)
         {
             try
             {
@@ -667,32 +860,41 @@ public sealed class AmosGraphics
             }
             catch { }
         }
-
+        
         public void FontRotate(int id, double angle) { if (_fonts.TryGetValue(id, out var f)) f.Angle = angle; }
         public void FontZoom(int id, double zx, double zy) { if (_fonts.TryGetValue(id, out var f)) { f.ZoomX = zx; f.ZoomY = zy; } }
         public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
 
-        public void FontPrint(int id, int x, int y, string text)
+        public unsafe void FontPrint(int id, int x, int y, string text)
         {
             if (!_fonts.TryGetValue(id, out var f)) return;
-            
-            // Om vi ritar på lager 0, behåll kö-logiken (för bakåtkompatibilitet/effekter)
-            if (_currentScreen == 0) {
-                _fontTexts.Add(new QueuedFontText { 
-                    FontId = id, X = x, Y = y, Text = text,
-                    Angle = f.Angle, ZoomX = f.ZoomX, ZoomY = f.ZoomY
-                });
-            } else {
-                // För alla andra lager, rita DIREKT in i lagrets bitmapp
-                var target = GetActiveScreen();
-                using var dst = target.Lock();
-                unsafe {
+
+            lock (LockObject)
+            {
+                if (_currentScreen == 0)
+                {
+                    _fontTexts.Add(new QueuedFontText
+                    {
+                        FontId = id,
+                        X = x,
+                        Y = y,
+                        Text = text,
+                        Angle = f.Angle,
+                        ZoomX = f.ZoomX,
+                        ZoomY = f.ZoomY
+                    });
+                }
+                else
+                {
+                    var target = GetActiveScreen();
+                    using var dst = target.Lock();
                     byte* dp = (byte*)dst.Address;
                     int rb = dst.RowBytes;
-                    int curX = x;
                     var qt = new QueuedFontText { Angle = f.Angle, ZoomX = f.ZoomX, ZoomY = f.ZoomY };
-                    
-                    foreach (var c in text) {
+                    int curX = x;
+
+                    foreach (var c in text)
+                    {
                         if (c == ' ') { curX += (int)(f.CharWidth * f.ZoomX); continue; }
                         RenderFontCharInternal(dp, rb, f, curX, y, c, qt);
                         curX += (int)(f.CharWidth * f.ZoomX);
@@ -701,7 +903,14 @@ public sealed class AmosGraphics
             }
         }
 
-        public void FontClear() => _fontTexts.Clear();
+
+        public void FontClear()
+        {
+            lock (LockObject)
+            {
+                _fontTexts.Clear();
+            }
+        }
         
         private unsafe void RenderFontTextInternal(byte* dp, int rb, QueuedFontText qt)
         {
@@ -731,45 +940,56 @@ public sealed class AmosGraphics
             byte* sp = (byte*)src.Address;
             int srb = src.RowBytes;
 
-            // Använd värdena från qt istället för f!
+            float zoomX = (float)qt.ZoomX;
+            float zoomY = (float)qt.ZoomY;
+
+            float cx = f.CharWidth / 2f;
+            float cy = f.CharHeight / 2f;
+
+            // För rotation
             double angleRad = qt.Angle * Math.PI / 180.0;
-            double cosA = Math.Cos(angleRad), sinA = Math.Sin(angleRad);
-            double invZx = 1.0 / qt.ZoomX, invZy = 1.0 / qt.ZoomY;
-            int hx = f.CharWidth / 2, hy = f.CharHeight / 2;
+            double cosA = Math.Cos(angleRad);
+            double sinA = Math.Sin(angleRad);
 
-            double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(qt.ZoomX, qt.ZoomY);
-            int targetW = GetActiveScreen().PixelSize.Width;
-            int targetH = GetActiveScreen().PixelSize.Height;
+            int w = (int)(f.CharWidth * Math.Abs(zoomX));
+            int h = (int)(f.CharHeight * Math.Abs(zoomY));
 
-            int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(targetW - 1, (int)(x + radius));
-            int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(targetH - 1, (int)(y + radius));
-
-
-            for (int py = minY; py <= maxY; py++)
+            for (int py = 0; py < h; py++)
             {
-                byte* rowPtr = dp + py * rb;
-                double dy = py - y;
-                for (int px = minX; px <= maxX; px++)
+                for (int px = 0; px < w; px++)
                 {
-                    double dx = px - x;
-                    double lx = (dx * cosA + dy * sinA) * invZx + hx;
-                    double ly = (dy * cosA - dx * sinA) * invZy + hy;
-                    int ilx = (int)lx, ily = (int)ly;
+                    // Koordinater i "tecknets lokala centrum"
+                    float nx = (px / Math.Abs(zoomX)) - cx;
+                    float ny = (py / Math.Abs(zoomY)) - cy;
 
-                    if (ilx >= 0 && ilx < f.CharWidth && ily >= 0 && ily < f.CharHeight)
-                    {
-                        byte* srcPx = sp + ily * srb + ilx * 4;
-                        if (srcPx[3] == 0 || (srcPx[0] == 0 && srcPx[1] == 0 && srcPx[2] == 0)) continue;
-                        int di = px * 4;
-                        rowPtr[di + 0] = srcPx[0];
-                        rowPtr[di + 1] = srcPx[1];
-                        rowPtr[di + 2] = srcPx[2];
-                        rowPtr[di + 3] = 255;
-                    }
+                    // Spegling vid negativ zoom
+                    if (zoomX < 0) nx = -nx;
+                    if (zoomY < 0) ny = -ny;
+
+                    // Rotation
+                    double rx = nx * cosA - ny * sinA;
+                    double ry = nx * sinA + ny * cosA;
+
+                    // Åter till tecknets pixelkoordinater
+                    int srcX = (int)(cx + rx);
+                    int srcY = (int)(cy + ry);
+
+                    if (srcX < 0 || srcX >= f.CharWidth || srcY < 0 || srcY >= f.CharHeight) continue;
+
+                    byte* srcPx = sp + srcY * srb + srcX * 4;
+                    if (srcPx[3] == 0) continue;
+
+                    int di = (x + px) * 4;
+                    byte* dr = dp + (y + py) * rb;
+                    dr[di + 0] = srcPx[0];
+                    dr[di + 1] = srcPx[1];
+                    dr[di + 2] = srcPx[2];
+                    dr[di + 3] = 255;
                 }
             }
         }
-        
+
+    
         public void FontChar(int id, int x, int y, string c)
         {
             if (!_fonts.TryGetValue(id, out var f) || string.IsNullOrEmpty(c)) return;
@@ -839,35 +1059,34 @@ public sealed class AmosGraphics
         }
     
         
-    public void LoadBackground(string f)
-    {
-        try
+        public void LoadBackground(string f)
         {
-            using var b = new Bitmap(f);
-            EnsureScreen();
-            int cw = Math.Min(Width, (int)b.Size.Width), ch = Math.Min(Height, (int)b.Size.Height);
-            using (var fb = GetActiveScreen().Lock())
-            {
-                b.CopyPixels(new PixelRect(0, 0, cw, ch), fb.Address, fb.RowBytes * Height, fb.RowBytes);
-                unsafe
-                {
-                    var p = (byte*)fb.Address;
-                    for (int i = 0; i < Width * Height; i++)
-                    {
-                        byte temp = p[i * 4 + 0];
-                        p[i * 4 + 0] = p[i * 4 + 2];
-                        p[i * 4 + 2] = temp;
-                        p[i * 4 + 3] = 255;
+            try {
+                using var b = new Bitmap(f);
+                lock (LockObject) {
+                    EnsureScreen();
+                    var layer = GpuLayers[_currentScreen];
+                    using (var fb = layer.Bitmap.Lock()) {
+                        b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address, fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
+                        unsafe {
+                            uint* p = (uint*)fb.Address;
+                            int count = layer.Bitmap.PixelSize.Width * layer.Bitmap.PixelSize.Height;
+                            for (int i = 0; i < count; i++) {
+                                uint pixel = p[i];
+                                // Byt plats på R och B (från RGBA till BGRA)
+                                uint a = (pixel >> 24) & 0xFF;
+                                uint r = (pixel >> 16) & 0xFF;
+                                uint g = (pixel >> 8) & 0xFF;
+                                uint bColor = pixel & 0xFF;
+                            
+                                if (r == 0 && g == 0 && bColor == 0) p[i] = 0;
+                                else p[i] = (a << 24) | (r << 0) | (g << 8) | (bColor << 16); // Korrekt ordning för Skia
+                            }
+                        }
                     }
                 }
-            }
-
-            Refresh();
+            } catch { }
         }
-        catch
-        {
-        }
-    }
 
     // ---------------- Tiles ----------------
     public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
@@ -967,7 +1186,17 @@ public sealed class AmosGraphics
         int pixelW = newW * _tileWidth;
         int pixelH = newH * _tileHeight;
 
-        _screens[_currentScreen] = CreateEmptyBitmap(pixelW, pixelH);
+        // Uppdatera bitmappen i det aktuella GPU-lagret istället för i den gamla _screens-listan
+        if (_currentScreen < GpuLayers.Count)
+        {
+            var layer = GpuLayers[_currentScreen];
+            GpuLayers[_currentScreen] = new GpuLayer 
+            { 
+                Bitmap = CreateEmptyBitmap(pixelW, pixelH),
+                Offset = layer.Offset,
+                Opacity = layer.Opacity
+            };
+        }
 
         // Initiera banan med -1 (tomt) istället för 0 (första tilen)
         for (int y = 0; y < newH; y++)
@@ -1254,7 +1483,7 @@ public sealed class AmosGraphics
         return x1 < x2 + s2.Width && x1 + s1.Width > x2 && y1 < y2 + s2.Height && y1 + s1.Height > y2;
     }
 
-    private Sprite GetSprite(int id)
+    public Sprite GetSprite(int id)
     {
         if (!_sprites.TryGetValue(id, out var s))
         {
