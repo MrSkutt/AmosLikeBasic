@@ -320,6 +320,7 @@ public partial class MainWindow : Window
         // Vi kollar om Shift var nedtryckt när vi klickade, eller anropar med true från kod
         bool startPaused = (sender == null && e == null) || 
                            (e is KeyEventArgs ke && (ke.KeyModifiers & KeyModifiers.Shift) != 0);
+        Editor.IsEnabled = false;
         
         await StartProgramAsync(startPaused);
     }
@@ -329,6 +330,7 @@ public partial class MainWindow : Window
         _isPaused = !_isPaused;
         PauseButton.Content = _isPaused ? "[ RESUME ]" : "[ PAUSE ]";
         StepButton.IsEnabled = _isPaused;
+        Editor.IsEnabled = _isPaused;
         if (!_isPaused) _stepSignal?.TrySetResult(true);
         if (_isPaused)
         {
@@ -348,6 +350,7 @@ public partial class MainWindow : Window
     private void StopButton_OnClick(object? sender, RoutedEventArgs e)
     {
         _isPaused = false;
+        Editor.IsEnabled = true;
         _stepSignal?.TrySetResult(false);
         _runCts?.Cancel();
         _audioEngine?.StopMod();

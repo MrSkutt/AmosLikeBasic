@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Threading;
+using AmosLikeBasic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -17,6 +18,8 @@ public sealed class GpuLayer
     
     public Point Offset { get; set; }
     public double Opacity { get; set; } = 1.0;
+    
+    public bool ReadyForSwap { get; set; } = false;
 }
 
 public sealed class AmosGpuView : Control
@@ -44,12 +47,13 @@ public sealed class AmosGpuView : Control
             new PixelSize(w, h),
             new Vector(96, 96)); // upplösning 96 DPI
     }
+    
 
     public override void Render(DrawingContext ctx)
     {
         if (Graphics == null) return;
         Graphics.BeginFrame();
-
+        
         // 1. Se till att framebuffer finns
         EnsureFramebuffer(Graphics.Width, Graphics.Height);
 
@@ -103,8 +107,6 @@ public sealed class AmosGpuView : Control
                     }
                 }
 
-
-
                 // RITA TEXTER → loopa över en **kopierad lista**
                 foreach (var qt in Graphics.GetQueuedTexts().ToList())
                 {
@@ -155,7 +157,7 @@ public sealed class AmosGpuView : Control
                         curX += (int)w;
                     }
                 }
-
+                
                 // RITA SPRITES
                 foreach (var id in Graphics.GetSpriteIds())
                 {
@@ -219,7 +221,6 @@ public sealed class AmosGraphics
     private int _currentScreen = 0;
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
     public double LastCpuUsage { get; private set; }
-    //private List<Point> _screenOffsets = new List<Point>();
     
     internal sealed class Rainbow
     {
@@ -241,7 +242,7 @@ public sealed class AmosGraphics
         public double Angle { get; set; } = 0;
         public double ZoomX { get; set; } = 1.0;
         public double ZoomY { get; set; } = 1.0;
-        public string CharMap { get; set; } = ""; 
+        public string CharMap { get; set; } = "";
     }
     
     internal Font? GetFont(int id) => _fonts.GetValueOrDefault(id);
@@ -251,6 +252,8 @@ public sealed class AmosGraphics
         int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
         return (charIdx >= 0 && charIdx < f.CharBitmaps.Count) ? f.CharBitmaps[charIdx] : null;
     }
+    
+    
     
     public sealed class Sprite
     {
@@ -489,12 +492,13 @@ public sealed class AmosGraphics
         {
             Width = w;
             Height = h;
-            
+
             GpuLayers.Clear();
-            GpuLayers.Add(new GpuLayer {
+            GpuLayers.Add(new GpuLayer
+            {
                 Bitmap = CreateEmptyBitmap(w, h),
                 Offset = new Point(0, 0)
-            });    
+            });
             _currentScreen = 0;
         }
 
@@ -505,6 +509,9 @@ public sealed class AmosGraphics
         }, Avalonia.Threading.DispatcherPriority.Render);
     }
 
+    
+  
+    
     public void SetDrawingScreen(int id)
     {
         lock (LockObject)
@@ -524,7 +531,7 @@ public sealed class AmosGraphics
             if (GpuLayers.Count == 0) Screen(640, 480);
         }
     }
-
+    
     private WriteableBitmap CreateEmptyBitmap(int w, int h, Color? background = null)
     {
         var bmp = new WriteableBitmap(
@@ -554,9 +561,10 @@ public sealed class AmosGraphics
                     p[i] = val;
             }
         }
-
         return bmp;
     }
+
+
     
     public void Clear(Color color)
     {
@@ -574,24 +582,60 @@ public sealed class AmosGraphics
             
         Refresh();
     }
-    
+
     private void ClearBitmap(WriteableBitmap bmp, Color c)
     {
         using var fb = bmp.Lock();
         unsafe
         {
             var p = (byte*)fb.Address;
+
+            byte a = c.A;
+            byte r = (byte)(c.R * a / 255);
+            byte g = (byte)(c.G * a / 255);
+            byte b = (byte)(c.B * a / 255);
+
             for (var i = 0; i < fb.RowBytes * bmp.PixelSize.Height; i += 4)
             {
-                p[i + 0] = c.B;
-                p[i + 1] = c.G;
-                p[i + 2] = c.R;
-                p[i + 3] = c.A;
+                p[i + 0] = b;
+                p[i + 1] = g;
+                p[i + 2] = r;
+                p[i + 3] = a;
             }
         }
     }
 
+    
+    private void ClearBitmap2(WriteableBitmap bmp, Color c)
+    {
+        using var fb = bmp.Lock();
+        unsafe
+        {
+            int rowPixels = bmp.PixelSize.Width;
+            
+            var p = (byte*)fb.Address;
 
+            byte a = c.A;
+            byte r = (byte)(c.R * a / 255);
+            byte g = (byte)(c.G * a / 255);
+            byte b = (byte)(c.B * a / 255);
+
+            for (var i = 0; i < rowPixels; i += 4)
+            {
+                p[i + 0] = b;
+                p[i + 1] = g;
+                p[i + 2] = r;
+                p[i + 3] = a;
+            }
+            
+            // Kopiera raden till resten av bitmapen
+            for (int y = 1; y < bmp.PixelSize.Height; y++)
+            {
+                Buffer.MemoryCopy(p, p + y * rowPixels, rowPixels * sizeof(uint), rowPixels * sizeof(uint));
+            }
+        }
+    }
+    
     public void Refresh()
     {
     }
@@ -824,43 +868,7 @@ public sealed class AmosGraphics
     {
     }
 }
-
-        public void FontLoad2(int id, string file, int tw, int th)
-        {
-            try
-            {
-                using var b = new Bitmap(file);
-                var font = new Font { CharWidth = tw, CharHeight = th };
-                int cols = (int)b.Size.Width / tw;
-                int rows = (int)b.Size.Height / th;
-
-                for (int y = 0; y < rows; y++)
-                {
-                    for (int x = 0; x < cols; x++)
-                    {
-                        var t = CreateEmptyBitmap(tw, th);
-                        using (var fb = t.Lock())
-                        {
-                            b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
-                            unsafe
-                            {
-                                var p = (byte*)fb.Address;
-                                for (int i = 0; i < tw * th; i++)
-                                {
-                                    byte temp = p[i * 4 + 0];
-                                    p[i * 4 + 0] = p[i * 4 + 2];
-                                    p[i * 4 + 2] = temp;
-                                }
-                            }
-                        }
-                        font.CharBitmaps.Add(t);
-                    }
-                }
-                _fonts[id] = font;
-            }
-            catch { }
-        }
-        
+    
         public void FontRotate(int id, double angle) { if (_fonts.TryGetValue(id, out var f)) f.Angle = angle; }
         public void FontZoom(int id, double zx, double zy) { if (_fonts.TryGetValue(id, out var f)) { f.ZoomX = zx; f.ZoomY = zy; } }
         public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
@@ -903,7 +911,7 @@ public sealed class AmosGraphics
             }
         }
 
-
+    
         public void FontClear()
         {
             lock (LockObject)
@@ -911,7 +919,7 @@ public sealed class AmosGraphics
                 _fontTexts.Clear();
             }
         }
-        
+
         private unsafe void RenderFontTextInternal(byte* dp, int rb, QueuedFontText qt)
         {
             if (!_fonts.TryGetValue(qt.FontId, out var f)) return;

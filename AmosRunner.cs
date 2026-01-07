@@ -216,9 +216,11 @@ public static class AmosRunner
                         break;
                     case "WAIT": 
                         if (arg.ToUpperInvariant() == "VBL") {
-                            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Render);
-                            await Task.Delay(16, token);
-                        } else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics)), token);
+                            await WaitNextFrameAsync(token);
+                        } else {
+                            int ms = Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
+                            await Task.Delay(ms, token);
+                        }
                         break;
                     case "IF":
                     {
@@ -473,7 +475,7 @@ public static class AmosRunner
                             // Om ett argument skickades med, välj det lagret först
                             graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
                         }
-                        graphics.Clear(Colors.Black); 
+                        graphics.Clear(Colors.Transparent); 
                         graphics.SetDrawingScreen(x);
                         onGraphicsChanged(); 
                         break;
@@ -756,10 +758,16 @@ public static class AmosRunner
                 }
                 return false;
             case "WAIT":
-                if (arg.ToUpperInvariant() == "VBL") {
-                    await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { }, Avalonia.Threading.DispatcherPriority.Render);
-                    await Task.Delay(16, t);
-                } else await Task.Delay(Math.Max(0, EvalInt(arg, vars, ln, gk, ikd, g)), t);
+                if (arg.ToUpperInvariant() == "VBL")
+                {
+                    // Vänta på nästa GPU-frame på ett korrekt sätt
+                    await WaitNextFrameAsync(t);
+                }
+                else
+                {
+                    int ms = Math.Max(0, EvalInt(arg, vars, ln, gk, ikd, g));
+                    await Task.Delay(ms, t);
+                }
                 return false;
             case "VSYNC": await al("@@VSYNC"); return false;
             case "REFRESH": g.Refresh(); og(); return false;
@@ -961,11 +969,8 @@ public static class AmosRunner
             }
             return 0.0;
         }
-// ... befintlig kod ...
 
-
-  
-
+    
     private static string ValueToString(object? v)
     {
         if (v is double d) 
@@ -1067,5 +1072,23 @@ public static class AmosRunner
         }
         public bool TryReadIdentifier(out string n) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsLetterOrDigit(_s[_i]) || _s[_i] == '$')) _i++; n = _s[s.._i]; return n.Length > 0; }
         public string ReadUntil(char c) { var s = _i; while (_i < _s.Length && _s[_i] != c) _i++; return _s[s.._i]; }
+    }
+    
+    private static DateTime _lastFrameTime = DateTime.MinValue;
+
+    private static async Task WaitNextFrameAsync(CancellationToken token)
+    {
+        // ~60 FPS -> 1000ms / 60 ≈ 16.6667ms
+        const double targetMs = 1000.0 / 60.0;
+
+        var now = DateTime.UtcNow;
+        double elapsed = _lastFrameTime == DateTime.MinValue 
+            ? targetMs 
+            : (now - _lastFrameTime).TotalMilliseconds;
+
+        double delay = Math.Max(0, targetMs - elapsed);
+
+        _lastFrameTime = now.AddMilliseconds(delay);
+        await Task.Delay(TimeSpan.FromMilliseconds(delay), token);
     }
 }
