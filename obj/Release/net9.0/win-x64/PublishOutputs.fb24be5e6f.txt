@@ -1,0 +1,65 @@
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/AmosLikeBasic.exe
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/ANCOOL1.YM
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/ding.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/ding.wav
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/ding2.wav
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/JOGEIR LILJEDAHL - G-Comp.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/JOGEIR LILJEDAHL - Guitar Slinger.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/JOGEIR LILJEDAHL - Physical Presence.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/JOGEIR LILJEDAHL - Signia.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/mus2.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/music.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/music.ym
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Sound/Scout.ym
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/.DS_Store
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/background.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/berg.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/FONT 32x32.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/font2.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/hero.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/hero_walk.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/test.amosmap
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/tiles2.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/tiles3.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/tiles4.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Graphics/tileset.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Projects/test.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Projects/tiles.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/bass.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/bassmix.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/libxmp.def
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/libxmp.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/libxmp.dll.a
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/AmosLikeBasic.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/AmosLikeBasic.runtimeconfig.json
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/AmosLikeBasic.pdb
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Base.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Controls.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.DesignerSupport.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Dialogs.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Markup.Xaml.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Markup.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Metal.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.MicroCom.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.OpenGL.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Vulkan.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Desktop.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Fonts.Inter.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.FreeDesktop.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Native.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Remote.Protocol.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Skia.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Themes.Fluent.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.Win32.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Avalonia.X11.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/HarfBuzzSharp.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/ManagedBass.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/ManagedBass.Mix.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/MicroCom.Runtime.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/SkiaSharp.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/Tmds.DBus.Protocol.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/av_libglesv2.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/libHarfBuzzSharp.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/libSkiaSharp.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Release/net9.0/win-x64/publish/AmosLikeBasic.deps.json

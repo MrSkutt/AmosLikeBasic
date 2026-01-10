@@ -1,1 +1,50 @@
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+1. Övergripande design / arkitektur
+- Grafiken hanteras primärt av GPU
+- Skärmen använder double buffering på frame-nivå
+- Två kompletta render-frames används:
+    en aktiv frame (presenteras)
+    en inaktiv frame (byggs upp)
+- Varje frame innehåller flera RenderLayer i Z-ordning (t.ex. background, sprites, text, UI)
+- ActiveFrame pekar på aktuell render-frame
+- InactiveFrame pekar på frame som skrivs till
+- Alla ritaroperationer sker alltid på den inaktiva framen
+- Frame-byte sker genom pekarswap, ingen pixelkopiering
+- Eventuell CPU-rendering används endast för debug, mätning eller statistik
+
+2. Viktiga krav och begränsningar
+- Använd riktiga pekare (unsafe) där det är motiverat
+- Plot() och alla ritfunktioner skriver alltid till den inaktiva framen
+- SwapBuffers() byter endast frame-referenser, aldrig innehåll
+- Inga individuella lager får swappa sig själva
+- Premultiplied alpha används konsekvent i GPU-rendering
+- Arkitekturen måste fungera både med:
+    GPU-rendering (huvudfall)
+    CPU-rendering (fallback / debug)
+
+3. Beslut vi redan fattat
+- Skärmen äger double buffering (inte render-lagren)
+- Två listor används för frames:
+    FrameA
+    FrameB
+- En bool (eller motsvarande) avgör vilken frame som är aktiv
+- RenderLayer representerar ett Z-ordnat renderplan, inte en buffer
+- Inga bitmap- eller pixelkopior vid frame-byte
+- Premultiplied alpha används i alla GPU-lager
+- Alla bakgrundsberäkningar sker på den inaktiva framen
+
+4. Senaste ändringar / pågående problem
+- Ny SwapBuffers()-implementation testad och fungerar korrekt med GPU-lager
+- CPU-baserad VBL-belastningsräknare behöver anpassas till GPU-pipeline
+- Nya ritfunktioner måste strikt följa:
+    build on inactive frame
+    present active frame
+- Terminologi håller på att konsolideras:
+    Frame = buffer-nivå
+    RenderLayer = Z-ordningsnivå
+
+
+
+Bra saker att ha koll på
+- Bygg för PC:
+    dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+

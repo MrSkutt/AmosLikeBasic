@@ -1,0 +1,41 @@
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/ANCOOL1.YM
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/ding.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/ding.wav
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/ding2.wav
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/JOGEIR LILJEDAHL - G-Comp.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/JOGEIR LILJEDAHL - Guitar Slinger.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/JOGEIR LILJEDAHL - Physical Presence.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/JOGEIR LILJEDAHL - Signia.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/mus2.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/music.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/music.ym
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Sound/Scout.ym
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/.DS_Store
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/background.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/berg.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/FONT 32x32.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/font2.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/hero.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/hero_walk.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/test.amosmap
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/tiles2.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/tiles3.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/tiles4.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Graphics/tileset.png
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Projects/test.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/Projects/tiles.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/AmosLikeBasic.deps.json
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/AmosLikeBasic.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/AmosLikeBasic.pdb
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/AmosLikeBasic.csproj.AssemblyReference.cache
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/Avalonia/Resources.Inputs.cache
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/Avalonia/resources
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/AmosLikeBasic.GeneratedMSBuildEditorConfig.editorconfig
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/AmosLikeBasic.AssemblyInfoInputs.cache
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/AmosLikeBasic.AssemblyInfo.cs
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/AmosLikeBasic.csproj.CoreCompileInputs.cache
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/AmosLikeBasic.sourcelink.json
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/Avalonia/AmosLikeBasic.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/Avalonia/AmosLikeBasic.pdb
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/refint/Avalonia/AmosLikeBasic.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/ref/AmosLikeBasic.dll
