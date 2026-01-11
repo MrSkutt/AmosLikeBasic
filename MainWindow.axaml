@@ -55,17 +55,17 @@
         <!-- Main Toolbar -->
         <Border Name="ToolbarBorder" DockPanel.Dock="Top" Background="#0A2D8F" Padding="5" BorderBrush="#7FB2FF" BorderThickness="0,0,0,2">
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button x:Name="RunButton" Classes="amos-button" Content="[ RUN ]" Background="#00CC00" Foreground="White" Click="RunButton_OnClick"/>
-                <Button x:Name="PauseButton" Classes="amos-button" Content="[ PAUSE ]" Background="#CC6600" Foreground="White" Click="PauseButton_OnClick" IsEnabled="False"/>
-                <Button x:Name="StepButton" Classes="amos-button" Content="[ STEP ]" Background="#0066CC" Foreground="White" Click="StepButton_OnClick" IsEnabled="False"/>
-                <Button x:Name="StopButton" Classes="amos-button" Content="[ STOP ]" Background="#CC0000" Foreground="White" Click="StopButton_OnClick" IsEnabled="False"/>
+                <Button x:Name="RunButton" Classes="amos-button" Content="[ RUN ]" Background="#00CC00" Foreground="White" Click="RunButton_OnClick" Focusable="False"/>
+                <Button x:Name="PauseButton" Classes="amos-button" Content="[ PAUSE ]" Background="#CC6600" Foreground="White" Click="PauseButton_OnClick" IsEnabled="False" Focusable="False"/>
+                <Button x:Name="StepButton" Classes="amos-button" Content="[ STEP ]" Background="#0066CC" Foreground="White" Click="StepButton_OnClick" IsEnabled="False" Focusable="False"/>
+                <Button x:Name="StopButton" Classes="amos-button" Content="[ STOP ]" Background="#CC0000" Foreground="White" Click="StopButton_OnClick" IsEnabled="False" Focusable="False"/>
                 <Separator Background="#7FB2FF" Width="2"/>
-                <Button Classes="amos-button" Content="LOAD" Click="OpenProject_OnClick" Background="#0A2D8F" Foreground="White"/>
-                <Button Classes="amos-button" Content="SAVE" Click="SaveProject_OnClick" Background="#0A2D8F" Foreground="White"/>
+                <Button Classes="amos-button" Content="LOAD" Click="OpenProject_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button Classes="amos-button" Content="SAVE" Click="SaveProject_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Separator Background="#7FB2FF" Width="2"/>
-                <Button Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White"/>
-                <Button Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White"/>
-                <Button Classes="amos-button" Content="CONSOLE" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White"/>
+                <Button Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button Classes="amos-button" Content="CONSOLE" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
             </StackPanel>
         </Border>
     

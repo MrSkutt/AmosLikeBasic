@@ -6,7 +6,7 @@
         Width="1280" Height="960"
         Background="Black"
         WindowStartupLocation="CenterOwner">
-    <Grid Background="Black" ClipToBounds="True">
+    <Grid Background="Black" ClipToBounds="True" Focusable="True">
         <Viewbox Stretch="Uniform">
             <Grid Width="640" Height="480" Background="Black">
                 <amosLikeBasic:AmosGpuView Name="ScreenControl" 

@@ -74,6 +74,15 @@ public partial class MainWindow : Window
 
     private void HandleGlobalKeyDown(object? sender, KeyEventArgs e)
     {
+        if (!_isPaused && RunButton.IsEnabled == false)
+        {
+            // Om händelsen kommer från editorn, hindra den
+            if (e.Source == Editor)
+            {
+                e.Handled = true;
+            }
+        }
+        
         // F5 - RUN / DEBUG
         if (e.Key == Key.F5) 
         { 
@@ -210,6 +219,7 @@ public partial class MainWindow : Window
             _screenWindow.Show();
         }
         _screenWindow.Activate();
+        _screenWindow.Focus(); 
 
         _isPaused = startPaused; // Sätt paus-läget direkt här
         
