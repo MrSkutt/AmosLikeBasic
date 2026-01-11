@@ -79,7 +79,7 @@ public sealed class AmosGpuView : Control
                 }
 
                 // RITA GPU-LAGER
-                foreach (var layer in Graphics.GpuLayers)
+                foreach (var layer in Graphics.ActiveFrame)
                 {
                     if (layer.Bitmap == null) continue;
 
@@ -214,10 +214,17 @@ public sealed class AmosGpuView : Control
 
 public sealed class AmosGraphics
 {
+    private readonly List<GpuLayer> _frameA = new();
+    private readonly List<GpuLayer> _frameB = new();
+    private bool _isAActive = true;
+
+    public List<GpuLayer> ActiveFrame => _isAActive ? _frameA : _frameB;
+    public List<GpuLayer> InactiveFrame => _isAActive ? _frameB : _frameA;
+    
     private System.Diagnostics.Stopwatch _frameTimer = new();
     public double LastCpuUsagePercent { get; private set; } = 0;
     public readonly object LockObject = new(); // Korrekt namn för låset
-    internal readonly List<GpuLayer> GpuLayers = new();
+    //internal readonly List<GpuLayer> GpuLayers = new();
     private int _currentScreen = 0;
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
     public double LastCpuUsage { get; private set; }
@@ -311,8 +318,18 @@ public sealed class AmosGraphics
     public Color Ink { get; set; } = Colors.White;
 
 
-    private WriteableBitmap GetActiveScreen()
-        => (WriteableBitmap)GpuLayers[_currentScreen].Bitmap;
+    public WriteableBitmap GetActiveScreen()
+    {
+        EnsureScreen();
+        
+        // Vi säkerställer att _currentScreen pekar på ett existerande lager
+        int index = (_currentScreen >= 0 && _currentScreen < InactiveFrame.Count) 
+            ? _currentScreen 
+            : 0;
+
+        // Info.txt: "Alla ritaroperationer sker alltid på den inaktiva framen"
+        return InactiveFrame[index].Bitmap;
+    }
     
     public int GetActiveScreenNumber()
     {
@@ -493,12 +510,21 @@ public sealed class AmosGraphics
             Width = w;
             Height = h;
 
-            GpuLayers.Clear();
-            GpuLayers.Add(new GpuLayer
+            _frameA.Clear();
+            _frameB.Clear();
+            
+            InactiveFrame.Add(new GpuLayer
             {
                 Bitmap = CreateEmptyBitmap(w, h),
                 Offset = new Point(0, 0)
             });
+            
+            ActiveFrame.Add(new GpuLayer
+            {
+                Bitmap = CreateEmptyBitmap(w, h),
+                Offset = new Point(0, 0)
+            });
+            
             _currentScreen = 0;
         }
 
@@ -516,9 +542,13 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            while (GpuLayers.Count <= id)
+            while (InactiveFrame.Count <= id)
             {
-                GpuLayers.Add(new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) });
+                InactiveFrame.Add(new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) });
+            }
+            while (ActiveFrame.Count <= id)
+            {
+                ActiveFrame.Add(new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) });
             }
             _currentScreen = id;
         }
@@ -526,9 +556,27 @@ public sealed class AmosGraphics
 
     private void EnsureScreen()
     {
-        lock (LockObject)
+        // Vi kollar om listorna är tomma istället för om de är null
+        if (_frameA.Count == 0 || _frameB.Count == 0)
         {
-            if (GpuLayers.Count == 0) Screen(640, 480);
+            lock (LockObject)
+            {
+                // Om de är tomma, initiera standardstorlek (t.ex. 640x480)
+                _frameA.Clear();
+                _frameB.Clear();
+
+                _frameA.Add(new GpuLayer 
+                { 
+                    Bitmap = CreateEmptyBitmap(640, 480),
+                    Offset = new Point(0, 0)
+                });
+
+                _frameB.Add(new GpuLayer 
+                { 
+                    Bitmap = CreateEmptyBitmap(640, 480),
+                    Offset = new Point(0, 0)
+                });
+            }
         }
     }
     
@@ -636,20 +684,54 @@ public sealed class AmosGraphics
         }
     }
     
+    public void SwapBuffers()
+    {
+        lock (LockObject)
+        {
+            _isAActive = !_isAActive;
+            // Nu byter vi bara pekare, ingen kopiering här!
+        }
+    }
+    
+    public void DoubleBuffer()
+    {
+        lock (LockObject)
+        {
+            // Kopiera Inactive -> Active (eller vice versa) 
+            // för att säkerställa att båda buffertarna ser likadana ut
+            for (int i = 0; i < ActiveFrame.Count && i < InactiveFrame.Count; i++)
+            {
+                var sourceBmp = InactiveFrame[i].Bitmap;
+                var destBmp = ActiveFrame[i].Bitmap;
+                
+                if (sourceBmp != null && destBmp != null)
+                {
+                    using var src = sourceBmp.Lock();
+                    using var dst = destBmp.Lock();
+                    unsafe
+                    {
+                        long size = (long)src.RowBytes * sourceBmp.PixelSize.Height;
+                        Buffer.MemoryCopy((void*)src.Address, (void*)dst.Address, size, size);
+                    }
+                }
+            }
+        }
+    }
+    
     public void Refresh()
     {
     }
 
     public void Scroll(int sid, int x, int y)
     {
-        if (sid >= 0 && sid < GpuLayers.Count) 
-            GpuLayers[sid].Offset = new Point(-x, -y);
+        if (sid >= 0 && sid < InactiveFrame.Count) 
+            InactiveFrame[sid].Offset = new Point(-x, -y);
     }
 
     public Point GetScreenOffset(int sid)
     {
-        if (sid >= 0 && sid < GpuLayers.Count) 
-            return GpuLayers[sid].Offset;
+        if (sid >= 0 && sid < InactiveFrame.Count) 
+            return InactiveFrame[sid].Offset;
         return new Point(0, 0);
     }
 
@@ -1073,7 +1155,7 @@ public sealed class AmosGraphics
                 using var b = new Bitmap(f);
                 lock (LockObject) {
                     EnsureScreen();
-                    var layer = GpuLayers[_currentScreen];
+                    var layer = InactiveFrame[_currentScreen];
                     using (var fb = layer.Bitmap.Lock()) {
                         b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address, fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
                         unsafe {
@@ -1195,10 +1277,17 @@ public sealed class AmosGraphics
         int pixelH = newH * _tileHeight;
 
         // Uppdatera bitmappen i det aktuella GPU-lagret istället för i den gamla _screens-listan
-        if (_currentScreen < GpuLayers.Count)
+        if (_currentScreen < InactiveFrame.Count)
         {
-            var layer = GpuLayers[_currentScreen];
-            GpuLayers[_currentScreen] = new GpuLayer 
+            var layer = InactiveFrame[_currentScreen];
+            InactiveFrame[_currentScreen] = new GpuLayer 
+            { 
+                Bitmap = CreateEmptyBitmap(pixelW, pixelH),
+                Offset = layer.Offset,
+                Opacity = layer.Opacity
+            };
+            var layer2 = ActiveFrame[_currentScreen];
+            ActiveFrame[_currentScreen] = new GpuLayer 
             { 
                 Bitmap = CreateEmptyBitmap(pixelW, pixelH),
                 Offset = layer.Offset,

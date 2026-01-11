@@ -215,11 +215,18 @@ public static class AmosRunner
                         }
                         break;
                     case "WAIT": 
-                        if (arg.ToUpperInvariant() == "VBL") {
+                        if (arg.ToUpperInvariant() == "VBL")
+                        {
+                            graphics.SwapBuffers();
                             await WaitNextFrameAsync(token);
                         } else {
                             int ms = Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
                             await Task.Delay(ms, token);
+                        }
+                        break;
+                    case "DOUBLE":
+                        if (arg.ToUpperInvariant() == "BUFFER") {
+                            graphics.DoubleBuffer();
                         }
                         break;
                     case "IF":

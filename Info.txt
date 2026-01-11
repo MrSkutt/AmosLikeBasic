@@ -41,7 +41,7 @@
 - Terminologi håller på att konsolideras:
     Frame = buffer-nivå
     RenderLayer = Z-ordningsnivå
-
+…
 
 
 Bra saker att ha koll på
