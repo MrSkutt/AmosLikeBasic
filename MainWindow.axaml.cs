@@ -267,8 +267,9 @@ public partial class MainWindow : Window
                                     var now = DateTime.Now;
                                     if (now - lastCpuUpdateTime > cpuUpdateInterval)
                                     {
-                                        var cpu = _gfx.LastCpuUsage;
-                                        //_screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
+                                        var cpu = _gfx.LastCpuUsagePercent;
+                                        if (_screenWindow != null)
+                                            _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
                                         StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%";
                                         lastCpuUpdateTime = now;
                                     }

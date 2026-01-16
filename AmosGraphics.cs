@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
-using System.Threading;
-using AmosLikeBasic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Media.Imaging;
+using Avalonia.Rendering.SceneGraph;
+using Avalonia.Skia;
+using SkiaSharp;
 
 namespace AmosLikeBasic;
 
@@ -18,9 +19,118 @@ public sealed class GpuLayer
     
     public Point Offset { get; set; }
     public double Opacity { get; set; } = 1.0;
+    public float Timer { get; set; } // For animations
+    // NYTT: Array för att skicka in t.ex. Y-positioner för 20 bars
+    public float[] ShaderParams { get; set; } = new float[22]; 
+    public float[] ShaderHeights { get; set; } = new float[22]; 
+    public SKColor[] ShaderColors { get; set; } = new SKColor[22]; 
+    public SKColor[] ShaderColorsTo { get; set; } = new SKColor[22];
     
-    public bool ReadyForSwap { get; set; } = false;
+    // Shader-support
+    public string? SkSlCode { get; set; }
+    public SKRuntimeEffect? CachedEffect { get; set; }
 }
+
+// Denna klass sköter själva Skia-ritningen
+public class ShaderDrawOperation : ICustomDrawOperation
+{
+    private readonly GpuLayer _layer;
+    private readonly Rect _destRect;
+
+    public ShaderDrawOperation(Rect bounds, GpuLayer layer, Rect destRect)
+    {
+        Bounds = bounds;
+        _layer = layer;
+        _destRect = destRect;
+    }
+
+    public Rect Bounds { get; }
+
+    public void Dispose()
+    {
+    }
+
+    public bool Equals(ICustomDrawOperation? other) => false;
+    public bool HitTest(Point p) => false;
+
+    public void Render(ImmediateDrawingContext context)
+    {
+        var lease = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
+        if (lease == null) return;
+
+        using var skia = lease.Lease();
+        var canvas = skia.SkCanvas;
+
+        // 1. Kompilera shadern
+        if (_layer.CachedEffect == null && !string.IsNullOrEmpty(_layer.SkSlCode))
+        {
+            _layer.CachedEffect = SKRuntimeEffect.Create(_layer.SkSlCode, out var errors);
+            if (!string.IsNullOrEmpty(errors))
+            {
+                System.Diagnostics.Debug.WriteLine($"SkSL Error: {errors}");
+                return;
+            }
+        }
+
+        if (_layer.CachedEffect != null)
+        {
+            try
+            {
+                using var fb = _layer.Bitmap.Lock();
+                var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
+                    SKColorType.Bgra8888, SKAlphaType.Premul);
+                using var skBitmap = new SKBitmap();
+                skBitmap.InstallPixels(info, fb.Address, fb.RowBytes);
+                using var image = SKImage.FromBitmap(skBitmap);
+
+                var children = new SKRuntimeEffectChildren(_layer.CachedEffect);
+                if (_layer.CachedEffect.Children.Contains("inputTexture"))
+                    children.Add("inputTexture", image.ToShader());
+
+                var uniforms = new SKRuntimeEffectUniforms(_layer.CachedEffect);
+            
+                if (_layer.CachedEffect.Uniforms.Contains("iResolution"))
+                    uniforms.Add("iResolution", new float[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
+
+                if (_layer.CachedEffect.Uniforms.Contains("uPositions")) {
+                    float[] p = new float[22];
+                    Array.Copy(_layer.ShaderParams, p, 22);
+                    uniforms.Add("uPositions", p);
+                }
+            
+                if (_layer.CachedEffect.Uniforms.Contains("uHeights")) {
+                    float[] h = new float[22];
+                    Array.Copy(_layer.ShaderHeights, h, 22);
+                    uniforms.Add("uHeights", h);
+                }
+
+                if (_layer.CachedEffect.Uniforms.Contains("uColors")) {
+                    float[] cf = new float[22 * 4];
+                    float[] ct = new float[22 * 4];
+                    for (int i = 0; i < 22; i++) {
+                        cf[i*4+0]=_layer.ShaderColors[i].Red/255f; cf[i*4+1]=_layer.ShaderColors[i].Green/255f;
+                        cf[i*4+2]=_layer.ShaderColors[i].Blue/255f; cf[i*4+3]=_layer.ShaderColors[i].Alpha/255f;
+                        ct[i*4+0]=_layer.ShaderColorsTo[i].Red/255f; ct[i*4+1]=_layer.ShaderColorsTo[i].Green/255f;
+                        ct[i*4+2]=_layer.ShaderColorsTo[i].Blue/255f; ct[i*4+3]=_layer.ShaderColorsTo[i].Alpha/255f;
+                    }
+                    uniforms.Add("uColors", cf);
+                    uniforms.Add("uColorsTo", ct);
+                }
+
+                using var shader = _layer.CachedEffect.ToShader(true, uniforms, children);
+                using var paint = new SKPaint { Shader = shader };
+                canvas.DrawRect(
+                    new SKRect((float)_destRect.X, (float)_destRect.Y, (float)_destRect.Right, (float)_destRect.Bottom),
+                    paint);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Render Error: " + ex.Message);
+            }
+        }
+    }
+}
+
 
 public sealed class AmosGpuView : Control
 {
@@ -52,7 +162,6 @@ public sealed class AmosGpuView : Control
     public override void Render(DrawingContext ctx)
     {
         if (Graphics == null) return;
-        Graphics.BeginFrame();
         
         // 1. Se till att framebuffer finns
         EnsureFramebuffer(Graphics.Width, Graphics.Height);
@@ -83,26 +192,37 @@ public sealed class AmosGpuView : Control
                 {
                     if (layer.Bitmap == null) continue;
 
+                  
                     var bmpSize = layer.Bitmap.Size;
                     var offset = layer.Offset;
 
                     int w = (int)bmpSize.Width;
                     int h = (int)bmpSize.Height;
 
-                    // Skär ut den del av lagret som syns på skärmen
-                    // Vi ritar 4 delar: original + de som "wrappar" horisontellt och/eller vertikalt
-                    for (int dx = -w; dx <= w; dx += w)
+                    if (!string.IsNullOrEmpty(layer.SkSlCode))
                     {
-                        for (int dy = -h; dy <= h; dy += h)
+                        // Använd vår custom Skia-operation
+                        var drawOp = new ShaderDrawOperation(new Rect(0,0, Graphics.Width, Graphics.Height), layer, new Rect(layer.Offset, layer.Bitmap.Size));
+                        ctx.Custom(drawOp);
+                    }
+                    else
+                    {
+                        // Skär ut den del av lagret som syns på skärmen
+                        // Vi ritar 4 delar: original + de som "wrappar" horisontellt och/eller vertikalt
+                        for (int dx = -w; dx <= w; dx += w)
                         {
-                            var drawRect = new Rect(offset.X + dx, offset.Y + dy, w, h);
+                            for (int dy = -h; dy <= h; dy += h)
+                            {
+                                var drawRect = new Rect(offset.X + dx, offset.Y + dy, w, h);
 
-                            // Snabb check: rita bara om den hamnar inom framebuffer
-                            if (drawRect.Right < 0 || drawRect.Bottom < 0 ||
-                                drawRect.Left > Graphics.Width || drawRect.Top > Graphics.Height)
-                                continue;
+                                // Snabb check: rita bara om den hamnar inom framebuffer
+                                if (drawRect.Right < 0 || drawRect.Bottom < 0 ||
+                                    drawRect.Left > Graphics.Width || drawRect.Top > Graphics.Height)
+                                    continue;
 
-                            fbCtx.DrawImage(layer.Bitmap, new Rect(bmpSize), drawRect);
+                                fbCtx.DrawImage(layer.Bitmap, new Rect(bmpSize), drawRect);
+
+                            }
                         }
                     }
                 }
@@ -205,9 +325,6 @@ public sealed class AmosGpuView : Control
             new Rect(_framebuffer.Size),
             new Rect(0, 0, Bounds.Width, Bounds.Height));
         
-        Graphics.EndFrame();
-        //_screenWindow.Title = $"AMOS Screen | GFX: {Graphics.LastCpuUsagePercent:F1}%";
-        Console.WriteLine($"CPU % av VBL: {Graphics.LastCpuUsagePercent:F1}%");
     }
 }
 
@@ -221,13 +338,58 @@ public sealed class AmosGraphics
     public List<GpuLayer> ActiveFrame => _isAActive ? _frameA : _frameB;
     public List<GpuLayer> InactiveFrame => _isAActive ? _frameB : _frameA;
     
-    private System.Diagnostics.Stopwatch _frameTimer = new();
+    private readonly System.Diagnostics.Stopwatch _vblTimer = new();
     public double LastCpuUsagePercent { get; private set; } = 0;
     public readonly object LockObject = new(); // Korrekt namn för låset
-    //internal readonly List<GpuLayer> GpuLayers = new();
     private int _currentScreen = 0;
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
     public double LastCpuUsage { get; private set; }
+    
+
+// ... byt ut RasterShaderCode i AmosGraphics.cs ...
+// ... inuti AmosGraphics klassen ...
+    private const string RasterShaderCode = @"
+uniform shader inputTexture;
+uniform float2 iResolution;
+uniform float uPositions[22];
+uniform float uHeights[22];
+uniform float4 uColors[22];
+uniform float4 uColorsTo[22];
+
+half4 main(float2 fragCoord) {
+    float y = fragCoord.y;
+    half4 mask = sample(inputTexture, fragCoord);
+    float mode = uPositions[21]; 
+    
+    // 1. Beräkna Bakgrundsraster (Slot 0)
+    float t = (y - uPositions[0]) / iResolution.y;
+    float triangle = 1.0 - abs((t - floor(t)) * 2.0 - 1.0);
+    half3 finalRGB = mix(uColors[0].rgb, uColorsTo[0].rgb, half(triangle));
+    bool hasRaster = (uHeights[0] > 0.1);
+
+    // 2. Bars (Slot 1-20)
+    for (int i = 1; i < 21; i++) {
+        float h = uHeights[i];
+        if (h > 0.1) {
+            float d = y - uPositions[i];
+            if (d >= 0.0 && d <= h) {
+                float bT = 1.0 - abs((d / h) * 2.0 - 1.0);
+                finalRGB = mix(uColors[i].rgb, uColorsTo[i].rgb, half(bT));
+                hasRaster = true;
+            }
+        }
+    }
+
+    // 3. Slutgiltig Mix
+    if (mask.a < 0.01 && !hasRaster) return half4(0.0);
+
+    if (mode > 0.5) {
+        return half4(mask.rgb * finalRGB, mask.a);
+    } else {
+        if (mask.a > 0.1) return mask;
+        return half4(finalRGB, 1.0);
+    }
+}";
     
     internal sealed class Rainbow
     {
@@ -259,7 +421,6 @@ public sealed class AmosGraphics
         int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
         return (charIdx >= 0 && charIdx < f.CharBitmaps.Count) ? f.CharBitmaps[charIdx] : null;
     }
-    
     
     
     public sealed class Sprite
@@ -334,6 +495,39 @@ public sealed class AmosGraphics
     public int GetActiveScreenNumber()
     {
         return _currentScreen;
+    }
+    
+    public void SetShaderParams(int layerIdx, int slot, float y, float height)
+    {
+        lock (LockObject) {
+            var frame = InactiveFrame;
+            if (layerIdx >= 0 && layerIdx < frame.Count) {
+                var layer = frame[layerIdx];
+                if (slot >= 0 && slot < 22) { // Uppdaterat till 24
+                    layer.ShaderParams[slot] = y;
+                    layer.ShaderHeights[slot] = height;
+                }
+            }
+        }
+    }
+
+    public void SetShaderColors(int layerIdx, int slot, Color c1, Color c2)
+    {
+        lock (LockObject) {
+            var frame = InactiveFrame;
+            if (layerIdx >= 0 && layerIdx < frame.Count) {
+                var layer = frame[layerIdx];
+                if (slot >= 0 && slot < 22) {
+                    layer.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255); // Sätt Alpha till 255
+                    layer.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
+                
+                    // Om det är slot 0 (bakgrund) och höjden är 0, sätt den till skärmhöjd
+                    if (slot == 0 && layer.ShaderHeights[0] <= 0) {
+                        layer.ShaderHeights[0] = (float)Height;
+                    }
+                }
+            }
+        }
     }
     
     // ---------------- Project Export/Import ----------------
@@ -446,14 +640,14 @@ public sealed class AmosGraphics
     
     public void BeginFrame()
     {
-        _frameTimer.Restart();
+        _vblTimer.Restart();
     }
 
     public void EndFrame(double targetVblMs = 16.67) // ~60Hz = 16.67 ms per VBL
     {
-        _frameTimer.Stop();
+        _vblTimer.Stop();
         // CPU-tid som procent av VBL
-        LastCpuUsagePercent = Math.Min(100, (_frameTimer.Elapsed.TotalMilliseconds / targetVblMs) * 100);
+        LastCpuUsagePercent = Math.Min(100, (_vblTimer.Elapsed.TotalMilliseconds / targetVblMs) * 100);
     }
 
 
@@ -507,27 +701,25 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            Width = w;
-            Height = h;
-
-            _frameA.Clear();
-            _frameB.Clear();
+            Width = w; Height = h;
+            _frameA.Clear(); _frameB.Clear();
             
-            InactiveFrame.Add(new GpuLayer
-            {
-                Bitmap = CreateEmptyBitmap(w, h),
-                Offset = new Point(0, 0)
-            });
+            var lA = new GpuLayer { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0), SkSlCode = RasterShaderCode };
+            var lB = new GpuLayer { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0), SkSlCode = RasterShaderCode };
             
-            ActiveFrame.Add(new GpuLayer
-            {
-                Bitmap = CreateEmptyBitmap(w, h),
-                Offset = new Point(0, 0)
-            });
+            for(int i=0; i<22; i++) { lA.ShaderHeights[i] = 0; lB.ShaderHeights[i] = 0; }
             
+            // Tvinga fram korrekt storlek på alla arrayer
+            lA.ShaderParams = new float[24]; lA.ShaderHeights = new float[24];
+            lA.ShaderColors = new SKColor[24]; lA.ShaderColorsTo = new SKColor[24];
+            lB.ShaderParams = new float[24]; lB.ShaderHeights = new float[24];
+            lB.ShaderColors = new SKColor[24]; lB.ShaderColorsTo = new SKColor[24];
+            
+            _frameA.Add(lA);
+            _frameB.Add(lB);
             _currentScreen = 0;
         }
-
+        
         // Tvinga UI-tråden att uppdatera storleken på vyn
         Avalonia.Threading.Dispatcher.UIThread.Post(() => {
             // Detta tvingar Viewbox att räkna om skalningen
@@ -544,11 +736,18 @@ public sealed class AmosGraphics
         {
             while (InactiveFrame.Count <= id)
             {
-                InactiveFrame.Add(new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) });
+                var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) };
+                layer.SkSlCode = RasterShaderCode; 
+                // Initiera ShaderHeights till 0 så att lagret är transparent som standard
+                for(int i=0; i<22; i++) layer.ShaderHeights[i] = 0;
+                InactiveFrame.Add(layer);
             }
             while (ActiveFrame.Count <= id)
             {
-                ActiveFrame.Add(new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) });
+                var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) };
+                layer.SkSlCode = RasterShaderCode;
+                for(int i=0; i<22; i++) layer.ShaderHeights[i] = 0;
+                ActiveFrame.Add(layer);
             }
             _currentScreen = id;
         }
@@ -580,8 +779,13 @@ public sealed class AmosGraphics
         }
     }
     
-    private WriteableBitmap CreateEmptyBitmap(int w, int h, Color? background = null)
+    private WriteableBitmap CreateEmptyBitmap(int w, int h, Color? background = null, GpuLayer? targetLayer = null)
     {
+        // Om vi skickar med ett targetLayer, sätt shadern där direkt
+        if (targetLayer != null) {
+            targetLayer.SkSlCode = RasterShaderCode;
+        }
+        
         var bmp = new WriteableBitmap(
             new PixelSize(w, h),
             new Vector(96, 96),

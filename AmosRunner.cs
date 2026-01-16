@@ -217,8 +217,18 @@ public static class AmosRunner
                     case "WAIT": 
                         if (arg.ToUpperInvariant() == "VBL")
                         {
+                            // Stega upp timern för alla lager innan swap
+                            lock(graphics.LockObject) {
+                                foreach(var layer in graphics.InactiveFrame) {
+                                    layer.Timer += 0.05f; // Justera hastigheten här
+                                }
+                            }
+                            
+                            graphics.EndFrame(); 
                             graphics.SwapBuffers();
+                            onGraphicsChanged(); 
                             await WaitNextFrameAsync(token);
+                            graphics.BeginFrame(); 
                         } else {
                             int ms = Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
                             await Task.Delay(ms, token);
@@ -550,53 +560,47 @@ public static class AmosRunner
                             StopMusic(audioEngine);
                         }
                         break;
-                        case "RAINBOW":
-                            if (arg.ToUpperInvariant().StartsWith("STR("))
-                            {
-                                int closeParen = arg.IndexOf(')');
-                                if (closeParen > 4)
-                                {
-                                    int rbNum = EvalInt(arg.Substring(4, closeParen - 4), vars, ln, getInkey, isKeyDown, graphics);
-                                    int eqIdx = arg.IndexOf('=');
-                                    if (eqIdx > 0)
-                                    {
-                                        string colorStr = Unquote(arg[(eqIdx + 1)..].Trim());
-                                        var colorParts = colorStr.Split(',').Select(c => c.Trim()).ToList();
-                                        
-                                        if (colorParts.Count == 2)
-                                        {
-                                            var c1 = ParseColor(colorParts[0]);
-                                            var c2 = ParseColor(colorParts[1]);
-                                            
-                                            // Hämta höjden som definierades i RAINBOW-kommandot
-                                            int height = graphics.GetRainbowHeight(rbNum);
-                                            if (height <= 0) height = 256; // Fallback
-                                            
-                                            graphics.SetRainbowGradient(rbNum, c1, c2, height);
-                                        }
-                                        else
-                                        {
-                                            var colors = colorParts.Select(c => ParseColor(c)).ToList();
-                                            graphics.SetRainbowColors(rbNum, colors);
-                                        }
-                                    }
-                                }
+                    case "RAINBOW":
+                        // Hämta det nuvarande aktiva lagret istället för hårdkodat 0
+                        int currentLayer = graphics.GetActiveScreenNumber();
+
+                        if (arg.ToUpperInvariant().StartsWith("STR("))
+                        {
+                            int closeParen = arg.IndexOf(')');
+                            int rbNum = EvalInt(arg.Substring(4, closeParen - 4), vars, ln, getInkey, isKeyDown, graphics);
+                            int eqIdx = arg.IndexOf('=');
+                            if (eqIdx > 0) {
+                                string colorStr = Unquote(arg[(eqIdx + 1)..].Trim());
+                                var parts = colorStr.Split(',').Select(c => c.Trim()).ToList();
+                                var c1 = ParseColor(parts[0]);
+                                var c2 = parts.Count > 1 ? ParseColor(parts[1]) : c1;
+            
+                                // Använd currentLayer!
+                                graphics.SetShaderColors(currentLayer, rbNum, c1, c2);
                             }
-                            else
-                            {
-                                var rbArgs = SplitCsvOrSpaces(arg);
-                                if (rbArgs.Count >= 4) {
-                                    // RAINBOW num, index, offset, height
-                                    int rbNum = EvalInt(rbArgs[0], vars, ln, getInkey, isKeyDown, graphics);
-                                    int rbIdx = EvalInt(rbArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int rbOff = EvalInt(rbArgs[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    int rbH = EvalInt(rbArgs[3], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.SetRainbow(rbNum, rbIdx, rbOff, rbH);
-                                } else if (rbArgs.Count >= 2 && rbArgs[0].ToUpperInvariant() == "DEL") {
-                                    graphics.DelRainbow(EvalInt(rbArgs[1], vars, ln, getInkey, isKeyDown, graphics));
-                                }
+                        }
+                        else {
+                            var rbArgs = SplitCsvOrSpaces(arg);
+                            if (rbArgs.Count >= 4) {
+                                int rbNum = EvalInt(rbArgs[0], vars, ln, getInkey, isKeyDown, graphics);
+                                int rbOff = EvalInt(rbArgs[2], vars, ln, getInkey, isKeyDown, graphics);
+                                int rbH = EvalInt(rbArgs[3], vars, ln, getInkey, isKeyDown, graphics);
+            
+                                // Använd currentLayer!
+                                graphics.SetShaderParams(currentLayer, rbNum, (float)rbOff, (float)rbH);
                             }
-                            break;
+                        }
+                        break;
+                    case "RAIN": // Format: RAIN typ, densitet
+                        var rainArgs = SplitCsvOrSpaces(arg);
+                        if (rainArgs.Count >= 2) {
+                            int type = EvalInt(rainArgs[0], vars, ln, getInkey, isKeyDown, graphics);
+                            float density = (float)EvalDouble(rainArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                            int curL = graphics.GetActiveScreenNumber();
+                            graphics.SetShaderParams(curL, 22, (float)type, 0); // Typ i slot 22
+                            graphics.SetShaderParams(curL, 23, density, 0);     // Densitet i slot 23
+                        }
+                        break;
                     case "TILE":
                         var tArgs = SplitCsvOrSpaces(arg);
                         if (tArgs.Count > 0) {
@@ -788,6 +792,7 @@ public static class AmosRunner
             default: if (!string.IsNullOrWhiteSpace(cmd)) throw new Exception($"Syntax Error in IF-THEN: Unknown command '{cmd}' at line {ln}"); return false;
         }
     }
+    
         private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
         {
             c = c.Trim();
