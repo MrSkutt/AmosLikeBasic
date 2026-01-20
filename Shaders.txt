@@ -1,0 +1,38 @@
+Metal / Mac Mini – Shader-regler (uppdaterad)
+
+1. Alpha
+    pAlpha finns inte på Metal.
+    Transparens måste alltid hanteras i fragmentets output alpha (half4 eller float4).
+
+    Manual alpha-blend görs direkt på färgvektorn:
+        fragCol.rgb = fragCol.rgb*(1-a) + dropCol.rgb*a;
+        fragCol.a   = fragCol.a + a*(1-fragCol.a);
+
+2. lerp
+    lerp(half3, half3, float) kraschar på Mac/Metal.
+    Om du vill använda lerp: alla tre argument måste ha samma typ och dimension:
+        float3 result = lerp(float3(a), float3(b), float3(alpha,alpha,alpha));
+    Enklare och stabilare: gör manuell blending som ovan.
+
+3. smoothstep / matematiska intrinsics
+    smoothstep(edge0, edge1, x) fungerar endast om alla argument är samma typ (float rekommenderas).
+    Half-precision (half) kan krascha på Metal.
+    Alternativ: manuell smoothstep:
+        float t = saturate((x - edge0)/(edge1 - edge0));
+        float s = t*t*(3-2*t);
+
+4. Rotation / lutning
+    Lutning av droppar/snö: 2D-rotation på koordinater, sedan multiplicera med stretch om du vill.
+        float2 dvRot;
+        dvRot.x = dv.x*cosA - dv.y*sinA;
+        dvRot.y = dv.x*sinA + dv.y*cosA;
+
+5. Färg och typ
+    Koordinater, positionsberäkningar: float
+    Färg: half (spara minne)
+    All blending och alpha måste göras i samma typ, ingen implicit konvertering mellan half/float
+
+6. Praktiska tumregler
+    Undvik att använda HLSL-liknande intrinsics med half på Apple GPU (t.ex. lerp, smoothstep) → gör beräkningar i float, konvertera till half på output.
+    Alla “Shadertoy”-liknande variabler (fragColor, pAlpha) måste mappas till Metal-standard: half4 eller float4 output.
+    Transparens måste alltid hanteras i output alpha, inte via en separat variabel.

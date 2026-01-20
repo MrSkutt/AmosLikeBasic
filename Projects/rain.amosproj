@@ -1,0 +1,1 @@
+{"Version":1,"ProgramText":"SCREEN 640,480\nSCREEN SELECT 0\nRAIN 1, 10  ; 1=Sn\u00F6, 20=Densitet\nRAINBOW 0,0,0,0 ; St\u00E4ng av bakgrundsraster s\u00E5 vi bara ser sn\u00F6n\n\nMain:\n  WAIT VBL\nGOTO Main","ScreenWidth":640,"ScreenHeight":480,"Sprites":[],"MapWidth":1,"MapHeight":1,"MapData":[-1]}

@@ -30,7 +30,6 @@
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Graphics/tiles3.png
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Graphics/tiles4.png
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Graphics/tileset.png
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/test.amosproj
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/tiles.amosproj
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/libbass.dylib
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/libbassmix.dylib
@@ -557,3 +556,9 @@
 /Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/osx-arm64/Avalonia/AmosLikeBasic.dll
 /Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/osx-arm64/Avalonia/AmosLikeBasic.pdb
 /Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/osx-arm64/refint/Avalonia/AmosLikeBasic.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/.DS_Store
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/arrays.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/fonts.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/rain.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/raster.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/sprites.amosproj

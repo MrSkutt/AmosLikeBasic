@@ -73,8 +73,8 @@
         <Grid ColumnDefinitions="*, Auto">
             <!-- Left side: Editor -->
             <Grid Grid.Column="0" RowDefinitions="*, 4, 150">
-                <Grid Grid.Row="0" RowDefinitions="*, Auto">
-                    <TextBox Grid.Row="0" x:Name="Editor" Classes="amos-editor" AcceptsReturn="True" BorderThickness="0" Padding="10"/>
+                <Grid Grid.Row="0" RowDefinitions="*, Auto" KeyboardNavigation.TabNavigation="None">
+                    <TextBox Grid.Row="0" x:Name="Editor" Classes="amos-editor" AcceptsReturn="True" AcceptsTab="True" BorderThickness="0" Padding="10"/>
                     <TextBlock Grid.Row="1" Name="CursorPosText" 
                                Text="Line: 1, Col: 1" 
                                Foreground="#7FB2FF" 

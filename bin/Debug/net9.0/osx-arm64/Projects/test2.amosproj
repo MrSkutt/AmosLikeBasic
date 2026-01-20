@@ -1,1 +1,0 @@
-{"Version":1,"ProgramText":"CLS\nPRINT \u0022READY.\u0022\nX = 0\nREPEAT\n  X = X \u002B 1\n  PRINT \u0022LINE \u0022 \u002B X\n  WAIT 100\nUNTIL X = 10\nEND\n","ScreenWidth":640,"ScreenHeight":480,"Sprites":[],"MapWidth":0,"MapHeight":0,"MapData":[]}

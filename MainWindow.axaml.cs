@@ -32,8 +32,10 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         Opened += MainWindow_OnOpened;
+
         this.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
         this.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
+        Editor.AddHandler(KeyDownEvent, Editor_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
 
         Editor.PropertyChanged += (s, e) => {
             if (e.Property.Name == nameof(TextBox.CaretIndex)) {
@@ -72,8 +74,51 @@ public partial class MainWindow : Window
         CursorPosText.Text = $"Line: {line}, Col: {col}";
     }
 
+    private void Editor_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.PageUp or Key.PageDown))
+            return;
+
+        var text = Editor.Text;
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        var currentLine = text[..Editor.CaretIndex].Count(c => c == '\n');
+
+        const int page = 20; // AMOS-känsla
+
+        var targetLine = e.Key == Key.PageUp
+            ? Math.Max(0, currentLine - page)
+            : Math.Min(lines.Length - 1, currentLine + page);
+
+        int charIndex = 0;
+        for (int i = 0; i < targetLine; i++)
+            charIndex += lines[i].Length + 1;
+
+        Editor.CaretIndex = charIndex;
+        Editor.SelectionStart = charIndex;
+        Editor.SelectionEnd = charIndex;
+        Editor.Focus();
+
+        e.Handled = true;
+    }
+    
     private void HandleGlobalKeyDown(object? sender, KeyEventArgs e)
     {
+        if (e.Source == Editor)
+        {
+            // Låt editorn hantera navigationstangenter själv, inklusive PageUp/Down
+            if (e.Key is Key.PageUp or Key.PageDown
+                or Key.Up or Key.Down
+                or Key.Left or Key.Right
+                or Key.Home or Key.End
+                or Key.Tab)
+            {
+                return; // Avbryt här så att e.Handled INTE sätts till true längre ner
+            }
+        }
+        
         if (!_isPaused && RunButton.IsEnabled == false)
         {
             // Om händelsen kommer från editorn, hindra den
@@ -86,6 +131,7 @@ public partial class MainWindow : Window
         // F5 - RUN / DEBUG
         if (e.Key == Key.F5) 
         { 
+            Editor.IsEnabled = false;
             bool debug = (e.KeyModifiers & KeyModifiers.Shift) != 0;
             _ = StartProgramAsync(debug); 
             e.Handled = true; 

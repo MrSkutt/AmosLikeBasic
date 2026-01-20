@@ -220,7 +220,7 @@ public static class AmosRunner
                             // Stega upp timern för alla lager innan swap
                             lock(graphics.LockObject) {
                                 foreach(var layer in graphics.InactiveFrame) {
-                                    layer.Timer += 0.05f; // Justera hastigheten här
+                                    layer.Timer += 0.016f; // Öka tiden (motsvarar ~60 FPS)
                                 }
                             }
                             
@@ -591,14 +591,14 @@ public static class AmosRunner
                             }
                         }
                         break;
-                    case "RAIN": // Format: RAIN typ, densitet
+                    case "RAIN": 
                         var rainArgs = SplitCsvOrSpaces(arg);
                         if (rainArgs.Count >= 2) {
                             int type = EvalInt(rainArgs[0], vars, ln, getInkey, isKeyDown, graphics);
                             float density = (float)EvalDouble(rainArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                             int curL = graphics.GetActiveScreenNumber();
-                            graphics.SetShaderParams(curL, 22, (float)type, 0); // Typ i slot 22
-                            graphics.SetShaderParams(curL, 23, density, 0);     // Densitet i slot 23
+                            // Slot 0 = Typ, Slot 1 = Mängd
+                            graphics.SetShadervalues(curL, 1, (float)type, density);
                         }
                         break;
                     case "TILE":
@@ -645,11 +645,26 @@ public static class AmosRunner
                     case "MAP":
                         var mArgs = SplitCsvOrSpaces(arg);
                         if (mArgs.Count >= 2 && mArgs[0].ToUpperInvariant() == "LOAD") {
-                            // Vi läser filen asynkront
                             var path = Unquote(mArgs[1]);
-                            using var fs = System.IO.File.OpenRead(path);
-                            // Vi kan återanvända samma logik som i editorn här för att fylla _gfx
-                            // Men för att hålla det enkelt just nu, kan du ladda banan via projektet.
+                            if (System.IO.File.Exists(path)) {
+                                try {
+                                    using var stream = System.IO.File.OpenRead(path);
+                                    var dto = await System.Text.Json.JsonSerializer.DeserializeAsync<MapDto>(stream);
+                                    if (dto != null) {
+                                        graphics.SetMapSize(dto.Width, dto.Height);
+                                        int idx = 0;
+                                        for (int y = 0; y < dto.Height; y++) {
+                                            for (int z = 0; z < dto.Width; z++) {
+                                                graphics.SetMapTile(z, y, dto.Data[idx++]);
+                                            }
+                                        }
+                                        // Rita ut banan på det stora lagret direkt efter laddning
+                                        graphics.DrawMap(0, 0);
+                                    }
+                                } catch (Exception ex) {
+                                    await appendLineAsync("MAP LOAD ERROR: " + ex.Message);
+                                }
+                            }
                         }
                         break;
                     case "END": return;
@@ -1103,4 +1118,5 @@ public static class AmosRunner
         _lastFrameTime = now.AddMilliseconds(delay);
         await Task.Delay(TimeSpan.FromMilliseconds(delay), token);
     }
+    private record MapDto(int Width, int Height, List<int> Data);
 }

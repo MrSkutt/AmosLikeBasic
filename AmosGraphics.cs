@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
+using System.Numerics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -10,6 +11,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Rendering.SceneGraph;
 using Avalonia.Skia;
 using SkiaSharp;
+using Vector = Avalonia.Vector;
 
 namespace AmosLikeBasic;
 
@@ -25,6 +27,8 @@ public sealed class GpuLayer
     public float[] ShaderHeights { get; set; } = new float[22]; 
     public SKColor[] ShaderColors { get; set; } = new SKColor[22]; 
     public SKColor[] ShaderColorsTo { get; set; } = new SKColor[22];
+    
+    public Vector4[] ShaderValues { get; set; } = new Vector4[2]; // t.ex. 8 slots
     
     // Shader-support
     public string? SkSlCode { get; set; }
@@ -74,60 +78,105 @@ public class ShaderDrawOperation : ICustomDrawOperation
 
         if (_layer.CachedEffect != null)
         {
-            try
-            {
-                using var fb = _layer.Bitmap.Lock();
-                var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
-                    SKColorType.Bgra8888, SKAlphaType.Premul);
-                using var skBitmap = new SKBitmap();
-                skBitmap.InstallPixels(info, fb.Address, fb.RowBytes);
-                using var image = SKImage.FromBitmap(skBitmap);
+                try
+                {
+                    using var fb = _layer.Bitmap.Lock();
+                    var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
+                        SKColorType.Bgra8888, SKAlphaType.Premul);
+                    using var skBitmap = new SKBitmap();
+                    skBitmap.InstallPixels(info, fb.Address, fb.RowBytes);
+                    using var image = SKImage.FromBitmap(skBitmap);
 
-                var children = new SKRuntimeEffectChildren(_layer.CachedEffect);
-                if (_layer.CachedEffect.Children.Contains("inputTexture"))
-                    children.Add("inputTexture", image.ToShader());
+                    var children = new SKRuntimeEffectChildren(_layer.CachedEffect);
+                    if (_layer.CachedEffect.Children.Contains("inputTexture"))
+                        children.Add("inputTexture", image.ToShader());
 
-                var uniforms = new SKRuntimeEffectUniforms(_layer.CachedEffect);
+                    var uniforms = new SKRuntimeEffectUniforms(_layer.CachedEffect);
             
-                if (_layer.CachedEffect.Uniforms.Contains("iResolution"))
-                    uniforms.Add("iResolution", new float[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
+                    if (_layer.CachedEffect.Uniforms.Contains("iResolution"))
+                        uniforms.Add("iResolution", new float[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
 
-                if (_layer.CachedEffect.Uniforms.Contains("uPositions")) {
-                    float[] p = new float[22];
-                    Array.Copy(_layer.ShaderParams, p, 22);
-                    uniforms.Add("uPositions", p);
-                }
-            
-                if (_layer.CachedEffect.Uniforms.Contains("uHeights")) {
-                    float[] h = new float[22];
-                    Array.Copy(_layer.ShaderHeights, h, 22);
-                    uniforms.Add("uHeights", h);
-                }
+                    // Lägg till denna för att shadern ska veta skärmens storlek separat från bildens storlek
+                    if (_layer.CachedEffect.Uniforms.Contains("iScreenResolution"))
+                        uniforms.Add("iScreenResolution", new float[] { (float)_destRect.Width, (float)_destRect.Height });
 
-                if (_layer.CachedEffect.Uniforms.Contains("uColors")) {
-                    float[] cf = new float[22 * 4];
-                    float[] ct = new float[22 * 4];
-                    for (int i = 0; i < 22; i++) {
-                        cf[i*4+0]=_layer.ShaderColors[i].Red/255f; cf[i*4+1]=_layer.ShaderColors[i].Green/255f;
-                        cf[i*4+2]=_layer.ShaderColors[i].Blue/255f; cf[i*4+3]=_layer.ShaderColors[i].Alpha/255f;
-                        ct[i*4+0]=_layer.ShaderColorsTo[i].Red/255f; ct[i*4+1]=_layer.ShaderColorsTo[i].Green/255f;
-                        ct[i*4+2]=_layer.ShaderColorsTo[i].Blue/255f; ct[i*4+3]=_layer.ShaderColorsTo[i].Alpha/255f;
+                    if (_layer.CachedEffect.Uniforms.Contains("iTime"))
+                        uniforms.Add("iTime", _layer.Timer);
+
+                    if (_layer.CachedEffect.Uniforms.Contains("uParams")) 
+                    {
+                        int slotCount = _layer.ShaderValues.Length;
+                        float[] uParamData = new float[slotCount * 4]; // varje Vector4 = 4 floats
+
+                        for (int i = 0; i < slotCount; i++)
+                        {
+                            Vector4 v = _layer.ShaderValues[i];
+                            int baseIndex = i * 4;
+                            uParamData[baseIndex + 0] = v.X;
+                            uParamData[baseIndex + 1] = v.Y;
+                            uParamData[baseIndex + 2] = v.Z;
+                            uParamData[baseIndex + 3] = v.W;
+                        }
+
+                        uniforms.Add("uParams", uParamData);
                     }
-                    uniforms.Add("uColors", cf);
-                    uniforms.Add("uColorsTo", ct);
-                }
+                    
+                    // Säkerställ att uPositions och uHeights är exakt 22 element
+                    if (_layer.CachedEffect.Uniforms.Contains("uPositions")) 
+                    {
+                        float[] p22 = new float[22];
+                        if (_layer.ShaderParams != null) 
+                            Array.Copy(_layer.ShaderParams, p22, Math.Min(_layer.ShaderParams.Length, 22));
+                        uniforms.Add("uPositions", p22);
+                    }
+            
+                    if (_layer.CachedEffect.Uniforms.Contains("uHeights")) 
+                    {
+                        float[] h22 = new float[22];
+                        if (_layer.ShaderHeights != null) 
+                            Array.Copy(_layer.ShaderHeights, h22, Math.Min(_layer.ShaderHeights.Length, 22));
+                        uniforms.Add("uHeights", h22);
+                    }
 
-                using var shader = _layer.CachedEffect.ToShader(true, uniforms, children);
-                using var paint = new SKPaint { Shader = shader };
-                canvas.DrawRect(
-                    new SKRect((float)_destRect.X, (float)_destRect.Y, (float)_destRect.Right, (float)_destRect.Bottom),
-                    paint);
+                    if (_layer.CachedEffect.Uniforms.Contains("uColors")) 
+                    {
+                        float[] cFrom = new float[22 * 4];
+                        float[] cTo = new float[22 * 4];
+                        
+                        // Säkerställ att vi inte kraschar om färg-arrayerna är null eller korta
+                        int colorCount = (_layer.ShaderColors != null) ? Math.Min(22, _layer.ShaderColors.Length) : 0;
+                        
+                        for (int i = 0; i < 22; i++) 
+                        {
+                            if (i < colorCount) {
+                                cFrom[i * 4 + 0] = _layer.ShaderColors[i].Red / 255f;
+                                cFrom[i * 4 + 1] = _layer.ShaderColors[i].Green / 255f;
+                                cFrom[i * 4 + 2] = _layer.ShaderColors[i].Blue / 255f;
+                                cFrom[i * 4 + 3] = _layer.ShaderColors[i].Alpha / 255f;
+
+                                cTo[i * 4 + 0] = _layer.ShaderColorsTo[i].Red / 255f;
+                                cTo[i * 4 + 1] = _layer.ShaderColorsTo[i].Green / 255f;
+                                cTo[i * 4 + 2] = _layer.ShaderColorsTo[i].Blue / 255f;
+                                cTo[i * 4 + 3] = _layer.ShaderColorsTo[i].Alpha / 255f;
+                            } else {
+                                // Standardvärden (Svart transparent)
+                                cFrom[i * 4 + 3] = 0.0f;
+                                cTo[i * 4 + 3] = 0.0f;
+                            }
+                        }
+                        uniforms.Add("uColors", cFrom);
+                        uniforms.Add("uColorsTo", cTo);
+                    }
+
+                    using var shader = _layer.CachedEffect.ToShader(true, uniforms, children);
+                    using var paint = new SKPaint { Shader = shader };
+                    canvas.DrawRect(new SKRect((float)_destRect.X, (float)_destRect.Y, (float)_destRect.Right, (float)_destRect.Bottom), paint);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine("Shader Render Crash: " + ex.Message);
+                }
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("Render Error: " + ex.Message);
-            }
-        }
     }
 }
 
@@ -156,6 +205,7 @@ public sealed class AmosGpuView : Control
         _framebuffer = new RenderTargetBitmap(
             new PixelSize(w, h),
             new Vector(96, 96)); // upplösning 96 DPI
+
     }
     
 
@@ -174,7 +224,7 @@ public sealed class AmosGpuView : Control
                 var amosRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
                 fbCtx.DrawRectangle(Brushes.Transparent, null, amosRect);
 
-                // RITA RAINBOWS
+                // RITA RAINBOWS, Kan tas bort?
                 foreach (var rb in Graphics.GetRainbows())
                 {
                     if (rb.Colors.Count == 0) continue;
@@ -201,8 +251,9 @@ public sealed class AmosGpuView : Control
 
                     if (!string.IsNullOrEmpty(layer.SkSlCode))
                     {
-                        // Använd vår custom Skia-operation
-                        var drawOp = new ShaderDrawOperation(new Rect(0,0, Graphics.Width, Graphics.Height), layer, new Rect(layer.Offset, layer.Bitmap.Size));
+                        // Vi ritar shadern på en rektangel som matchar skärmens storlek
+                        var screenRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
+                        var drawOp = new ShaderDrawOperation(screenRect, layer, screenRect);
                         ctx.Custom(drawOp);
                     }
                     else
@@ -227,56 +278,56 @@ public sealed class AmosGpuView : Control
                     }
                 }
 
-                // RITA TEXTER → loopa över en **kopierad lista**
+          
+// ... inuti AmosGpuView.Render, i loopen för queued texts ...
                 foreach (var qt in Graphics.GetQueuedTexts().ToList())
                 {
                     var f = Graphics.GetFont(qt.FontId);
                     if (f == null)
                         continue;
 
-                    int curX = qt.X;
+                    double totalUnscaledW = qt.Text.Length * f.CharWidth;
+                    double totalUnscaledH = f.CharHeight;
+
+                    // Pivot = center av texten
+                    double centerX = totalUnscaledW / 2.0;
+                    double centerY = totalUnscaledH / 2.0;
 
                     double angleRad = qt.Angle * Math.PI / 180.0;
 
-                    foreach (var c in qt.Text)
+                    for (int i = 0; i < qt.Text.Length; i++)
                     {
-                        if (c == ' ')
-                        {
-                            curX += (int)(f.CharWidth * qt.ZoomX);
-                            continue;
-                        }
+                        char c = qt.Text[i];
+                        if (c == ' ') continue;
 
                         var charBmp = Graphics.GetFontChar(f, c);
-                        if (charBmp == null)
-                        {
-                            curX += (int)(f.CharWidth * qt.ZoomX);
-                            continue;
-                        }
+                        if (charBmp == null) continue;
 
-                        double w = f.CharWidth * qt.ZoomX;
-                        double h = f.CharHeight * qt.ZoomY;
+                        // Bokstavens lokala position i ordets koordinater
+                        double charLocalX = i * f.CharWidth;
+                        double charLocalY = 0;
 
-                        // Glyphens centrum i världens koordinater
-                        double cx = curX + w / 2.0;
-                        double cy = qt.Y + h / 2.0;
-
-                        // Transform: flytta till centrum → rotera → flytta tillbaka
+                        // Transformkedja: rotation och zoom runt center
                         var transform =
-                            Matrix.CreateTranslation(-cx, -cy) *
-                            Matrix.CreateRotation(angleRad) *
-                            Matrix.CreateTranslation(cx, cy);
+                            Matrix.CreateTranslation(charLocalX, charLocalY) // glyph lokalt
+                            * Matrix.CreateTranslation(-centerX, -centerY)   // flytta center till origo
+                            * Matrix.CreateScale(qt.ZoomX, qt.ZoomY)         // zoom
+                            * Matrix.CreateRotation(angleRad)                // rotation
+                            * Matrix.CreateTranslation(centerX + qt.X, centerY + qt.Y); // tillbaka till center + top-left
 
                         using (fbCtx.PushPostTransform(transform))
                         {
                             fbCtx.DrawImage(
                                 charBmp,
                                 new Rect(charBmp.Size),
-                                new Rect(curX, qt.Y, w, h));
+                                new Rect(0, 0, f.CharWidth, f.CharHeight));
                         }
-
-                        curX += (int)w;
                     }
                 }
+
+
+
+
                 
                 // RITA SPRITES
                 foreach (var id in Graphics.GetSpriteIds())
@@ -344,50 +395,147 @@ public sealed class AmosGraphics
     private int _currentScreen = 0;
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
     public double LastCpuUsage { get; private set; }
-    
 
-// ... byt ut RasterShaderCode i AmosGraphics.cs ...
-// ... inuti AmosGraphics klassen ...
+
+
     private const string RasterShaderCode = @"
 uniform shader inputTexture;
 uniform float2 iResolution;
+uniform float2 iScreenResolution;
+uniform float iTime;
 uniform float uPositions[22];
 uniform float uHeights[22];
 uniform float4 uColors[22];
 uniform float4 uColorsTo[22];
+uniform vec4 uParams[2];
+
+float hash(float n) { return fract(sin(n) * 43758.5453); }
 
 half4 main(float2 fragCoord) {
-    float y = fragCoord.y;
-    half4 mask = sample(inputTexture, fragCoord);
-    float mode = uPositions[21]; 
-    
-    // 1. Beräkna Bakgrundsraster (Slot 0)
-    float t = (y - uPositions[0]) / iResolution.y;
-    float triangle = 1.0 - abs((t - floor(t)) * 2.0 - 1.0);
-    half3 finalRGB = mix(uColors[0].rgb, uColorsTo[0].rgb, half(triangle));
-    bool hasRaster = (uHeights[0] > 0.1);
+    float2 scroll = float2(uParams[0].x, uParams[0].y);
+    float2 wrappedCoord = fragCoord + scroll;
 
-    // 2. Bars (Slot 1-20)
+    // Wrap manually
+    wrappedCoord.x = wrappedCoord.x - iResolution.x * floor(wrappedCoord.x / iResolution.x);
+    wrappedCoord.y = wrappedCoord.y - iResolution.y * floor(wrappedCoord.y / iResolution.y);
+
+    // Sample the texture
+    half4 mask = sample(inputTexture, wrappedCoord);
+    float y = fragCoord.y;
+    float2 uv = fragCoord / iScreenResolution.xy;
+    
+    float mode = uPositions[21]; 
+    float weatherType = uParams[1].x;
+    float weatherDensity = uParams[1].y;
+
+    // 1. RASTERS (Slot 0-20)
+        float h0 = uHeights[0];
+        float dist0 = y - uPositions[0];
+        half3 finalRGB = uColors[0].rgb;
+        bool hasR = (h0 > 0.1);
+
+        if (hasR && dist0 >= 0.0 && dist0 <= h0) {
+            float t = dist0 / h0;
+            // Linjär gradient från färg A till B över hela höjden
+            finalRGB = mix(uColors[0].rgb, uColorsTo[0].rgb, half(t));
+        }
+
+
     for (int i = 1; i < 21; i++) {
         float h = uHeights[i];
         if (h > 0.1) {
-            float d = y - uPositions[i];
-            if (d >= 0.0 && d <= h) {
-                float bT = 1.0 - abs((d / h) * 2.0 - 1.0);
-                finalRGB = mix(uColors[i].rgb, uColorsTo[i].rgb, half(bT));
-                hasRaster = true;
+            float dist = y - uPositions[i];
+            if (dist >= 0.0 && dist <= h) {
+                float barT = 1.0 - abs((dist / h) * 2.0 - 1.0);
+                finalRGB = mix(uColors[i].rgb, uColorsTo[i].rgb, half(barT));
+                hasR = true;
             }
         }
     }
 
-    // 3. Slutgiltig Mix
-    if (mask.a < 0.01 && !hasRaster) return half4(0.0);
+    // 2. WEATHER (Nu med slumpmässiga positioner)
+    half3 pCol = half3(0.0);
+    if (weatherType > 0.5) {
+        float size = 15.0 + weatherDensity;
+        float2 uv = fragCoord / iResolution.xy;
+        float2 grid = uv * float2(size, size * (iResolution.y / iResolution.x));
+        float2 id = floor(grid);
+        float2 gUv = fract(grid) - 0.5;
+        float h = hash(id.x * 123.0 + id.y * 456.0);
 
+        
+        // Skapa tre olika slumptal baserat på cellens ID
+        float h1 = hash(id.x * 123.0 + id.y * 456.0);
+        float h2 = hash(h1 * 789.0);
+        float h3 = hash(h2 * 321.0);
+        
+        // Slumpmässig offset inuti cellen (-0.4 till 0.4)
+        float2 pOffset = float2(h2 - 0.5, h3 - 0.5) * 0.8;
+
+        if (weatherType < 1.5) { // SNÖ
+            float speed = 3.4 + h1 * 0.4;
+            float pX = pOffset.x + sin(iTime + h1 * 6.28) * 0.2;
+            float pY = fract(h1 + iTime * speed) - 0.5;
+            if (length(gUv - float2(pX, pY)) < 0.05) {
+                float2 dv = gUv - float2(pX, pY);
+                float d = length(dv);
+                float radius = 0.05;
+                if (d < radius)
+                {
+                    float t = d / radius;
+                    t = saturate(t);
+
+                    float a = 1.0 - (t * t * (3.0 - 2.0 * t));
+                    pCol = half3(0.8, 0.9, 1.0);
+                }
+            }
+        } 
+
+        else if (weatherType < 2.5) { // REGN
+            float speed = 8.0;
+            float pY = fract(h1 + iTime * speed) - 0.5;
+            float pX = fract(h1 * 12.34) - 0.5;
+
+            // Lutning ca -10° till +10°
+            float angle = (fract(h1 * 7.89) - 0.5) * (10.0 * 3.1415926 / 180.0);
+            float cosA = cos(angle);
+            float sinA = sin(angle);
+
+            float2 dv = gUv - float2(pX, pY);
+            float2 dvRot;
+            dvRot.x = dv.x * cosA - dv.y * sinA;
+            dvRot.y = dv.x * sinA + dv.y * cosA;
+
+            // Stretch droppar horisontellt
+            dvRot *= float2(15.0, 1.0);
+
+            // Mjuk kant
+            float radius = 0.25;
+        float t = length(dvRot) / radius;
+        t = saturate(t);
+        float a = (1.0 - (t*t*(3.0 - 2.0*t))) * 0.5; // alpha
+
+        // --- Metal-säker färg-blend ---
+        half3 col = half3(0.6, 0.7, 1.0);
+        pCol = pCol * (1.0 - half(a)) + col * half(a);
+    }
+        else { // STJÄRNOR (Nu helt slumpade och skimrande)
+            float shimmer = sin(iTime * 1.5 + h1 * 10.0) * 0.5 + 0.5;
+            // Vi använder pOffset för att placera stjärnan slumpmässigt i cellen
+            if (length(gUv - pOffset) < 0.03) pCol = half3(half(shimmer * h1));
+        }
+    }
+
+    // 3. FINAL MIX
+    if (mask.a < 0.01 && !hasR && weatherType < 0.5) return half4(0.0, 0.0, 0.0, 0.0);
+
+    half3 combinedBG = hasR ? finalRGB + pCol : pCol;
     if (mode > 0.5) {
-        return half4(mask.rgb * finalRGB, mask.a);
+        return half4(mask.rgb * combinedBG, mask.a);
     } else {
         if (mask.a > 0.1) return mask;
-        return half4(finalRGB, 1.0);
+        float outA = (hasR || weatherType > 2.5) ? 1.0 : half(length(pCol));
+        return half4(combinedBG, outA);
     }
 }";
     
@@ -411,6 +559,9 @@ half4 main(float2 fragCoord) {
         public double Angle { get; set; } = 0;
         public double ZoomX { get; set; } = 1.0;
         public double ZoomY { get; set; } = 1.0;
+        public double BaseZoomX { get; set; } = 1.0;
+        public double BaseZoomY { get; set; } = 1.0;
+        public bool BaseZoomInitialized;
         public string CharMap { get; set; } = "";
     }
     
@@ -497,6 +648,20 @@ half4 main(float2 fragCoord) {
         return _currentScreen;
     }
     
+    public void SetShadervalues(int layerIdx, int slot, float nr, float value)
+    {
+        lock (LockObject) {
+            var frame = InactiveFrame;
+            if (layerIdx >= 0 && layerIdx < frame.Count) {
+                var layer = frame[layerIdx];
+                if (slot >= 0 && slot < 2) {
+                    layer.ShaderValues[slot] = new Vector4(nr, value,0f,0f);
+                }
+                layer.SkSlCode = RasterShaderCode;   
+            }
+        }
+    }
+    
     public void SetShaderParams(int layerIdx, int slot, float y, float height)
     {
         lock (LockObject) {
@@ -506,7 +671,7 @@ half4 main(float2 fragCoord) {
                 if (slot >= 0 && slot < 22) { // Uppdaterat till 24
                     layer.ShaderParams[slot] = y;
                     layer.ShaderHeights[slot] = height;
-                }
+                }layer.SkSlCode = RasterShaderCode;   
             }
         }
     }
@@ -526,6 +691,7 @@ half4 main(float2 fragCoord) {
                         layer.ShaderHeights[0] = (float)Height;
                     }
                 }
+                layer.SkSlCode = RasterShaderCode;   
             }
         }
     }
@@ -704,8 +870,8 @@ half4 main(float2 fragCoord) {
             Width = w; Height = h;
             _frameA.Clear(); _frameB.Clear();
             
-            var lA = new GpuLayer { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0), SkSlCode = RasterShaderCode };
-            var lB = new GpuLayer { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0), SkSlCode = RasterShaderCode };
+            var lA = new GpuLayer { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0) }; //, SkSlCode = RasterShaderCode };
+            var lB = new GpuLayer { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0) }; //, SkSlCode = RasterShaderCode };
             
             for(int i=0; i<22; i++) { lA.ShaderHeights[i] = 0; lB.ShaderHeights[i] = 0; }
             
@@ -737,7 +903,7 @@ half4 main(float2 fragCoord) {
             while (InactiveFrame.Count <= id)
             {
                 var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) };
-                layer.SkSlCode = RasterShaderCode; 
+                //layer.SkSlCode = RasterShaderCode; 
                 // Initiera ShaderHeights till 0 så att lagret är transparent som standard
                 for(int i=0; i<22; i++) layer.ShaderHeights[i] = 0;
                 InactiveFrame.Add(layer);
@@ -745,7 +911,7 @@ half4 main(float2 fragCoord) {
             while (ActiveFrame.Count <= id)
             {
                 var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) };
-                layer.SkSlCode = RasterShaderCode;
+                //layer.SkSlCode = RasterShaderCode;
                 for(int i=0; i<22; i++) layer.ShaderHeights[i] = 0;
                 ActiveFrame.Add(layer);
             }
@@ -783,7 +949,7 @@ half4 main(float2 fragCoord) {
     {
         // Om vi skickar med ett targetLayer, sätt shadern där direkt
         if (targetLayer != null) {
-            targetLayer.SkSlCode = RasterShaderCode;
+           // targetLayer.SkSlCode = RasterShaderCode;
         }
         
         var bmp = new WriteableBitmap(
@@ -926,18 +1092,20 @@ half4 main(float2 fragCoord) {
     {
     }
 
-    public void Scroll(int sid, int x, int y)
+    public void Scroll(int sid, float x, float y)
     {
         if (sid >= 0 && sid < InactiveFrame.Count) 
-            InactiveFrame[sid].Offset = new Point(-x, -y);
+            //InactiveFrame[sid].ShaderValues[0] = new Vector4(x, y,0f,0f);
+            SetShadervalues(sid,0,x,y);
+            //InactiveFrame[sid].Offset = new Point(-x, -y);
     }
 
-    public Point GetScreenOffset(int sid)
-    {
-        if (sid >= 0 && sid < InactiveFrame.Count) 
-            return InactiveFrame[sid].Offset;
-        return new Point(0, 0);
-    }
+    //public Vector4 GetScreenOffset(int sid)
+    //{
+    //    if (sid >= 0 && sid < InactiveFrame.Count) 
+    //        return InactiveFrame[sid].Offset;
+    //    return new Point(0, 0);
+   // }
 
     // ---------------- Drawing ----------------
     public void Plot(int x, int y) => Plot(x, y, Ink);
@@ -1156,15 +1324,42 @@ half4 main(float2 fragCoord) {
 }
     
         public void FontRotate(int id, double angle) { if (_fonts.TryGetValue(id, out var f)) f.Angle = angle; }
-        public void FontZoom(int id, double zx, double zy) { if (_fonts.TryGetValue(id, out var f)) { f.ZoomX = zx; f.ZoomY = zy; } }
-        public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
+        public void FontZoom(int id, double zx, double zy)
+        {
+            if (!_fonts.TryGetValue(id, out var f))
+                return;
+        
+            if (!f.BaseZoomInitialized)
+            {
+                f.BaseZoomX = zx;
+                f.BaseZoomY = zy;
+                f.BaseZoomInitialized = true;
+            }
+            
+            f.ZoomX = zx;
+            f.ZoomY = zy;
+        }        public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
 
         public unsafe void FontPrint(int id, int x, int y, string text)
         {
             if (!_fonts.TryGetValue(id, out var f)) return;
+            
+            double totalUnscaledW = text.Length * f.CharWidth;
+            double totalUnscaledH = f.CharHeight;
 
+            double centerX = totalUnscaledW / 2.0;
+            double centerY = totalUnscaledH / 2.0;
+            
+            // --- Kompensation för att flytta texten utan att påverka rotation/zoom ---
+            double compensateX = centerX * (f.BaseZoomX - 1.0);
+            double compensateY = centerY * (f.BaseZoomY - 1.0);
+
+            x = x + (int)compensateX;
+            y = y + (int)compensateY;
+            
             lock (LockObject)
             {
+
                 if (_currentScreen == 0)
                 {
                     _fontTexts.Add(new QueuedFontText
@@ -1488,14 +1683,16 @@ half4 main(float2 fragCoord) {
             { 
                 Bitmap = CreateEmptyBitmap(pixelW, pixelH),
                 Offset = layer.Offset,
-                Opacity = layer.Opacity
+                Opacity = layer.Opacity,
+                //SkSlCode = layer.SkSlCode
             };
             var layer2 = ActiveFrame[_currentScreen];
             ActiveFrame[_currentScreen] = new GpuLayer 
             { 
                 Bitmap = CreateEmptyBitmap(pixelW, pixelH),
                 Offset = layer.Offset,
-                Opacity = layer.Opacity
+                Opacity = layer.Opacity,
+                //SkSlCode = layer2.SkSlCode 
             };
         }
 
@@ -1581,10 +1778,15 @@ half4 main(float2 fragCoord) {
                     int tx = dx + x;
                     if (tx < 0 || tx >= tw) continue;
                     int si = x * 4, di = tx * 4;
-                    dr[di + 0] = sr[si + 0];
-                    dr[di + 1] = sr[si + 1];
-                    dr[di + 2] = sr[si + 2];
-                    dr[di + 3] = 255;
+
+                    // Kolla om käll-pixeln (tilen) faktiskt har någon alfa (inte är helt transparent)
+                    if (sr[si + 3] > 0)
+                    {
+                        dr[di + 0] = sr[si + 0];
+                        dr[di + 1] = sr[si + 1];
+                        dr[di + 2] = sr[si + 2];
+                        dr[di + 3] = sr[si + 3]; // Använd källans alfa istället för hårdkodat 255
+                    }
                 }
             }
         }
