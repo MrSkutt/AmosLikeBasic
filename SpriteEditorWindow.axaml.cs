@@ -16,6 +16,7 @@ public partial class SpriteEditorWindow : Window
     private int _zoom = 12;
     private bool _suppressUiEvents;
 
+    
     public SpriteEditorWindow(AmosGraphics gfx)
     {
         _gfx = gfx;
@@ -149,7 +150,7 @@ public partial class SpriteEditorWindow : Window
 
         Dispatcher.UIThread.Post(() => SpriteImage.InvalidateVisual());
     }
-
+    
     private void PaletteWhite_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _currentColor = Colors.White;
     private void PaletteBlack_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _currentColor = Colors.Black;
     private void PaletteRed_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => _currentColor = Colors.Red;

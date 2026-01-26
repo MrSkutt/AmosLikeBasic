@@ -35,6 +35,7 @@ public sealed class GpuLayer
     public SKRuntimeEffect? CachedEffect { get; set; }
 }
 
+
 // Denna klass sköter själva Skia-ritningen
 public class ShaderDrawOperation : ICustomDrawOperation
 {
@@ -396,6 +397,13 @@ public sealed class AmosGraphics
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
     public double LastCpuUsage { get; private set; }
 
+    public int CursorX { get; set; } = 0;
+    public int CursorY { get; set; } = 0;
+    public int TextRows { get; private set; } = 30; // Anpassa efter fontstorlek
+    public int TextCols { get; private set; } = 80;
+    public int CharWidth { get; private set; } = 8;  // T.ex. 8x16 font
+    public int CharHeight { get; private set; } = 16;
+    public Color PaperColor { get; set; } = Colors.Transparent; // Bakgrundsfärg för text
 
 
     private const string RasterShaderCode = @"
@@ -403,11 +411,14 @@ uniform shader inputTexture;
 uniform float2 iResolution;
 uniform float2 iScreenResolution;
 uniform float iTime;
+uniform vec4 uParams[2];
+
 uniform float uPositions[22];
 uniform float uHeights[22];
+uniform float uRasterColorCount[22];
 uniform float4 uColors[22];
 uniform float4 uColorsTo[22];
-uniform vec4 uParams[2];
+uniform float4 uRasterColors[176];
 
 float hash(float n) { return fract(sin(n) * 43758.5453); }
 
@@ -446,7 +457,8 @@ half4 main(float2 fragCoord) {
         if (h > 0.1) {
             float dist = y - uPositions[i];
             if (dist >= 0.0 && dist <= h) {
-                float barT = 1.0 - abs((dist / h) * 2.0 - 1.0);
+                //float barT = 1.0 - abs((dist / h) * 2.0 - 1.0);
+                float barT = dist / h;
                 finalRGB = mix(uColors[i].rgb, uColorsTo[i].rgb, half(barT));
                 hasR = true;
             }
@@ -538,6 +550,233 @@ half4 main(float2 fragCoord) {
         return half4(combinedBG, outA);
     }
 }";
+   
+            // Sätt font-storlek (anropa i början)
+        public void ConfigureText(int w, int h)
+        {
+            CharWidth = w;
+            CharHeight = h;
+            TextCols = Width / w;
+            TextRows = Height / h;
+        }
+
+        public void Locate(int x, int y)
+        {
+            CursorX = Math.Clamp(x, 0, TextCols - 1);
+            CursorY = Math.Clamp(y, 0, TextRows - 1);
+        }
+
+        public void ConsolePrint(string text, bool newLine = true)
+        {
+            // Dela upp i rader för att hantera \n korrekt
+            var lines = text.Replace("\r\n", "\n").Split('\n');
+
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                if (line.Length > 0)
+                {
+                    // Rita texten grafiskt på nuvarande position
+                    DrawStringInternal(line);
+                }
+
+                // Om det är sista delen och newLine är false, gör ingen radbrytning (semikolon i BASIC)
+                if (i < lines.Length - 1 || newLine)
+                {
+                    ConsoleNewLine();
+                }
+            }
+        }
+
+        private void ConsoleNewLine()
+        {
+            CursorX = 0;
+            CursorY++;
+            if (CursorY >= TextRows)
+            {
+                CursorY = TextRows - 1;
+                ScrollUp(CharHeight);
+            }
+        }
+
+        private void DrawStringInternal(string s)
+        {
+            // Vi måste köra detta på UI-tråden eller via lås eftersom vi ritar text
+            // För enkelhetens skull, använd din existerande DrawText-logik men anpassad
+            // Här simulerar vi en "blitting" av text.
+            
+            // Beräkna pixelposition
+            int px = CursorX * CharWidth;
+            int py = CursorY * CharHeight;
+
+            // 1. Rita PAPER (Bakgrundsbox)
+            if (PaperColor != Colors.Transparent)
+            {
+                // Rita en box bakom texten
+                int pixelWidth = s.Length * CharWidth;
+                Bar(px, py, px + pixelWidth - 1, py + CharHeight - 1, PaperColor);
+            }
+
+            // 2. Rita TEXT (Ink)
+            // Vi använder Avalonia FormattedText för att rita "vanliga" fonter grafiskt
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                EnsureScreen();
+                // Använd en Monospace font för att garantera rutnätet
+                var typeface = new Typeface("Courier New", FontStyle.Normal, FontWeight.Bold); 
+                
+                var ft = new FormattedText(
+                    s,
+                    CultureInfo.CurrentCulture,
+                    FlowDirection.LeftToRight,
+                    typeface,
+                    CharHeight, // Fontstorlek ungefär samma som höjd
+                    new SolidColorBrush(Ink)
+                );
+
+                // Rita till en temporär bitmap och blitta över (samma teknik som din DrawText)
+                // OBS: Detta är en förenkling. För max prestanda bör man cacha ett alfabet.
+                
+                var ps = new PixelSize((int)ft.Width + 1, (int)ft.Height + 1);
+                using var rtb = new RenderTargetBitmap(ps);
+                using (var ctx = rtb.CreateDrawingContext())
+                {
+                    ctx.DrawText(ft, new Point(0, 0));
+                }
+
+                // Kopiera pixlar till ActiveScreen
+                var b = new byte[ps.Width * ps.Height * 4];
+                unsafe
+                {
+                    fixed (byte* p = b) rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
+                }
+
+                lock (LockObject)
+                {
+                    using (var dst = GetActiveScreen().Lock())
+                    unsafe
+                    {
+                        var dp = (byte*)dst.Address;
+                        for (int r = 0; r < Math.Min(ps.Height, CharHeight); r++)
+                        {
+                            int ty = py + r;
+                            if (ty < 0 || ty >= Height) continue;
+                            var dr = dp + ty * dst.RowBytes;
+                            for (int c = 0; c < ps.Width; c++)
+                            {
+                                int tx = px + c;
+                                if (tx < 0 || tx >= Width) continue;
+                                
+                                int si = (r * ps.Width + c) * 4;
+                                int di = tx * 4;
+                                
+                                // Enkel alpha blend
+                                byte alpha = b[si + 3];
+                                if (alpha > 0)
+                                {
+                                    dr[di + 0] = b[si + 0]; // B
+                                    dr[di + 1] = b[si + 1]; // G
+                                    dr[di + 2] = b[si + 2]; // R
+                                    dr[di + 3] = 255;       // A
+                                }
+                            }
+                        }
+                    }
+                }
+            }, Avalonia.Threading.DispatcherPriority.Render); // Kör renderingen
+            
+            // Flytta cursorn framåt
+            CursorX += s.Length;
+        }
+
+        // En hjälpare för att rita PAPER-boxen (samma som din Bar men tar in färg direkt)
+        public void Bar(int x1, int y1, int x2, int y2, Color c)
+        {
+            lock (LockObject)
+            {
+                EnsureScreen();
+                Normalize(ref x1, ref y1, ref x2, ref y2);
+                x1 = Math.Clamp(x1, 0, Width - 1);
+                x2 = Math.Clamp(x2, 0, Width - 1);
+                y1 = Math.Clamp(y1, 0, Height - 1);
+                y2 = Math.Clamp(y2, 0, Height - 1);
+                using var fb = GetActiveScreen().Lock();
+                unsafe
+                {
+                    var p = (byte*)fb.Address;
+                    // Pre-calculate colors
+                    byte a = c.A;
+                    byte r = (byte)(c.R * a / 255);
+                    byte g = (byte)(c.G * a / 255);
+                    byte b = (byte)(c.B * a / 255);
+
+                    for (var y = y1; y <= y2; y++)
+                    {
+                        var row = p + y * fb.RowBytes;
+                        for (var x = x1; x <= x2; x++)
+                        {
+                            var i = x * 4;
+                            row[i + 0] = b;
+                            row[i + 1] = g;
+                            row[i + 2] = r;
+                            row[i + 3] = a;
+                        }
+                    }
+                }
+            }
+        }
+
+        public void ScrollUp(int pixels)
+        {
+            lock (LockObject)
+            {
+                var bmp = GetActiveScreen();
+                using var fb = bmp.Lock();
+                unsafe
+                {
+                    byte* ptr = (byte*)fb.Address;
+                    int rowBytes = fb.RowBytes;
+                    int totalHeight = bmp.PixelSize.Height;
+                    
+                    // 1. Flytta minnet uppåt
+                    // Destination: start (rad 0)
+                    // Källa: rad 'pixels'
+                    // Antal bytes: (totalHeight - pixels) * rowBytes
+                    int bytesToMove = (totalHeight - pixels) * rowBytes;
+                    
+                    if (bytesToMove > 0)
+                    {
+                        Buffer.MemoryCopy(
+                            ptr + pixels * rowBytes, // Source
+                            ptr,                     // Dest
+                            bytesToMove,             // DestSize
+                            bytesToMove              // SourceSize
+                        );
+                    }
+
+                    // 2. Rensa botten-remsan med PAPER-färgen (eller svart/transparent)
+                    Color clearCol = PaperColor; // Eller Colors.Transparent om du vill
+                    
+                    byte a = clearCol.A;
+                    byte r = (byte)(clearCol.R * a / 255);
+                    byte g = (byte)(clearCol.G * a / 255);
+                    byte b = (byte)(clearCol.B * a / 255);
+
+                    for (int y = totalHeight - pixels; y < totalHeight; y++)
+                    {
+                        byte* row = ptr + y * rowBytes;
+                        for (int x = 0; x < bmp.PixelSize.Width; x++)
+                        {
+                            int i = x * 4;
+                            row[i + 0] = b;
+                            row[i + 1] = g;
+                            row[i + 2] = r;
+                            row[i + 3] = a;
+                        }
+                    }
+                }
+            }
+        }
     
     internal sealed class Rainbow
     {
@@ -990,14 +1229,30 @@ half4 main(float2 fragCoord) {
         // Rensa bara den nuvarande aktiva skärmen/lagret
         ClearBitmap(GetActiveScreen(), color);
             
-        // Om det är lager 0 vi rensar, kan vi även nollställa texter
-        if (_currentScreen == 0) 
+        lock (LockObject) 
         {
-            _fontTexts.Clear();
-            _rainbows.Clear(); // <--- Lägg till denna rad!
-        }
+            // 2. Nollställ shader-parametrarna för lagret vi just rensade
+            // Vi gör detta för BÅDE Active och Inactive frame så att ingen gammal data hänger kvar
+            foreach (var frame in new[] { ActiveFrame, InactiveFrame })
+            {
+                if (_currentScreen >= 0 && _currentScreen < frame.Count)
+                {
+                    var layer = frame[_currentScreen];
+                    // Nollställ höjderna så att inga rasters/rainbows ritas
+                    for (int i = 0; i < 22; i++) layer.ShaderHeights[i] = 0;
+                    // Nollställ väder/scroll-parametrar
+                    for (int i = 0; i < layer.ShaderValues.Length; i++) layer.ShaderValues[i] = Vector4.Zero;
+                }
+            }
 
-            
+            // 3. Om det är huvudskärmen, rensa även systemlistorna
+            if (_currentScreen == 0) 
+            {
+                _fontTexts.Clear();
+                _rainbows.Clear();
+                foreach (var s in _sprites.Values) s.Visible = false;
+            }
+        }
         Refresh();
     }
 

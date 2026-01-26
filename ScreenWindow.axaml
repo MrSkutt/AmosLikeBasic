@@ -5,24 +5,31 @@
         Title="AMOS Screen"
         Width="1280" Height="960"
         Background="Black"
-        WindowStartupLocation="CenterOwner">
-    <Grid Background="Black" ClipToBounds="True" Focusable="True">
-        <Viewbox Stretch="Uniform">
-            <Grid Width="640" Height="480" Background="Black">
-                <amosLikeBasic:AmosGpuView Name="ScreenControl" 
-                                           Width="640" 
-                                           Height="480" />
-                
-                <TextBox Name="Console" 
-                         Classes="amos-console" 
-                         Background="Transparent" 
+        WindowStartupLocation="CenterOwner"
+        UseLayoutRounding="True">
+    <Grid Name="GridControl" Background="Black" ClipToBounds="True" Focusable="True">
+        <Viewbox Stretch="Uniform" UseLayoutRounding="True">
+            <Grid Name="ScreenGrid" Width="640" Height="480" Background="Black">
+                <amosLikeBasic:AmosGpuView Name="ScreenControl"
+                                           Width="640"
+                                           Height="480"
+                                           Focusable="True"
+                                           IsTabStop="True"
+                                           PointerPressed="OnScreenPointerPressed" />
+
+                <TextBox Name="Console"
+                         Classes="amos-console"
+                         Background="Transparent"
                          Foreground="White"
-                         IsHitTestVisible="False"
                          IsReadOnly="True"
                          Focusable="False"
+                         IsHitTestVisible="False"
                          BorderThickness="0"
                          Margin="0"
                          Padding="0"
+                         AcceptsReturn="True"
+                         TextWrapping="NoWrap"
+                         FontSize="14"
                          VerticalAlignment="Stretch"
                          HorizontalAlignment="Stretch"/>
             </Grid>

@@ -4,12 +4,14 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 
 namespace AmosLikeBasic;
 
@@ -30,7 +32,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-
+        
         Opened += MainWindow_OnOpened;
 
         this.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
@@ -106,6 +108,38 @@ public partial class MainWindow : Window
     
     private void HandleGlobalKeyDown(object? sender, KeyEventArgs e)
     {
+        // 1) Registrera alltid tangenten först (så KEYSTATE funkar även om vi "äter" eventet sen)
+        _pressedKeys.Add(e.Key.ToString());
+        
+        // Om ScreenWindow är aktiv och väntar på INPUT
+        if (_screenWindow?.IsActive == true && _screenWindow != null)
+        {
+            // Kolla om vi är i INPUT-läge (du kan lägga till en flag i ScreenWindow)
+            if (e.Key == Key.Return)
+            {
+                _screenWindow.SubmitInput();
+                e.Handled = true;
+                return;
+            }
+            else if (e.Key == Key.Back)
+            {
+                _screenWindow.BackspaceInput();
+                e.Handled = true;
+                return;
+            }
+            else if (e.Key != Key.Escape && e.Key != Key.Tab)
+            {
+                // Lägg till ett tecken
+                string ch = GetCharFromKey(e.Key, (e.KeyModifiers & KeyModifiers.Shift) != 0);
+                if (!string.IsNullOrEmpty(ch))
+                {
+                    _screenWindow.AppendInputChar(ch);
+                    e.Handled = true;
+                    return;
+                }
+            }
+        }
+        
         if (e.Source == Editor)
         {
             // Låt editorn hantera navigationstangenter själv, inklusive PageUp/Down
@@ -131,7 +165,7 @@ public partial class MainWindow : Window
         // F5 - RUN / DEBUG
         if (e.Key == Key.F5) 
         { 
-            Editor.IsEnabled = false;
+           // Editor.IsEnabled = false;
             bool debug = (e.KeyModifiers & KeyModifiers.Shift) != 0;
             _ = StartProgramAsync(debug); 
             e.Handled = true; 
@@ -186,7 +220,56 @@ public partial class MainWindow : Window
         _pressedKeys.Remove(e.Key.ToString());
     }
 
-    
+    private string GetCharFromKey(Key key, bool shift)
+    {
+        return key switch
+        {
+            Key.A => shift ? "A" : "a",
+            Key.B => shift ? "B" : "b",
+            Key.C => shift ? "C" : "c",
+            Key.D => shift ? "D" : "d",
+            Key.E => shift ? "E" : "e",
+            Key.F => shift ? "F" : "f",
+            Key.G => shift ? "G" : "g",
+            Key.H => shift ? "H" : "h",
+            Key.I => shift ? "I" : "i",
+            Key.J => shift ? "J" : "j",
+            Key.K => shift ? "K" : "k",
+            Key.L => shift ? "L" : "l",
+            Key.M => shift ? "M" : "m",
+            Key.N => shift ? "N" : "n",
+            Key.O => shift ? "O" : "o",
+            Key.P => shift ? "P" : "p",
+            Key.Q => shift ? "Q" : "q",
+            Key.R => shift ? "R" : "r",
+            Key.S => shift ? "S" : "s",
+            Key.T => shift ? "T" : "t",
+            Key.U => shift ? "U" : "u",
+            Key.V => shift ? "V" : "v",
+            Key.W => shift ? "W" : "w",
+            Key.X => shift ? "X" : "x",
+            Key.Y => shift ? "Y" : "y",
+            Key.Z => shift ? "Z" : "z",
+            Key.OemOpenBrackets => shift ? "Å" : "å",
+            Key.OemQuotes       => shift ? "Ä" : "ä",
+            Key.OemSemicolon    => shift ? "Ö" : "ö",
+            Key.D0 => shift ? ")" : "0",
+            Key.D1 => shift ? "!" : "1",
+            Key.D2 => shift ? "@" : "2",
+            Key.D3 => shift ? "#" : "3",
+            Key.D4 => shift ? "$" : "4",
+            Key.D5 => shift ? "%" : "5",
+            Key.D6 => shift ? "^" : "6",
+            Key.D7 => shift ? "&" : "7",
+            Key.D8 => shift ? "*" : "8",
+            Key.D9 => shift ? "(" : "9",
+            Key.Space => " ",
+            Key.OemMinus => shift ? "_" : "-",
+            Key.OemPlus => shift ? "+" : "=",
+            _ => ""
+        };
+    }
+
     private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.F5) { RunButton_OnClick(null, new RoutedEventArgs()); e.Handled = true; return; }
@@ -215,6 +298,33 @@ public partial class MainWindow : Window
             {
                 if (_screenWindow?.Console is null) return;
 
+                if (line.StartsWith("@@PAPER ", StringComparison.Ordinal))
+                {
+                    var arg = line.Substring(8).Trim(); // efter "@@PAPER "
+                    try
+                    {
+                        var c = Avalonia.Media.Color.Parse(arg);
+                        _screenWindow.ScreenGrid.Background = new SolidColorBrush(c);
+                    }
+                    catch
+                    {
+                        // Om färgen inte kan tolkas: ignorera eller sätt default
+                        _screenWindow.Console.Background = Brushes.Black;
+                    }
+                }
+                else if (line.StartsWith("@@INK ", StringComparison.Ordinal))
+                {
+                    var arg = line.Substring(6).Trim();
+                    try
+                    {
+                        var c = Avalonia.Media.Color.Parse(arg);
+                        _screenWindow.Console.Foreground = new SolidColorBrush(c);
+                    }
+                    catch
+                    {
+                        _screenWindow.Console.Foreground = Brushes.White;
+                    }
+                }               
                 if (line.StartsWith("@@LOCATE ", StringComparison.Ordinal))
                 {
                     var rest = line.Substring(9).Trim();
@@ -231,7 +341,39 @@ public partial class MainWindow : Window
                     _textScreen.Clear();
                 }
 
-                _screenWindow.Console.Text = _textScreen.Render();
+                // Viktigt: trailing newline ger ScrollViewer “plats” att scrolla så sista raden blir hel
+                _screenWindow.Console.Text = _textScreen.Render() + "\n";
+
+                // Flytta caret sist
+                _screenWindow.Console.CaretIndex = _screenWindow.Console.Text?.Length ?? 0;
+                _screenWindow.Console.SelectionStart = _screenWindow.Console.CaretIndex;
+                _screenWindow.Console.SelectionEnd = _screenWindow.Console.CaretIndex;
+
+                // Scrolla längst ner (låt ScrollViewer själv klampa till max)
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var sv = _screenWindow.Console
+                        .GetVisualDescendants()
+                        .OfType<ScrollViewer>()
+                        .FirstOrDefault();
+
+                    if (sv is null) return;
+
+                    sv.Offset = new Vector(sv.Offset.X, double.MaxValue);
+                }, DispatcherPriority.Render);
+
+                // En extra “sen” post kan hjälpa om font/layout uppdateras efter Render-pass
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var sv = _screenWindow.Console
+                        .GetVisualDescendants()
+                        .OfType<ScrollViewer>()
+                        .FirstOrDefault();
+
+                    if (sv is null) return;
+
+                    sv.Offset = new Vector(sv.Offset.X, double.MaxValue);
+                }, DispatcherPriority.Background);
             }
             else if (LogBox is not null)
             {
@@ -251,6 +393,14 @@ public partial class MainWindow : Window
         }).GetTask();
     }
 
+    public void SetScreenConsoleBackground(Color color)
+    {
+
+            if (_screenWindow?.Console != null)
+                _screenWindow.Console.Background = new SolidColorBrush(color);
+
+    }
+    
     private async Task StartProgramAsync(bool startPaused)
     {
         if (_screenWindow == null || !_screenWindow.IsVisible)
@@ -280,6 +430,9 @@ public partial class MainWindow : Window
 
         _gfx.Clear(Colors.Black);
         _textScreen.Clear();
+        foreach(var id in _gfx.GetSpriteIds()) {
+            _gfx.SpriteOff(id);
+        }
         _screenWindow.Console.Text = "";
         _screenWindow.ScreenControl.Graphics = _gfx;
     
@@ -298,6 +451,10 @@ public partial class MainWindow : Window
                     await AmosRunner.ExecuteAsync(
                         programText: program,
                         appendLineAsync: AppendConsoleLineAsync,
+                        getConsoleInputAsync: async () => {
+                            if (_screenWindow == null) return "";
+                            return await Dispatcher.UIThread.InvokeAsync(() => _screenWindow.RequestInputAsync());
+                        },
                         clearAsync: ClearConsoleAsync,
                         graphics: _gfx,
                         onGraphicsChanged: () => {
@@ -323,33 +480,33 @@ public partial class MainWindow : Window
                             }, DispatcherPriority.Render);
                         },
  
-                    getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
-                    isKeyDown: (k) => _pressedKeys.Contains(k),
-                    audioEngine: _audioEngine,
-                    token: token,
-                    onVariablesChanged: (vars) => {
-                        Dispatcher.UIThread.Post(() => {
-                            VariableListBox.ItemsSource = vars.OrderBy(v => v.Key).ToList();
-                        });
-                    },
-                    waitForStep: async (pc) => {
-                        if (_isPaused)
-                        {
+                        getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
+                        isKeyDown: (k) => _pressedKeys.Contains(k),
+                        audioEngine: _audioEngine,
+                        token: token,
+                        onVariablesChanged: (vars) => {
                             Dispatcher.UIThread.Post(() => {
-                                StatusText.Text = "Status: PAUSED";
-                                CurrentLineText.Text = $"Line: {pc + 1}";
-                                if (Editor.Text != null)
-                                {
-                                    var textLines = Editor.Text.Replace("\r\n", "\n").Split('\n');
-                                    int charIndex = 0;
-                                    for (int i = 0; i < pc && i < textLines.Length; i++) charIndex += textLines[i].Length + 1;
+                                VariableListBox.ItemsSource = vars.OrderBy(v => v.Key).ToList();
+                            });
+                        },
+                        waitForStep: async (pc) => {
+                            if (_isPaused)
+                            {
+                                Dispatcher.UIThread.Post(() => { 
+                                    StatusText.Text = "Status: PAUSED";
+                                    CurrentLineText.Text = $"Line: {pc + 1}";
+                                    if (Editor.Text != null)
+                                    {
+                                        var textLines = Editor.Text.Replace("\r\n", "\n").Split('\n');
+                                        int charIndex = 0;
+                                        for (int i = 0; i < pc && i < textLines.Length; i++) charIndex += textLines[i].Length + 1;
                                     
-                                    int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
-                                    Editor.SelectionStart = charIndex;
-                                    Editor.SelectionEnd = charIndex + lineLength;
-                                    Editor.CaretIndex = charIndex;
-                                    Editor.Focus();
-                                }
+                                        int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
+                                        Editor.SelectionStart = charIndex;
+                                        Editor.SelectionEnd = charIndex + lineLength;
+                                        Editor.CaretIndex = charIndex;
+                                        Editor.Focus();
+                                    }
                             });
                             _stepSignal = new TaskCompletionSource<bool>();
                             await _stepSignal.Task;
