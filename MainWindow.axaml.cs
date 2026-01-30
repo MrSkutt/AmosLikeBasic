@@ -21,7 +21,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _runCts;
     private TaskCompletionSource<bool>? _stepSignal;
     private bool _isPaused = false;
-    private readonly AmosGraphics _gfx = new();
+    private readonly AmosGraphics _gfx = new(); 
     private AudioEngine? _audioEngine = new(); 
 
     private readonly TextScreen _textScreen = new(rows: 30, cols: 80);
@@ -34,6 +34,16 @@ public partial class MainWindow : Window
         InitializeComponent();
         
         Opened += MainWindow_OnOpened;
+        
+        // KOPPLA IHOP AMOSGRAPHICS MED LOGBOX HÄR
+        _gfx.OnError = (msg) => {
+            // Se till att vi är på UI-tråden eftersom vi ska ändra text i en TextBox
+            Dispatcher.UIThread.Post(() => {
+                Log(msg + Environment.NewLine);
+                // Om du vill att LogBox ska scrolla till slutet automatiskt:
+                LogBox.CaretIndex = LogBox.Text?.Length ?? 0;
+            });
+        };
 
         this.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
         this.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
@@ -76,6 +86,11 @@ public partial class MainWindow : Window
         CursorPosText.Text = $"Line: {line}, Col: {col}";
     }
 
+    public void Log(string message)
+    {
+        LogBox.Text += message;
+    }
+    
     private void Editor_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key is not (Key.PageUp or Key.PageDown))
@@ -270,20 +285,7 @@ public partial class MainWindow : Window
         };
     }
 
-    private void MainWindow_OnKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.F5) { RunButton_OnClick(null, new RoutedEventArgs()); e.Handled = true; return; }
-        if (e.Key == Key.F9) { VariableWatchPanel.IsVisible = !VariableWatchPanel.IsVisible; e.Handled = true; return; }
-        if (e.Key == Key.Escape) { StopButton_OnClick(null, new RoutedEventArgs()); e.Handled = true; return; }
-
-        _pressedKeys.Add(e.Key.ToString());
-    }
-
-    private void MainWindow_OnKeyUp(object? sender, KeyEventArgs e)
-    {
-        _pressedKeys.Remove(e.Key.ToString());
-    }
-
+    
     private async Task AppendConsoleLineAsync(string line)
     {
         if (line.StartsWith("@@VSYNC", StringComparison.Ordinal))
@@ -392,14 +394,6 @@ public partial class MainWindow : Window
                 _screenWindow.Console.Text = _textScreen.Render();
         }).GetTask();
     }
-
-    public void SetScreenConsoleBackground(Color color)
-    {
-
-            if (_screenWindow?.Console != null)
-                _screenWindow.Console.Background = new SolidColorBrush(color);
-
-    }
     
     private async Task StartProgramAsync(bool startPaused)
     {
@@ -429,13 +423,13 @@ public partial class MainWindow : Window
         });
 
         _gfx.Clear(Colors.Black);
+        _gfx.ClearFrames();
         _textScreen.Clear();
         foreach(var id in _gfx.GetSpriteIds()) {
             _gfx.SpriteOff(id);
         }
         _screenWindow.Console.Text = "";
         _screenWindow.ScreenControl.Graphics = _gfx;
-    
         _runCts?.Cancel();
         _runCts = new CancellationTokenSource();
         var token = _runCts.Token;
@@ -600,8 +594,10 @@ public partial class MainWindow : Window
 
     private void ToggleConsole_OnClick(object? sender, RoutedEventArgs e)
     {
-        _textScreen.Clear();
-        if (_screenWindow?.Console != null) _screenWindow.Console.Text = "";
+        LogBox.Clear();
+        VariableListBox.ItemsSource = null;
+        //_textScreen.Clear();
+        //if (_screenWindow?.Console != null) _screenWindow.Console.Text = "";
     }
 
     private void UpdateTitleBar()

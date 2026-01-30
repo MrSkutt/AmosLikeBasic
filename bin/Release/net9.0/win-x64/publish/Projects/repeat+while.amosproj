@@ -1,0 +1,1 @@
+{"Version":1,"ProgramText":"PRINT \u0022REPEAT\u0022\nI=0\nREPEAT\n   PRINT I\n   I=I\u002B1\nUNTIl I=10\n\nPRINT \u0022\u0022\nPRINT \u0022\u0022\n\nPRINT \u0022WHILE\u0022\nI=0\nWHILE I\u003C10\n  PRINT I\n  INC I\nWEND\n","ScreenWidth":640,"ScreenHeight":480,"Sprites":[],"MapWidth":1,"MapHeight":1,"MapData":[-1]}

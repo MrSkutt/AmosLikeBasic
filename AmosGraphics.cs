@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
+using System.IO;
 using System.Numerics;
 using Avalonia;
 using Avalonia.Controls;
@@ -194,8 +195,7 @@ public sealed class AmosGpuView : Control
         if (Graphics != null && Graphics.Width > 0) return new Size(Graphics.Width, Graphics.Height);
         return new Size(640, 480);
     }
-
-
+    
     private void EnsureFramebuffer(int w, int h)
     {
         if (_framebuffer != null &&
@@ -383,10 +383,13 @@ public sealed class AmosGpuView : Control
 
 public sealed class AmosGraphics
 {
+    public Action<string>? OnError { get; set; }
+    
     private readonly List<GpuLayer> _frameA = new();
     private readonly List<GpuLayer> _frameB = new();
     private bool _isAActive = true;
-
+    private bool _doubleBufferMode = false;
+    
     public List<GpuLayer> ActiveFrame => _isAActive ? _frameA : _frameB;
     public List<GpuLayer> InactiveFrame => _isAActive ? _frameB : _frameA;
     
@@ -550,7 +553,14 @@ half4 main(float2 fragCoord) {
         return half4(combinedBG, outA);
     }
 }";
-   
+    
+    
+    public void ClearFrames()
+    {
+        ActiveFrame.Clear();
+        InactiveFrame.Clear();
+    }
+    
             // Sätt font-storlek (anropa i början)
         public void ConfigureText(int w, int h)
         {
@@ -1573,8 +1583,9 @@ half4 main(float2 fragCoord) {
 
         _fonts[id] = font;
     }
-    catch
+    catch (Exception ex)
     {
+        OnError?.Invoke($"[FONT LOAD] Error loading '{file}': {ex.Message}");
     }
 }
     
@@ -1805,31 +1816,42 @@ half4 main(float2 fragCoord) {
         
         public void LoadBackground(string f)
         {
-            try {
+            try
+            {
                 using var b = new Bitmap(f);
-                lock (LockObject) {
+                lock (LockObject)
+                {
                     EnsureScreen();
                     var layer = InactiveFrame[_currentScreen];
-                    using (var fb = layer.Bitmap.Lock()) {
-                        b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address, fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
-                        unsafe {
+                    using (var fb = layer.Bitmap.Lock())
+                    {
+                        b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address,
+                            fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
+                        unsafe
+                        {
                             uint* p = (uint*)fb.Address;
                             int count = layer.Bitmap.PixelSize.Width * layer.Bitmap.PixelSize.Height;
-                            for (int i = 0; i < count; i++) {
+                            for (int i = 0; i < count; i++)
+                            {
                                 uint pixel = p[i];
                                 // Byt plats på R och B (från RGBA till BGRA)
                                 uint a = (pixel >> 24) & 0xFF;
                                 uint r = (pixel >> 16) & 0xFF;
                                 uint g = (pixel >> 8) & 0xFF;
                                 uint bColor = pixel & 0xFF;
-                            
+
                                 if (r == 0 && g == 0 && bColor == 0) p[i] = 0;
-                                else p[i] = (a << 24) | (r << 0) | (g << 8) | (bColor << 16); // Korrekt ordning för Skia
+                                else
+                                    p[i] = (a << 24) | (r << 0) | (g << 8) | (bColor << 16); // Korrekt ordning för Skia
                             }
                         }
                     }
                 }
-            } catch { }
+            }
+            catch (Exception ex)
+            {
+                OnError?.Invoke($"[LOADBACKGROUND]: {ex.Message}");
+            }
         }
 
     // ---------------- Tiles ----------------
@@ -1866,8 +1888,8 @@ half4 main(float2 fragCoord) {
                 }
             }
         }
-        catch {
-            // Logga gärna felet här om du vill, t.ex. Console.WriteLine(ex.Message);
+        catch (Exception ex) {
+            OnError?.Invoke($"[TILE LOAD] Error loading '{f}': {ex.Message}");
         }
     }
 
@@ -1911,8 +1933,9 @@ half4 main(float2 fragCoord) {
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            OnError?.Invoke($"[TILE STREAM] Error: {ex.Message}");
         }
     }
 
@@ -2104,8 +2127,9 @@ half4 main(float2 fragCoord) {
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            OnError?.Invoke($"[SPRITE LOAD] Error loading '{fileName}': {ex.Message}");
         }
     }
 

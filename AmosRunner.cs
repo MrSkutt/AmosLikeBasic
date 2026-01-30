@@ -1150,7 +1150,13 @@ public static class AmosRunner
                         graphics.SetDrawingScreen(x);
                         onGraphicsChanged(); 
                         break;
-                    case "LOAD": graphics.LoadBackground(Unquote(arg)); onGraphicsChanged(); break;
+                    case "LOAD":
+                    {
+                        string str = ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
+                        graphics.LoadBackground(str);
+                        onGraphicsChanged();
+                        break;
+                    }
                     case "INK":
                     {
                         var c = ParseColor(arg);

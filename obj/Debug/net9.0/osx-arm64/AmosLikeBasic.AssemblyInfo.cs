@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AmosLikeBasic")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e039b87c982a3ac8ecdc0e15b4648d35fc59f57f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+30572c57f66dbe6ee63a40783182b55336dd974a")]
 [assembly: System.Reflection.AssemblyProductAttribute("AmosLikeBasic")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AmosLikeBasic")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

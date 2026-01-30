@@ -6,7 +6,7 @@
         x:Class="AmosLikeBasic.MainWindow"
         Title="AMOS Professional IDE"
         Background="#00134D"
-        Width="1024" Height="768" 
+        Width="1280" Height="1024" 
         WindowStartupLocation="CenterScreen">
     <DockPanel>
 
@@ -65,7 +65,7 @@
                 <Separator Background="#7FB2FF" Width="2"/>
                 <Button Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Button Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
-                <Button Classes="amos-button" Content="CONSOLE" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button Classes="amos-button" Content="CLEAR" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
             </StackPanel>
         </Border>
     
@@ -96,7 +96,7 @@
             </Grid>
 
             <!-- Right side: Variable Watch -->
-            <Border Name="VariableWatchPanel" Grid.Column="1" Width="250" Background="#00134D" BorderBrush="#7FB2FF" BorderThickness="2,0,0,0">
+            <Border Name="VariableWatchPanel" Grid.Column="1" Width="350" Background="#00134D" BorderBrush="#7FB2FF" BorderThickness="2,0,0,0">
                 <DockPanel>
                     <Border DockPanel.Dock="Top" Background="#06206F" Padding="5">
                         <StackPanel>
