@@ -10,6 +10,7 @@
       "AmosLikeBasic/1.0.0": {
         "dependencies": {
           "Avalonia": "11.2.3",
+          "Avalonia.AvaloniaEdit": "11.3.0",
           "Avalonia.Desktop": "11.2.3",
           "Avalonia.Diagnostics": "11.2.3",
           "Avalonia.Fonts.Inter": "11.2.3",
@@ -70,6 +71,17 @@
           "lib/net8.0/Avalonia.dll": {
             "assemblyVersion": "11.2.3.0",
             "fileVersion": "11.2.3.0"
+          }
+        }
+      },
+      "Avalonia.AvaloniaEdit/11.3.0": {
+        "dependencies": {
+          "Avalonia": "11.2.3"
+        },
+        "runtime": {
+          "lib/net6.0/AvaloniaEdit.dll": {
+            "assemblyVersion": "11.3.0.0",
+            "fileVersion": "11.3.0.0"
           }
         }
       },
@@ -317,6 +329,13 @@
       "sha512": "sha512-pD6woFAUfGcyEvMmrpctntU4jv4fT8752pfx1J5iRORVX3Ob0oQi8PWo0TXVaAJZiSfH0cdKTeKx0w0DzD0/mg==",
       "path": "avalonia/11.2.3",
       "hashPath": "avalonia.11.2.3.nupkg.sha512"
+    },
+    "Avalonia.AvaloniaEdit/11.3.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-9M/jJb4DPqQmKtNMZn6+vpqlf+ZGMtK8vEBpPVP3De1xRCu1hv4ZAtoA8hY6bYj2hgv/luete3ixoOsEQ++YJQ==",
+      "path": "avalonia.avaloniaedit/11.3.0",
+      "hashPath": "avalonia.avaloniaedit.11.3.0.nupkg.sha512"
     },
     "Avalonia.Controls.ColorPicker/11.2.3": {
       "type": "package",

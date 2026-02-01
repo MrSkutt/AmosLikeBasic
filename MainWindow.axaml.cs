@@ -14,6 +14,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using AvaloniaEdit;
 
 namespace AmosLikeBasic;
 
@@ -52,11 +53,10 @@ public partial class MainWindow : Window
         this.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
         Editor.AddHandler(KeyDownEvent, Editor_KeyDown, RoutingStrategies.Tunnel, handledEventsToo: true);
 
-        Editor.PropertyChanged += (s, e) => {
-            if (e.Property.Name == nameof(TextBox.CaretIndex)) {
-                UpdateCursorPosition();
-            }
+        Editor.TextArea.Caret.PositionChanged += (s, e) => {
+            UpdateCursorPosition();
         };
+
     
         _gfx.Screen(640, 480);
         _gfx.Clear(Colors.Black);
@@ -81,7 +81,8 @@ public partial class MainWindow : Window
     private void UpdateCursorPosition()
     {
         if (Editor.Text == null) return;
-        int caretIndex = Editor.CaretIndex;
+        // TextEditor använder CaretOffset istället för CaretIndex
+        int caretIndex = Editor.CaretOffset;
         string text = Editor.Text.Substring(0, Math.Min(caretIndex, Editor.Text.Length));
         int line = text.Count(c => c == '\n') + 1;
         int lastNewLine = text.LastIndexOf('\n');
@@ -104,7 +105,7 @@ public partial class MainWindow : Window
             return;
 
         var lines = text.Replace("\r\n", "\n").Split('\n');
-        var currentLine = text[..Editor.CaretIndex].Count(c => c == '\n');
+        var currentLine = text[..Editor.CaretOffset].Count(c => c == '\n');
 
         const int page = 20; // AMOS-känsla
 
@@ -116,9 +117,10 @@ public partial class MainWindow : Window
         for (int i = 0; i < targetLine; i++)
             charIndex += lines[i].Length + 1;
 
-        Editor.CaretIndex = charIndex;
+        Editor.CaretOffset = charIndex;
+        // TextEditor använder SelectionStart och SelectionLength
         Editor.SelectionStart = charIndex;
-        Editor.SelectionEnd = charIndex;
+        Editor.SelectionLength = 0;
         Editor.Focus();
 
         e.Handled = true;
@@ -158,7 +160,7 @@ public partial class MainWindow : Window
             }
         }
         
-        if (e.Source == Editor)
+        if (Editor.IsKeyboardFocusWithin)
         {
             // Låt editorn hantera navigationstangenter själv, inklusive PageUp/Down
             if (e.Key is Key.PageUp or Key.PageDown
@@ -174,7 +176,7 @@ public partial class MainWindow : Window
         if (!_isPaused && RunButton.IsEnabled == false)
         {
             // Om händelsen kommer från editorn, hindra den
-            if (e.Source == Editor)
+            if (Editor.IsKeyboardFocusWithin)
             {
                 e.Handled = true;
             }
@@ -612,8 +614,8 @@ public partial class MainWindow : Window
                                     
                                         int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
                                         Editor.SelectionStart = charIndex;
-                                        Editor.SelectionEnd = charIndex + lineLength;
-                                        Editor.CaretIndex = charIndex;
+                                        Editor.SelectionLength = lineLength;
+                                        Editor.CaretOffset = charIndex;
                                         Editor.Focus();
                                     }
                             });
@@ -804,6 +806,12 @@ public partial class MainWindow : Window
             };
             ApplyTheme(theme);
         }
+    }
+    
+    private async void About_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var aboutWin = new AboutWindow();
+        await aboutWin.ShowDialog(this);
     }
 
     private void ApplyTheme(AmosTheme theme)

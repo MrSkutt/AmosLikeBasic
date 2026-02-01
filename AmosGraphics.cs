@@ -412,6 +412,7 @@ public sealed class AmosGraphics
     public int CharHeight { get; private set; } = 16;
     public Color PaperColor { get; set; } = Colors.Transparent; // Bakgrundsfärg för text
 
+    private string font = "Topaz a600a1200a400";
 
     private const string RasterShaderCode = @"
 uniform shader inputTexture;
@@ -566,12 +567,13 @@ half4 main(float2 fragCoord) {
     }
     
             // Sätt font-storlek (anropa i början)
-        public void ConfigureText(int w, int h)
+        public void ConfigureText(int w, int h, string text)
         {
             CharWidth = w;
             CharHeight = h;
             TextCols = Width / w;
             TextRows = Height / h;
+            font = text;
         }
 
         public void Locate(int x, int y)
@@ -634,7 +636,8 @@ half4 main(float2 fragCoord) {
                 Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     EnsureScreen();
-                    var typeface = new Typeface("Topaz a600a1200a400", FontStyle.Normal, FontWeight.Bold); 
+                    //var typeface = new Typeface("33333333, FontStyle.Normal, FontWeight.Bold); 
+                    var typeface = new Typeface(font, FontStyle.Normal, FontWeight.Bold); 
 
                     // Skapa en bitmap som rymmer hela texten
                     var ps = new PixelSize(s.Length * currentW, currentH);

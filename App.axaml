@@ -1,11 +1,15 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:avaloniaEdit="https://github.com/avaloniaui/avaloniaedit"
              x:Class="AmosLikeBasic.App"
              RequestedThemeVariant="Default">
              <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
 
     <Application.Styles>
         <FluentTheme />
+        
+        <!-- VIKTIGT: Denna rad laddar AvaloniaEdit så att den fungerar! -->
+        <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
 
         <!-- AMOS-ish palette + chunky controls -->
         <Style Selector="Window">
@@ -19,7 +23,8 @@
             <Setter Property="CornerRadius" Value="0"/>
         </Style>
 
-        <Style Selector="TextBox.amos-editor">
+        <!-- Uppdaterad stil för TextEditor -->
+        <Style Selector="avaloniaEdit|TextEditor.amos-editor">
             <Setter Property="FontFamily" Value="Courier New, Monospace"/>
             <Setter Property="Background" Value="#00134D"/>
             <Setter Property="Foreground" Value="#7FB2FF"/>

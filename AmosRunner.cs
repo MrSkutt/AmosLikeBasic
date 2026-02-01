@@ -610,7 +610,16 @@ public static class AmosRunner
                         graphics.SetDrawingScreen(x);
                         onGraphicsChanged(); 
                         break;
-                    
+
+                    case "CONFIGFONT":
+                    {
+                        var bC = ParsePrintAtArguments(arg); 
+                        int width = EvalInt(bC.RowExpr, vars, ln, getInkey, isKeyDown, graphics);
+                        int height = EvalInt(bC.ColExpr, vars, ln, getInkey, isKeyDown, graphics);
+                        object fnt = EvalValue(bC.RestExpr, vars, ln, getInkey, isKeyDown, graphics);
+                        graphics.ConfigureText(width, height, ValueToString(fnt));
+                        break;
+                    }
                     case "PRINT":
                     {
                         var printArg = arg.Trim();

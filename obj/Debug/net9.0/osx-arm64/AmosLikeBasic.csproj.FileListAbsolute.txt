@@ -532,3 +532,4 @@
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/strings.amosproj
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/test2.amosproj
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/variables.amosproj
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/AvaloniaEdit.dll

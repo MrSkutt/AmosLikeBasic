@@ -1,11 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "cyiTkvvrR6A=",
+  "dgSpecHash": "GevrJ+awfrE=",
   "success": true,
   "projectFilePath": "/Users/mattias/RiderProjects/AmosLikeBasic/AmosLikeBasic.csproj",
   "expectedPackageFiles": [
     "/Users/mattias/.nuget/packages/avalonia/11.2.3/avalonia.11.2.3.nupkg.sha512",
     "/Users/mattias/.nuget/packages/avalonia.angle.windows.natives/2.1.22045.20230930/avalonia.angle.windows.natives.2.1.22045.20230930.nupkg.sha512",
+    "/Users/mattias/.nuget/packages/avalonia.avaloniaedit/11.3.0/avalonia.avaloniaedit.11.3.0.nupkg.sha512",
     "/Users/mattias/.nuget/packages/avalonia.buildservices/0.0.29/avalonia.buildservices.0.0.29.nupkg.sha512",
     "/Users/mattias/.nuget/packages/avalonia.controls.colorpicker/11.2.3/avalonia.controls.colorpicker.11.2.3.nupkg.sha512",
     "/Users/mattias/.nuget/packages/avalonia.controls.datagrid/11.2.3/avalonia.controls.datagrid.11.2.3.nupkg.sha512",
