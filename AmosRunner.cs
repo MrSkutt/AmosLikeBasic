@@ -16,6 +16,22 @@ public static class AmosRunner
     private static Color ParseColorFlexible(string s)
     {
         s = (s ?? "").Trim();
+        
+        if (int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n >= 0 && n <= 15)
+        {
+            return PaperValueToColor(n);
+        }
+
+        {
+            try
+            {
+                return Color.Parse(s);
+            }
+            catch (Exception ex)
+            {
+                throw new FormatException($"Ogiltigt färgvärde: '{s}'", ex);
+            }
+        }
 
         // "r,g,b" eller "r,g,b,a"
         var parts = s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -41,19 +57,31 @@ public static class AmosRunner
     {
         if (v is string s)
             return ParseColorFlexible(s);
+        
+        int n = 0;
+        try {
+            n = (int)Math.Round(Convert.ToDouble(v, CultureInfo.InvariantCulture));
+        } catch { /* Ignorera fel och använd 0 (svart) */ }
 
-        var n = (int)Math.Round(Convert.ToDouble(v, CultureInfo.InvariantCulture));
         return n switch
         {
-            0 => Colors.Black,
-            1 => Colors.White,
-            2 => Colors.Red,
-            3 => Colors.Green,
-            4 => Colors.Blue,
-            5 => Colors.Yellow,
-            6 => Colors.Magenta,
-            7 => Colors.Cyan,
-            _ => Colors.Black
+            0  => Color.FromRgb(0x00, 0x00, 0x00), // Black
+            1  => Color.FromRgb(0xFF, 0xFF, 0xFF), // White
+            2  => Color.FromRgb(0x88, 0x00, 0x00), // Red
+            3  => Color.FromRgb(0xAA, 0xFF, 0xEE), // Cyan
+            4  => Color.FromRgb(0xCC, 0x44, 0xCC), // Purple
+            5  => Color.FromRgb(0x00, 0xCC, 0x55), // Green
+            6  => Color.FromRgb(0x00, 0x00, 0xAA), // Blue
+            7  => Color.FromRgb(0xEE, 0xEE, 0x77), // Yellow
+            8  => Color.FromRgb(0xDD, 0x88, 0x55), // Orange
+            9  => Color.FromRgb(0x66, 0x44, 0x00), // Brown
+            10 => Color.FromRgb(0xFF, 0x77, 0x77), // Light red
+            11 => Color.FromRgb(0x33, 0x33, 0x33), // Dark grey
+            12 => Color.FromRgb(0x77, 0x77, 0x77), // Grey
+            13 => Color.FromRgb(0xAA, 0xFF, 0x66), // Light green
+            14 => Color.FromRgb(0x00, 0x88, 0xFF), // Light blue
+            15 => Color.FromRgb(0xBB, 0xBB, 0xBB), // Light grey
+            _  => Color.FromRgb(0x00, 0x00, 0x00)
         };
     }
     
@@ -562,44 +590,54 @@ public static class AmosRunner
                 var (cmd, arg) = SplitCommand(trimmedCmd);
 
                 switch (cmd) {
-                         case "CLSG2": 
-                            // Rensa både grafik och text-cursor
-                            await clearAsync(); // Om du vill rensa loggen/text-boxen också, annars ta bort
-                            graphics.Clear(graphics.PaperColor); // Använd paper color som bakgrund
-                            graphics.Locate(0, 0); 
-                            break;
-
-                        case "PAPERG2":
+                    case "CLS": await appendLineAsync("@@CLS"); await clearAsync(); break;
+                    
+                    case "CLSG": 
+                        // Rensa både grafik och text-cursor
+                        await clearAsync(); // Om du vill rensa loggen/text-boxen också, annars ta bort
+                        graphics.Clear(graphics.PaperColor); // Använd paper color som bakgrund
+                        graphics.Locate(0, 0); 
+                        break;
+                    
+                    case "CLSG2": 
+                        var x = graphics.GetActiveScreenNumber();
+                        if (!string.IsNullOrWhiteSpace(arg))
                         {
-                            // Sätter grafikens bakgrundsfärg för text
-                            var color = Colors.Black;
-                            if (!string.IsNullOrWhiteSpace(arg))
+                            // Om ett argument skickades med, välj det lagret först
+                            graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
+                        }
+                        graphics.Clear(Colors.Transparent); 
+                        graphics.SetDrawingScreen(x);
+                        onGraphicsChanged(); 
+                        break;
+                    
+                    case "PRINT":
+                    {
+                        var printArg = arg.Trim();
+
+                        if (printArg.StartsWith("AT ", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var at = ParsePrintAtArguments(printArg);
+
+                            int row = EvalInt(at.RowExpr, vars, ln, getInkey, isKeyDown, graphics);
+                            int col = EvalInt(at.ColExpr, vars, ln, getInkey, isKeyDown, graphics);
+
+                            await appendLineAsync($"@@LOCATE {row} {col}");
+
+                            if (!string.IsNullOrWhiteSpace(at.RestExpr))
                             {
-                                var v = EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics);
-                                color = PaperValueToColor(v);
+                                var valToPrint = EvalValue(at.RestExpr, vars, ln, getInkey, isKeyDown, graphics);
+                                await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
                             }
-                            graphics.PaperColor = color;
-                            // Vi behöver inte anropa MainWindow längre för detta
-                            break;
                         }
-
-                        case "INKG2":
+                        else
                         {
-                            var c = ParseColor(arg);
-                            graphics.Ink = c;
-                            // Ingen @@INK behövs, graphics.Ink används av ConsolePrint
-                            break;
+                            var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
+                            await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
                         }
-
-                        case "LOCATEG2": 
-                            var lp = SplitCsvOrSpaces(arg); 
-                            graphics.Locate(
-                                EvalInt(lp[0], vars, ln, getInkey, isKeyDown, graphics), 
-                                EvalInt(lp[1], vars, ln, getInkey, isKeyDown, graphics)
-                            );
-                            break;
-
-                        case "PRINTG2":
+                    } break;
+                    
+                    case "PRINTG":
                         {
                             var printArg = arg.Trim();
                             
@@ -616,15 +654,14 @@ public static class AmosRunner
                                 {
                                     var valToPrint = EvalValue(at.RestExpr, vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.ConsolePrint(ValueToString(valToPrint));
-                                    graphics.DoubleBuffer();
                                 }
                             }
                             else
                             {
                                 // Vanlig PRINT
-                                // Kolla om det slutar med ; för att undvika nyrad
+                                // Kolla om det slutar med , för att undvika nyrad
                                 bool newLine = true;
-                                if (printArg.EndsWith(";")) 
+                                if (printArg.EndsWith(",")) 
                                 {
                                     newLine = false;
                                     printArg = printArg[..^1];
@@ -632,13 +669,231 @@ public static class AmosRunner
 
                                 var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
                                 graphics.ConsolePrint(ValueToString(valToPrint), newLine);
-                                graphics.DoubleBuffer();
                             }
                             
                             // Trigga uppdatering av fönstret
                             onGraphicsChanged();
                         }
-                        break;                   
+                        break; 
+                    case "INPUT":
+                        string inputArg = arg.Trim();
+                        string promptInput = "";
+                        string varNameInput = "A$";
+
+                        // Hitta kommat som INTE är inuti citattecken
+                        int commaIdx = -1;
+                        bool inQuotes = false;
+                        for (int i = 0; i < inputArg.Length; i++) {
+                            if (inputArg[i] == '\"') inQuotes = !inQuotes;
+                            if (!inQuotes && inputArg[i] == ',') {
+                                commaIdx = i;
+                                break;
+                            }
+                        }
+
+                        if (commaIdx >= 0)
+                        {
+                            promptInput = Unquote(inputArg[..commaIdx].Trim());
+                            varNameInput = inputArg[(commaIdx + 1)..].Trim();
+                        }
+                        else
+                        {
+                            varNameInput = inputArg;
+                        }
+
+                        // Skriv ut prompten
+                        if (!string.IsNullOrEmpty(promptInput))
+                        {
+                            await appendLineAsync("@@PRINT " + promptInput);
+                        }
+
+                        // Vänta på användarens inmatning
+                        string userInput = await getConsoleInputAsync();
+
+                        // Spara resultatet
+                        setVar(varNameInput, userInput.Trim());
+                        break;
+                    
+                    case "INPUTG":
+                        {
+                            string iArg = arg.Trim();
+                            string pPrompt = "? ";
+                            string vName = "";
+
+                            // 1. Parsa argument
+                            int cIdx = -1;
+                            bool inQ = false;
+                            for (int i = 0; i < iArg.Length; i++) {
+                                if (iArg[i] == '\"') inQ = !inQ;
+                                if (!inQ && iArg[i] == ',') { cIdx = i; break; }
+                            }
+
+                            if (cIdx >= 0)
+                            {
+                                pPrompt = Unquote(iArg[..cIdx].Trim());
+                                vName = iArg[(cIdx + 1)..].Trim();
+                            }
+                            else
+                            {
+                                vName = iArg;
+                            }
+
+                            // 2. Skriv prompt och tvinga cursor-uppdatering
+                            if (!string.IsNullOrEmpty(pPrompt))
+                            {
+                                graphics.ConsolePrint(pPrompt, newLine: false);
+                                onGraphicsChanged();
+                            }
+
+                            var inputBuffer = new System.Text.StringBuilder();
+                            while (!string.IsNullOrEmpty(getInkey())) { }
+
+                            // Variabler för repeat-logik
+                            string lastKey = null;
+                            DateTime lastKeyTime = DateTime.MinValue;
+                            int currentDelay = 500;
+
+                            bool done = false;
+                            while (!done)
+                            {
+                                token.ThrowIfCancellationRequested();
+                                string key = getInkey();
+
+                                // --- Repeat ---
+                                if (string.IsNullOrEmpty(key)) { lastKey = null; await Task.Delay(5, token); continue; }
+                                if (key == lastKey) {
+                                    if ((DateTime.Now - lastKeyTime).TotalMilliseconds < currentDelay) { await Task.Delay(5, token); continue; }
+                                    currentDelay = 50;
+                                } else { currentDelay = 500; }
+                                lastKey = key; lastKeyTime = DateTime.Now;
+                                // --------------
+
+                                string uKey = key.ToUpperInvariant();
+
+                                // ENTER
+                                if (uKey == "RETURN" || uKey == "ENTER" || key == "\r" || key == "\n")
+                                {
+                                    done = true;
+                                    graphics.ConsolePrint(""); 
+                                    onGraphicsChanged();
+                                }
+                                // BACKSPACE
+                                else if (uKey == "BACK" || uKey == "BACKSPACE" || key == "\b" || (key.Length > 0 && key[0] == 8))
+                                {
+                                    if (inputBuffer.Length > 0)
+                                    {
+                                        inputBuffer.Length--;
+                                        int cx = graphics.CursorX; int cy = graphics.CursorY;
+                                        if (cx > 0)
+                                        {
+                                            // Sudda med bakgrundsfärg (Bar)
+                                            int cw = graphics.CharWidth; int ch = graphics.CharHeight;
+                                            graphics.Bar((cx - 1) * cw, cy * ch, cx * cw - 1, cy * ch + ch - 1, graphics.PaperColor);
+                                            graphics.Locate(cx - 1, cy);
+                                            onGraphicsChanged();
+                                        }
+                                    }
+                                }
+                                // SPACE
+                                else if (uKey == "SPACE" || key == " ")
+                                {
+                                    inputBuffer.Append(' ');
+                                    graphics.ConsolePrint(" ", newLine: false);
+                                    onGraphicsChanged();
+                                }
+                                // TECKEN (A-Z, 0-9)
+                                else if (key.Length == 1 && !char.IsControl(key[0]))
+                                {
+                                    // Kolla Shift status via isKeyDown
+                                    bool isShift = isKeyDown("LeftShift") || isKeyDown("RightShift") || isKeyDown("Shift");
+                                    
+                                    string finalChar = key;
+
+                                    if (char.IsLetter(key[0]))
+                                    {
+                                        // Om bokstav: Shift = Stor, Ingen Shift = Liten
+                                        finalChar = isShift ? key.ToUpperInvariant() : key.ToLowerInvariant();
+                                    }
+                                    else if (char.IsDigit(key[0]) && isShift)
+                                    {
+                                        // Enkel mapping för siffror + shift (kan behöva justeras för SE/US layout)
+                                        finalChar = key[0] switch
+                                        {
+                                            '1' => "!", '2' => "\"", '3' => "#", '4' => "¤", '5' => "%",
+                                            '6' => "&", '7' => "/", '8' => "(", '9' => ")", '0' => "=",
+                                            _ => key
+                                        };
+                                    }
+                                    // Hantera punkt och kommma om de kommer in som råa tecken
+                                    else if (key == "." && isShift) finalChar = ":";
+                                    else if (key == "," && isShift) finalChar = ";";
+
+                                    inputBuffer.Append(finalChar);
+                                    graphics.ConsolePrint(finalChar, newLine: false);
+                                    onGraphicsChanged();
+                                }
+                            }
+
+                            while (!string.IsNullOrEmpty(getInkey())) { await Task.Delay(10); }
+                            setVar(vName, inputBuffer.ToString());
+                        }
+                        break;
+
+                    case "PAPER":
+                    {
+                        Color c2;
+                        try { c2 = ParseColorFlexible(Unquote(arg)); }
+                        catch { c2 = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)); }
+                        
+                        // Skicka till UI-tråden via console-pipeline (AppendConsoleLineAsync)
+                        await appendLineAsync("@@PAPER " + c2.ToString());
+                        break;
+                    }
+                         
+                    case "PAPERG":
+                        {
+                            Color c;
+                            // 1. Försök tolka som direkt färg/siffra först (t.ex. Red, #FF0000, 1)
+                            try { c = ParseColorFlexible(Unquote(arg)); }
+                            // 2. Om det misslyckas, utvärdera som variabel/uttryck (t.ex. I, A$, 10+5)
+                            catch { c = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)); }
+                                
+                            graphics.PaperColor = c;
+                            break;
+                        }
+                    case "INK":
+                    {
+                        Color c;
+                        try { c = ParseColorFlexible(Unquote(arg)); }
+                        catch { c = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)); }
+
+                        
+                        await appendLineAsync("@@INK " + c.ToString());
+                        break;
+                    }
+                    case "INKG":
+                        {
+                            Color c;
+                            try { c = ParseColorFlexible(Unquote(arg)); }
+                            catch { c = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)); }
+
+                            graphics.Ink = c; 
+                            break;
+                        }
+                    case "LOCATE": 
+                        var lp2 = SplitCsvOrSpaces(arg); 
+                        await appendLineAsync($"@@LOCATE {EvalInt(lp2[0], vars, ln, getInkey, isKeyDown, graphics)} {EvalInt(lp2[1], vars, ln, getInkey, isKeyDown, graphics)}"); 
+                        break;
+
+                    case "LOCATEG": 
+                            var lp = SplitCsvOrSpaces(arg); 
+                            graphics.Locate(
+                                EvalInt(lp[0], vars, ln, getInkey, isKeyDown, graphics), 
+                                EvalInt(lp[1], vars, ln, getInkey, isKeyDown, graphics)
+                            );
+                        break;
+
+                  
                     case "DATA":
                         // DATA exekveras inte (endast deklaration)
                         break;
@@ -780,75 +1035,6 @@ public static class AmosRunner
                     case "RETURN":
                         if (gosubStack.Count > 0) { pc = gosubStack.Pop(); jumpHappened = true; }
                         else throw new Exception($"RETURN without GOSUB at line {ln}");
-                        break;
-                    case "CLS": await appendLineAsync("@@CLS"); await clearAsync(); break;
-                    case "LOCATE": 
-                        var lp2 = SplitCsvOrSpaces(arg); 
-                        await appendLineAsync($"@@LOCATE {EvalInt(lp2[0], vars, ln, getInkey, isKeyDown, graphics)} {EvalInt(lp2[1], vars, ln, getInkey, isKeyDown, graphics)}"); 
-                        break;
-                    case "PRINT":
-                    {
-                        var printArg = arg.Trim();
-
-                        if (printArg.StartsWith("AT ", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var at = ParsePrintAtArguments(printArg);
-
-                            int row = EvalInt(at.RowExpr, vars, ln, getInkey, isKeyDown, graphics);
-                            int col = EvalInt(at.ColExpr, vars, ln, getInkey, isKeyDown, graphics);
-
-                            await appendLineAsync($"@@LOCATE {row} {col}");
-
-                            if (!string.IsNullOrWhiteSpace(at.RestExpr))
-                            {
-                                var valToPrint = EvalValue(at.RestExpr, vars, ln, getInkey, isKeyDown, graphics);
-                                await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
-                            }
-                        }
-                        else
-                        {
-                            var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
-                            await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
-                        }
-                    }
-                        break;
-                    case "INPUT":
-                        string inputArg = arg.Trim();
-                        string promptInput = "";
-                        string varNameInput = "A$";
-
-                        // Hitta kommat som INTE är inuti citattecken
-                        int commaIdx = -1;
-                        bool inQuotes = false;
-                        for (int i = 0; i < inputArg.Length; i++) {
-                            if (inputArg[i] == '\"') inQuotes = !inQuotes;
-                            if (!inQuotes && inputArg[i] == ',') {
-                                commaIdx = i;
-                                break;
-                            }
-                        }
-
-                        if (commaIdx >= 0)
-                        {
-                            promptInput = Unquote(inputArg[..commaIdx].Trim());
-                            varNameInput = inputArg[(commaIdx + 1)..].Trim();
-                        }
-                        else
-                        {
-                            varNameInput = inputArg;
-                        }
-
-                        // Skriv ut prompten
-                        if (!string.IsNullOrEmpty(promptInput))
-                        {
-                            await appendLineAsync("@@PRINT " + promptInput);
-                        }
-
-                        // Vänta på användarens inmatning
-                        string userInput = await getConsoleInputAsync();
-
-                        // Spara resultatet
-                        setVar(varNameInput, userInput.Trim());
                         break;
                     case "LET": 
                         var (n, vt) = SplitAssignment(arg); 
@@ -1139,43 +1325,12 @@ public static class AmosRunner
                             if (parts.Length >= 2) graphics.Scroll(0, EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics));
                         }
                         break;
-                    case "CLSG": 
-                        var x = graphics.GetActiveScreenNumber();
-                        if (!string.IsNullOrWhiteSpace(arg))
-                        {
-                            // Om ett argument skickades med, välj det lagret först
-                            graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
-                        }
-                        graphics.Clear(Colors.Transparent); 
-                        graphics.SetDrawingScreen(x);
-                        onGraphicsChanged(); 
-                        break;
+
                     case "LOAD":
                     {
                         string str = ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
                         graphics.LoadBackground(str);
                         onGraphicsChanged();
-                        break;
-                    }
-                    case "INK":
-                    {
-                        var c = ParseColor(arg);
-                        
-                        await appendLineAsync("@@INK " + c.ToString());
-                        break;
-                    }
-                    case "INKG":
-                    {
-                        var c = ParseColor(arg);
-                        graphics.Ink = c;
-                        break;
-                    }
-                    case "PAPER":
-                    {
-                        var c2 = ParseColor(arg);
-
-                        // Skicka till UI-tråden via console-pipeline (AppendConsoleLineAsync)
-                        await appendLineAsync("@@PAPER " + c2.ToString());
                         break;
                     }
                     case "INC":
@@ -1200,12 +1355,27 @@ public static class AmosRunner
                         var rR = SplitCsvOrSpaces(arg); 
                         graphics.Bar(EvalInt(rR[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[3], vars, ln, getInkey, isKeyDown, graphics)); 
                         onGraphicsChanged(); break;
+                    case "CIRCLE": 
+                        var rC = SplitCsvOrSpaces(arg); 
+                        graphics.Circle(EvalInt(rC[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rC[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rC[2], vars, ln, getInkey, isKeyDown, graphics)); 
+                        onGraphicsChanged(); break;   
+                    case "CIRCLEF": 
+                        var rF = SplitCsvOrSpaces(arg); 
+                        graphics.CircleF(EvalInt(rF[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rF[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rF[2], vars, ln, getInkey, isKeyDown, graphics),EvalInt(rF[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                        onGraphicsChanged(); break;   
+                    case "ELLIPSE": 
+                        var rE = SplitCsvOrSpaces(arg); 
+                        graphics.Ellipse(EvalInt(rE[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rE[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rE[2], vars, ln, getInkey, isKeyDown, graphics),EvalInt(rE[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                        onGraphicsChanged(); break;  
+                    case "FILL": 
+                        var rI = SplitCsvOrSpaces(arg); 
+                        graphics.Fill(EvalInt(rI[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rI[1], vars, ln, getInkey, isKeyDown, graphics)); 
+                        onGraphicsChanged(); break;  
                     case "TEXT":
                         var tP = SplitCsvOrSpaces(arg);
                         if (tP.Count >= 3) graphics.DrawText(EvalInt(tP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tP[1], vars, ln, getInkey, isKeyDown, graphics), ValueToString(EvalValue(string.Join(" ", tP.Skip(2)), vars, ln, getInkey, isKeyDown, graphics)));
                         onGraphicsChanged(); break;
-                    case "REFRESH": graphics.Refresh(); onGraphicsChanged(); break;
-                        case "SPRITE":
+                    case "SPRITE":
                             var ss = SplitCsvOrSpaces(arg);
                             if (ss.Count == 0) break;
                             if (!int.TryParse(ss[0], out var sid)) {
@@ -1240,7 +1410,7 @@ public static class AmosRunner
                             StopMusic(audioEngine);
                         }
                         break;
-                    case "RAINBOW":
+                    case "RASTER":
                             int currentLayer = graphics.GetActiveScreenNumber();
 
                             if (arg.ToUpperInvariant().StartsWith("STR("))
@@ -1275,7 +1445,7 @@ public static class AmosRunner
                                 }
                             }
                             break;
-                    case "RAIN": 
+                    case "PARTICLE": 
                         var rainArgs = SplitCsvOrSpaces(arg);
                         if (rainArgs.Count >= 2) {
                             int type = EvalInt(rainArgs[0], vars, ln, getInkey, isKeyDown, graphics);
@@ -1496,8 +1666,6 @@ public static class AmosRunner
                     await Task.Delay(ms, t);
                 }
                 return false;
-            case "VSYNC": await al("@@VSYNC"); return false;
-            case "REFRESH": g.Refresh(); og(); return false;
             case "SAM":
                 var sa = SplitCsvOrSpaces(arg);
                 if (sa.Count >= 2 && sa[0].ToUpperInvariant() == "PLAY") {
@@ -1705,8 +1873,8 @@ public static class AmosRunner
                         var k = ValueToString(ParseExpr(ref t, v, ln, gk, ikd, g)); t.TryConsume(')'); return ikd(k) ? 1.0 : 0.0;
                     }
 
-                        // --- String functions (AMOS-like) ---
-                        if (id.Equals("LEN", StringComparison.OrdinalIgnoreCase))
+                    // --- String functions (AMOS-like) ---
+                    if (id.Equals("LEN", StringComparison.OrdinalIgnoreCase))
                         {
                             object val = ParseExpr(ref t, v, ln, gk, ikd, g);
                             t.TryConsume(')');
@@ -1714,21 +1882,21 @@ public static class AmosRunner
                             return (double)sVal.Length;
                         }
 
-                        if (id.Equals("TRIM$", StringComparison.OrdinalIgnoreCase))
+                    if (id.Equals("TRIM$", StringComparison.OrdinalIgnoreCase))
                         {
                             object val = ParseExpr(ref t, v, ln, gk, ikd, g);
                             t.TryConsume(')');
                             return ValueToString(val).Trim();
                         }
 
-                        if (id.Equals("LOWER$", StringComparison.OrdinalIgnoreCase))
+                    if (id.Equals("LOWER$", StringComparison.OrdinalIgnoreCase))
                         {
                             object val = ParseExpr(ref t, v, ln, gk, ikd, g);
                             t.TryConsume(')');
                             return ValueToString(val).ToLowerInvariant();
                         }
 
-                        if (id.Equals("LEFT$", StringComparison.OrdinalIgnoreCase))
+                    if (id.Equals("LEFT$", StringComparison.OrdinalIgnoreCase))
                         {
                             object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
                             t.TryConsume(',');
@@ -1742,7 +1910,7 @@ public static class AmosRunner
                             return sVal.Substring(0, n1);
                         }
 
-                        if (id.Equals("RIGHT$", StringComparison.OrdinalIgnoreCase))
+                    if (id.Equals("RIGHT$", StringComparison.OrdinalIgnoreCase))
                         {
                             object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
                             t.TryConsume(',');
@@ -1756,7 +1924,7 @@ public static class AmosRunner
                             return sVal.Substring(sVal.Length - n2, n2);
                         }
 
-                        if (id.Equals("MID$", StringComparison.OrdinalIgnoreCase))
+                    if (id.Equals("MID$", StringComparison.OrdinalIgnoreCase))
                         {
                             object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
                             t.TryConsume(',');
@@ -1781,7 +1949,7 @@ public static class AmosRunner
                             return sVal.Substring(start0, maxLen);
                         }
 
-						if (id.Equals("REPLACE$", StringComparison.OrdinalIgnoreCase))
+                    if (id.Equals("REPLACE$", StringComparison.OrdinalIgnoreCase))
 						{ 
                             // REPLACE$(source$, find$, replace$)
 
@@ -1974,7 +2142,9 @@ static string InputCommand(string[] args)
         if (string.IsNullOrWhiteSpace(a)) return new List<string>();
         return a.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
     }
-    private static Color ParseColor(string t) { try { return Color.Parse(t); } catch { return Colors.White; } }
+    //private static Color ParseColor(string t) { try { return Color.Parse(t); } catch { return Colors.Transparent; } }
+    private static Color ParseColor(string t) { try { return ParseColorFlexible(t); } catch { return Colors.Transparent; } }
+
     private static int IndexOfWord(string t, string w) => t.ToUpperInvariant().IndexOf(w.ToUpperInvariant());
 
     private ref struct Tokenizer {

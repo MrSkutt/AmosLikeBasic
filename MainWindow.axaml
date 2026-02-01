@@ -16,7 +16,7 @@
                 <MenuItem Header="New" Click="NewProject_OnClick"/>
                 <MenuItem Header="Open..." Click="OpenProject_OnClick"/>
                 <Separator/>
-                <MenuItem Header="Exit"/>
+                <MenuItem Header="Exit" Click="Exit_OnClick"/>
             </MenuItem>
             <MenuItem Header="_Edit">
                 <MenuItem Header="Cut"/>

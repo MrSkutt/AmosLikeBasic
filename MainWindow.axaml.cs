@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -8,6 +9,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.Media;
@@ -34,6 +36,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         
         Opened += MainWindow_OnOpened;
+        this.Closing += MainWindow_Closing;
         
         // KOPPLA IHOP AMOSGRAPHICS MED LOGBOX HÄR
         _gfx.OnError = (msg) => {
@@ -385,6 +388,116 @@ public partial class MainWindow : Window
         });
     }
 
+    private async void Exit_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var result = await MessageBox(
+            "Avsluta programmet",
+            "Vill du verkligen avsluta?",
+            "Ja",
+            "Nej"
+        );
+
+        if (result)
+        {
+            Environment.Exit(0);
+        }
+    }
+    
+    private async void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        e.Cancel = true; // Stoppa fönstret direkt
+
+        var result = await ShowExitDialog();
+
+        if (result)
+        {
+            // Stänger fönstret efter dialogen
+            this.Closing -= MainWindow_Closing; // Undvik loop
+            this.Close();
+        }
+    }
+    
+    private async Task<bool> ShowExitDialog()
+    {
+        var dialog = new Window
+        {
+            Title = "Avsluta programmet",
+            Width = 300,
+            Height = 130,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+
+        var yesButton = new Button { Content = "Ja", Width = 80, Margin = new Thickness(5) };
+        var noButton  = new Button { Content = "Nej", Width = 80, Margin = new Thickness(5) };
+
+        var tcs = new TaskCompletionSource<bool>();
+
+        yesButton.Click += (_, _) => { tcs.TrySetResult(true); dialog.Close(); };
+        noButton.Click  += (_, _) => { tcs.TrySetResult(false); dialog.Close(); };
+
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(10),
+            Children =
+            {
+                new TextBlock { Text = "Vill du verkligen avsluta?", Margin = new Thickness(0,0,0,10) },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+                    Children = { yesButton, noButton }
+                }
+            }
+        };
+
+        await dialog.ShowDialog(this); // Ägare = MainWindow
+
+        return await tcs.Task;
+    }
+    
+    private async Task<bool> MessageBox(string title, string message, string yesText, string noText)
+    {
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 320,
+            Height = 140,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+
+        var yesButton = new Button { Content = yesText, Width = 80, Margin = new Thickness(5) };
+        var noButton  = new Button { Content = noText,  Width = 80, Margin = new Thickness(5) };
+
+        var tcs = new TaskCompletionSource<bool>();
+
+        yesButton.Click += (_, _) => { tcs.TrySetResult(true); dialog.Close(); };
+        noButton.Click  += (_, _) => { tcs.TrySetResult(false); dialog.Close(); };
+
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(10),
+            Children =
+            {
+                new TextBlock { Text = message, Margin = new Thickness(0,0,0,10) },
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Children = { yesButton, noButton }
+                }
+            }
+        };
+
+        if (this is Window owner)
+            await dialog.ShowDialog(owner);
+        else
+            dialog.Show();
+
+        return await tcs.Task;
+    }
+    
     private Task ClearConsoleAsync()
     {
         return Dispatcher.UIThread.InvokeAsync(() =>
@@ -425,6 +538,8 @@ public partial class MainWindow : Window
         _gfx.Clear(Colors.Black);
         _gfx.ClearFrames();
         _textScreen.Clear();
+        _gfx.CursorX = 0;
+        _gfx.CursorY = 0;
         foreach(var id in _gfx.GetSpriteIds()) {
             _gfx.SpriteOff(id);
         }

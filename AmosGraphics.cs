@@ -9,6 +9,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Media.Imaging;
+using Avalonia.Media.Immutable;
 using Avalonia.Rendering.SceneGraph;
 using Avalonia.Skia;
 using SkiaSharp;
@@ -393,6 +394,9 @@ public sealed class AmosGraphics
     public List<GpuLayer> ActiveFrame => _isAActive ? _frameA : _frameB;
     public List<GpuLayer> InactiveFrame => _isAActive ? _frameB : _frameA;
     
+    private List<GpuLayer> DrawingFrame => _doubleBufferMode ? InactiveFrame : ActiveFrame;
+
+    
     private readonly System.Diagnostics.Stopwatch _vblTimer = new();
     public double LastCpuUsagePercent { get; private set; } = 0;
     public readonly object LockObject = new(); // Korrekt namn för låset
@@ -609,95 +613,105 @@ half4 main(float2 fragCoord) {
             }
         }
 
-        private void DrawStringInternal(string s)
-        {
-            // Vi måste köra detta på UI-tråden eller via lås eftersom vi ritar text
-            // För enkelhetens skull, använd din existerande DrawText-logik men anpassad
-            // Här simulerar vi en "blitting" av text.
-            
-            // Beräkna pixelposition
-            int px = CursorX * CharWidth;
-            int py = CursorY * CharHeight;
-
-            // 1. Rita PAPER (Bakgrundsbox)
-            if (PaperColor != Colors.Transparent)
+            private void DrawStringInternal(string s)
             {
-                // Rita en box bakom texten
-                int pixelWidth = s.Length * CharWidth;
-                Bar(px, py, px + pixelWidth - 1, py + CharHeight - 1, PaperColor);
-            }
+                // Beräkna startposition
+                int px = CursorX * CharWidth;
+                int py = CursorY * CharHeight;
 
-            // 2. Rita TEXT (Ink)
-            // Vi använder Avalonia FormattedText för att rita "vanliga" fonter grafiskt
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                EnsureScreen();
-                // Använd en Monospace font för att garantera rutnätet
-                var typeface = new Typeface("Courier New", FontStyle.Normal, FontWeight.Bold); 
-                
-                var ft = new FormattedText(
-                    s,
-                    CultureInfo.CurrentCulture,
-                    FlowDirection.LeftToRight,
-                    typeface,
-                    CharHeight, // Fontstorlek ungefär samma som höjd
-                    new SolidColorBrush(Ink)
-                );
+                Color currentInk = Ink;
+                Color currentPaper = PaperColor;
+                int currentH = CharHeight;
+                int currentW = CharWidth;
 
-                // Rita till en temporär bitmap och blitta över (samma teknik som din DrawText)
-                // OBS: Detta är en förenkling. För max prestanda bör man cacha ett alfabet.
-                
-                var ps = new PixelSize((int)ft.Width + 1, (int)ft.Height + 1);
-                using var rtb = new RenderTargetBitmap(ps);
-                using (var ctx = rtb.CreateDrawingContext())
+                // 1. Rita PAPER (Bakgrundsbox) för hela strängen direkt (snabbare)
+                if (currentPaper != Colors.Transparent)
                 {
-                    ctx.DrawText(ft, new Point(0, 0));
+                    Bar(px, py, px + s.Length * currentW - 1, py + currentH - 1, currentPaper);
                 }
 
-                // Kopiera pixlar till ActiveScreen
-                var b = new byte[ps.Width * ps.Height * 4];
-                unsafe
+                // 2. Rita TEXT (Ink) tecken för tecken för att garantera rutnätet
+                Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    fixed (byte* p = b) rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
-                }
+                    EnsureScreen();
+                    var typeface = new Typeface("Topaz a600a1200a400", FontStyle.Normal, FontWeight.Bold); 
 
-                lock (LockObject)
-                {
-                    using (var dst = GetActiveScreen().Lock())
+                    // Skapa en bitmap som rymmer hela texten
+                    var ps = new PixelSize(s.Length * currentW, currentH);
+                    if (ps.Width == 0 || ps.Height == 0) return;
+
+                    using var rtb = new RenderTargetBitmap(ps);
+                    using (var ctx = rtb.CreateDrawingContext())
+                    {
+                        // Se till att RTB är tömd
+                        ctx.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ps.Width, ps.Height));
+                        
+                        // Rita varje tecken i sin exakta "box"
+                        for(int i=0; i<s.Length; i++)
+                        {
+                            string charStr = s[i].ToString();
+                            var ft = new FormattedText(
+                                charStr,
+                                CultureInfo.CurrentCulture,
+                                FlowDirection.LeftToRight,
+                                typeface,
+                                currentH, 
+                                new SolidColorBrush(currentInk) 
+                            );
+
+                            // Tvinga positionen: i * CharWidth
+                            // Vi använder PushClip för att hindra breda tecken från att blöda in i nästa ruta
+                            using (ctx.PushClip(new Rect(i * currentW, 0, currentW, currentH)))
+                            {
+                                ctx.DrawText(ft, new Point(i * currentW, 0));
+                            }
+                        }
+                    }
+
+                    // Kopiera pixlar till ActiveScreen (med RGBA->BGRA fixen)
+                    var b = new byte[ps.Width * ps.Height * 4];
                     unsafe
                     {
-                        var dp = (byte*)dst.Address;
-                        for (int r = 0; r < Math.Min(ps.Height, CharHeight); r++)
+                        fixed (byte* p = b) rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
+                    }
+
+                    lock (LockObject)
+                    {
+                        using (var dst = GetActiveScreen().Lock())
+                        unsafe
                         {
-                            int ty = py + r;
-                            if (ty < 0 || ty >= Height) continue;
-                            var dr = dp + ty * dst.RowBytes;
-                            for (int c = 0; c < ps.Width; c++)
+                            var dp = (byte*)dst.Address;
+                            for (int r = 0; r < Math.Min(ps.Height, currentH); r++)
                             {
-                                int tx = px + c;
-                                if (tx < 0 || tx >= Width) continue;
+                                int ty = py + r;
+                                if (ty < 0 || ty >= Height) continue;
+                                var dr = dp + ty * dst.RowBytes;
                                 
-                                int si = (r * ps.Width + c) * 4;
-                                int di = tx * 4;
-                                
-                                // Enkel alpha blend
-                                byte alpha = b[si + 3];
-                                if (alpha > 0)
+                                for (int c = 0; c < ps.Width; c++)
                                 {
-                                    dr[di + 0] = b[si + 0]; // B
-                                    dr[di + 1] = b[si + 1]; // G
-                                    dr[di + 2] = b[si + 2]; // R
-                                    dr[di + 3] = 255;       // A
+                                    int tx = px + c;
+                                    if (tx < 0 || tx >= Width) continue;
+                                
+                                    int si = (r * ps.Width + c) * 4;
+                                    int di = tx * 4;
+                                
+                                    byte alpha = b[si + 3];
+                                    if (alpha > 0)
+                                    {
+                                        dr[di + 0] = b[si + 2]; // B
+                                        dr[di + 1] = b[si + 1]; // G
+                                        dr[di + 2] = b[si + 0]; // R
+                                        dr[di + 3] = 255;       // A
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }, Avalonia.Threading.DispatcherPriority.Render); // Kör renderingen
+                }, Avalonia.Threading.DispatcherPriority.Render).Wait(); // Vänta på att ritningen är klar
             
-            // Flytta cursorn framåt
-            CursorX += s.Length;
-        }
+                // Flytta cursorn framåt
+                CursorX += s.Length;
+            }
 
         // En hjälpare för att rita PAPER-boxen (samma som din Bar men tar in färg direkt)
         public void Bar(int x1, int y1, int x2, int y2, Color c)
@@ -884,12 +898,12 @@ half4 main(float2 fragCoord) {
         EnsureScreen();
         
         // Vi säkerställer att _currentScreen pekar på ett existerande lager
-        int index = (_currentScreen >= 0 && _currentScreen < InactiveFrame.Count) 
+        int index = (_currentScreen >= 0 && _currentScreen < DrawingFrame.Count) 
             ? _currentScreen 
             : 0;
 
         // Info.txt: "Alla ritaroperationer sker alltid på den inaktiva framen"
-        return InactiveFrame[index].Bitmap;
+        return DrawingFrame[index].Bitmap;
     }
     
     public int GetActiveScreenNumber()
@@ -900,7 +914,7 @@ half4 main(float2 fragCoord) {
     public void SetShadervalues(int layerIdx, int slot, float nr, float value)
     {
         lock (LockObject) {
-            var frame = InactiveFrame;
+            var frame = DrawingFrame;
             if (layerIdx >= 0 && layerIdx < frame.Count) {
                 var layer = frame[layerIdx];
                 if (slot >= 0 && slot < 2) {
@@ -914,7 +928,7 @@ half4 main(float2 fragCoord) {
     public void SetShaderParams(int layerIdx, int slot, float y, float height)
     {
         lock (LockObject) {
-            var frame = InactiveFrame;
+            var frame = DrawingFrame;
             if (layerIdx >= 0 && layerIdx < frame.Count) {
                 var layer = frame[layerIdx];
                 if (slot >= 0 && slot < 22) { // Uppdaterat till 24
@@ -928,7 +942,7 @@ half4 main(float2 fragCoord) {
     public void SetShaderColors(int layerIdx, int slot, Color c1, Color c2)
     {
         lock (LockObject) {
-            var frame = InactiveFrame;
+            var frame = DrawingFrame;
             if (layerIdx >= 0 && layerIdx < frame.Count) {
                 var layer = frame[layerIdx];
                 if (slot >= 0 && slot < 22) {
@@ -1116,6 +1130,8 @@ half4 main(float2 fragCoord) {
     {
         lock (LockObject)
         {
+            _doubleBufferMode = false;
+            
             Width = w; Height = h;
             _frameA.Clear(); _frameB.Clear();
             
@@ -1149,6 +1165,7 @@ half4 main(float2 fragCoord) {
     {
         lock (LockObject)
         {
+            // Vi måste se till att lagret finns i BÅDA listorna
             while (InactiveFrame.Count <= id)
             {
                 var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) };
@@ -1263,7 +1280,6 @@ half4 main(float2 fragCoord) {
                 foreach (var s in _sprites.Values) s.Visible = false;
             }
         }
-        Refresh();
     }
 
     private void ClearBitmap(WriteableBitmap bmp, Color c)
@@ -1321,6 +1337,8 @@ half4 main(float2 fragCoord) {
     
     public void SwapBuffers()
     {
+        if (!_doubleBufferMode) return;
+        
         lock (LockObject)
         {
             _isAActive = !_isAActive;
@@ -1332,37 +1350,42 @@ half4 main(float2 fragCoord) {
     {
         lock (LockObject)
         {
-            // Kopiera Inactive -> Active (eller vice versa) 
-            // för att säkerställa att båda buffertarna ser likadana ut
-            for (int i = 0; i < ActiveFrame.Count && i < InactiveFrame.Count; i++)
+            // NY LOGIK: Aktivera Double Buffer-läget
+            if (!_doubleBufferMode)
             {
-                var sourceBmp = InactiveFrame[i].Bitmap;
-                var destBmp = ActiveFrame[i].Bitmap;
-                
-                if (sourceBmp != null && destBmp != null)
+                _doubleBufferMode = true;
+
+                // Kopiera Active -> Inactive så att bakbufferten ser ut som skärmen
+                // gör just nu. Annars riskerar vi att första WAIT VBL visar en svart skärm.
+                for (int i = 0; i < ActiveFrame.Count && i < InactiveFrame.Count; i++)
                 {
-                    using var src = sourceBmp.Lock();
-                    using var dst = destBmp.Lock();
-                    unsafe
+                    var sourceBmp = ActiveFrame[i].Bitmap; // Det som syns nu
+                    var destBmp = InactiveFrame[i].Bitmap; // Det vi ska börja rita på
+                    
+                    if (sourceBmp != null && destBmp != null)
                     {
-                        long size = (long)src.RowBytes * sourceBmp.PixelSize.Height;
-                        Buffer.MemoryCopy((void*)src.Address, (void*)dst.Address, size, size);
+                        using var src = sourceBmp.Lock();
+                        using var dst = destBmp.Lock();
+                        unsafe
+                        {
+                            long size = (long)src.RowBytes * sourceBmp.PixelSize.Height;
+                            Buffer.MemoryCopy((void*)src.Address, (void*)dst.Address, size, size);
+                        }
                     }
                 }
             }
+            // Om vi redan var i double buffer mode gör vi inget, eller så kan man tvinga en kopiering om man vill.
         }
     }
     
-    public void Refresh()
-    {
-    }
 
     public void Scroll(int sid, float x, float y)
     {
-        if (sid >= 0 && sid < InactiveFrame.Count) 
+        // ÄNDRAT: Använd DrawingFrame via SetShadervalues
+        if (sid >= 0 && sid < DrawingFrame.Count) 
             //InactiveFrame[sid].ShaderValues[0] = new Vector4(x, y,0f,0f);
             SetShadervalues(sid,0,x,y);
-            //InactiveFrame[sid].Offset = new Point(-x, -y);
+        //InactiveFrame[sid].Offset = new Point(-x, -y);
     }
 
     //public Vector4 GetScreenOffset(int sid)
@@ -1464,6 +1487,278 @@ half4 main(float2 fragCoord) {
             }
         }
     }
+    
+        public void Circle(int x1, int y1, int r)
+        {
+            lock (LockObject)
+            {
+                EnsureScreen();
+                var bmp = GetActiveScreen();
+                using var fb = bmp.Lock();
+                
+                int w = bmp.PixelSize.Width;
+                int h = bmp.PixelSize.Height;
+                
+                // Konvertera Ink till uint (BGRA)
+                uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+
+                unsafe
+                {
+                    uint* ptr = (uint*)fb.Address;
+                    int stride = fb.RowBytes / 4;
+
+                    // Lokal funktion för säker pixel-sättning
+                    void SetPixel(int px, int py)
+                    {
+                        if (px >= 0 && px < w && py >= 0 && py < h)
+                            ptr[py * stride + px] = cVal;
+                    }
+
+                    int x = 0, y = r;
+                    int d = 3 - 2 * r;
+
+                    while (y >= x)
+                    {
+                        SetPixel(x1 + x, y1 + y);
+                        SetPixel(x1 - x, y1 + y);
+                        SetPixel(x1 + x, y1 - y);
+                        SetPixel(x1 - x, y1 - y);
+                        SetPixel(x1 + y, y1 + x);
+                        SetPixel(x1 - y, y1 + x);
+                        SetPixel(x1 + y, y1 - x);
+                        SetPixel(x1 - y, y1 - x);
+
+                        x++;
+                        if (d > 0)
+                        {
+                            y--;
+                            d = d + 4 * (x - y) + 10;
+                        }
+                        else
+                        {
+                            d = d + 4 * x + 6;
+                        }
+                    }
+                }
+            }
+        }
+    
+        public void Ellipse(int x1, int y1, int r1, int r2)
+        {
+            lock (LockObject)
+            {
+                EnsureScreen();
+                var bmp = GetActiveScreen();
+                using var fb = bmp.Lock();
+
+                int w = bmp.PixelSize.Width;
+                int h = bmp.PixelSize.Height;
+                uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+
+                unsafe
+                {
+                    uint* ptr = (uint*)fb.Address;
+                    int stride = fb.RowBytes / 4;
+
+                    void SetPixel(int px, int py)
+                    {
+                        if (px >= 0 && px < w && py >= 0 && py < h)
+                            ptr[py * stride + px] = cVal;
+                    }
+
+                    int x = 0, y = r2;
+                    long rx = r1, ry = r2; // Använd long för att undvika overflow vid kvadrat
+                    long rxSq = rx * rx;
+                    long rySq = ry * ry;
+                    long twoRxSq = 2 * rxSq;
+                    long twoRySq = 2 * rySq;
+                    long p;
+                    long px = 0;
+                    long py = twoRxSq * y;
+
+                    // Region 1
+                    p = (long)Math.Round(rySq - (rxSq * ry) + (0.25 * rxSq));
+                    while (px < py)
+                    {
+                        SetPixel(x1 + x, y1 + y);
+                        SetPixel(x1 - x, y1 + y);
+                        SetPixel(x1 + x, y1 - y);
+                        SetPixel(x1 - x, y1 - y);
+                        x++;
+                        px += twoRySq;
+                        if (p < 0)
+                        {
+                            p += rySq + px;
+                        }
+                        else
+                        {
+                            y--;
+                            py -= twoRxSq;
+                            p += rySq + px - py;
+                        }
+                    }
+
+                    // Region 2
+                    p = (long)Math.Round(rySq * (x + 0.5) * (x + 0.5) + rxSq * (y - 1) * (y - 1) - rxSq * rySq);
+                    while (y >= 0)
+                    {
+                        SetPixel(x1 + x, y1 + y);
+                        SetPixel(x1 - x, y1 + y);
+                        SetPixel(x1 + x, y1 - y);
+                        SetPixel(x1 - x, y1 - y);
+                        y--;
+                        py -= twoRxSq;
+                        if (p > 0)
+                        {
+                            p += rxSq - py;
+                        }
+                        else
+                        {
+                            x++;
+                            px += twoRySq;
+                            p += rxSq - py + px;
+                        }
+                    }
+                }
+            }
+        }
+    
+        public void CircleF(int x1, int y1, int r1, int r2)
+        {
+            lock (LockObject)
+            {
+                EnsureScreen();
+                var bmp = GetActiveScreen();
+                using var fb = bmp.Lock();
+
+                int w = bmp.PixelSize.Width;
+                int h = bmp.PixelSize.Height;
+                uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+
+                unsafe
+                {
+                    uint* ptr = (uint*)fb.Address;
+                    int stride = fb.RowBytes / 4;
+
+                    // Iterera genom höjden (Y-axeln)
+                    for (int y = -r2; y <= r2; y++)
+                    {
+                        // Beräkna bredden vid denna Y-koordinat baserat på ellips-ekvationen
+                        // x = r1 * sqrt(1 - y^2/r2^2)
+                        int halfWidth = (int)(r1 * Math.Sqrt(1.0 - (double)(y * y) / (r2 * r2)));
+
+                        int drawY = y1 + y;
+                        if (drawY < 0 || drawY >= h) continue;
+
+                        int startX = x1 - halfWidth;
+                        int endX = x1 + halfWidth;
+
+                        // Clamp X
+                        if (startX < 0) startX = 0;
+                        if (endX >= w) endX = w - 1;
+
+                        if (startX <= endX)
+                        {
+                            uint* row = ptr + drawY * stride;
+                            for (int xx = startX; xx <= endX; xx++)
+                            {
+                                row[xx] = cVal;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    
+        public void Fill(int x1, int y1)
+        {
+            lock (LockObject)
+            {
+                EnsureScreen();
+                var bmp = GetActiveScreen();
+                using var fb = bmp.Lock();
+                int w = bmp.PixelSize.Width;
+                int h = bmp.PixelSize.Height;
+                
+                if (x1 < 0 || x1 >= w || y1 < 0 || y1 >= h) return;
+
+                uint fillColor = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+
+                unsafe
+                {
+                    uint* ptr = (uint*)fb.Address;
+                    int stride = fb.RowBytes / 4;
+
+                    // Hämta färgen som vi ska ersätta (Target Color)
+                    uint targetColor = ptr[y1 * stride + x1];
+
+                    // Om vi redan har rätt färg, gör inget
+                    if (targetColor == fillColor) return;
+
+                    // Scanline Flood Fill Algorithm (Stack-baserad)
+                    Stack<(int x, int y)> stack = new();
+                    stack.Push((x1, y1));
+
+                    while (stack.Count > 0)
+                    {
+                        var (cx, cy) = stack.Pop();
+                        int offset = cy * stride + cx;
+                        
+                        // Flytta vänster så långt det går
+                        int lx = cx;
+                        while (lx >= 0 && ptr[cy * stride + lx] == targetColor)
+                        {
+                            lx--;
+                        }
+                        lx++; // Gå tillbaka ett steg till sista giltiga pixel
+
+                        // Flytta höger och fyll, samt scanna raderna ovanför och under
+                        bool spanAbove = false;
+                        bool spanBelow = false;
+
+                        int rx = lx;
+                        while (rx < w && ptr[cy * stride + rx] == targetColor)
+                        {
+                            // Fyll pixel
+                            ptr[cy * stride + rx] = fillColor;
+
+                            // Kolla raden ovanför
+                            if (cy > 0)
+                            {
+                                uint colorAbove = ptr[(cy - 1) * stride + rx];
+                                if (!spanAbove && colorAbove == targetColor)
+                                {
+                                    stack.Push((rx, cy - 1));
+                                    spanAbove = true;
+                                }
+                                else if (spanAbove && colorAbove != targetColor)
+                                {
+                                    spanAbove = false;
+                                }
+                            }
+
+                            // Kolla raden under
+                            if (cy < h - 1)
+                            {
+                                uint colorBelow = ptr[(cy + 1) * stride + rx];
+                                if (!spanBelow && colorBelow == targetColor)
+                                {
+                                    stack.Push((rx, cy + 1));
+                                    spanBelow = true;
+                                }
+                                else if (spanBelow && colorBelow != targetColor)
+                                {
+                                    spanBelow = false;
+                                }
+                            }
+
+                            rx++;
+                        }
+                    }
+                }
+            }
+        }
+    
 
     public void DrawText(int x, int y, string t)
     {
@@ -1511,8 +1806,6 @@ half4 main(float2 fragCoord) {
                         }
                     }
                 }
-
-            Refresh();
         });
     }
 
@@ -1822,7 +2115,7 @@ half4 main(float2 fragCoord) {
                 lock (LockObject)
                 {
                     EnsureScreen();
-                    var layer = InactiveFrame[_currentScreen];
+                    var layer = DrawingFrame[_currentScreen];
                     using (var fb = layer.Bitmap.Lock())
                     {
                         b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address,
