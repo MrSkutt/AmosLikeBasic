@@ -2568,6 +2568,70 @@ half4 main(float2 fragCoord) {
         }
     }
 
+         public void LoadSpriteSheet(int id, string fileName, int frameW, int frameH, int count)
+        {
+            try
+            {
+                using var sourceInfo = new Bitmap(fileName);
+                int sheetW = (int)sourceInfo.Size.Width;
+                int sheetH = (int)sourceInfo.Size.Height;
+                int cols = sheetW / frameW; // Hur många får plats på en rad?
+
+                // Skapa spriten (initierar listan och properties)
+                CreateSprite(id, frameW, frameH);
+                var s = GetSprite(id);
+                
+                // Rensa den tomma standard-framen som skapades av CreateSprite
+                s.Frames.Clear(); 
+
+                for (int i = 0; i < count; i++)
+                {
+                    // Räkna ut X och Y i texturen
+                    int col = i % cols;
+                    int row = i / cols;
+                    
+                    int srcX = col * frameW;
+                    int srcY = row * frameH;
+
+                    // Om vi försöker läsa utanför bilden, avbryt eller ignorera
+                    if (srcY + frameH > sheetH) break;
+
+                    var f = CreateEmptyBitmap(frameW, frameH);
+                    using (var fb = f.Lock())
+                    {
+                        // Kopiera snittet från stora bilden
+                        sourceInfo.CopyPixels(new PixelRect(srcX, srcY, frameW, frameH), fb.Address, fb.RowBytes * frameH, fb.RowBytes);
+                        
+                        // Fixa färgordning (BGRA <-> RGBA)
+                        unsafe
+                        {
+                            var p = (byte*)fb.Address;
+                            for (int px = 0; px < frameW * frameH; px++)
+                            {
+                                byte temp = p[px * 4 + 0];
+                                p[px * 4 + 0] = p[px * 4 + 2];
+                                p[px * 4 + 2] = temp;
+                            }
+                            
+                            // Sätt transparent key baserat på första pixeln i FÖRSTA framen
+                            if (i == 0) 
+                            {
+                                s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
+                            }
+                        }
+                    }
+                    s.Frames.Add(f);
+                }
+                
+                // Se till att current frame är 0
+                s.CurrentFrame = 0;
+            }
+            catch (Exception ex)
+            {
+                OnError?.Invoke($"[SPRITE SHEET LOAD] Error loading '{fileName}': {ex.Message}");
+            }
+        }
+         
     public void AddFrame(int id, string file)
     {
         var s = GetSprite(id);

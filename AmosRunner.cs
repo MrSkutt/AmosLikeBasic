@@ -1496,8 +1496,26 @@ public static class AmosRunner
                             if (!int.TryParse(ss[0], out var sid)) {
                                 var sub = ss[0].ToUpperInvariant();
                                 if (sub=="POS") graphics.SpritePos(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[3],vars,ln,getInkey,isKeyDown, graphics));
-                                else if (sub=="LOAD") graphics.LoadSprite(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
-                                else if (sub=="ADDFRAME") graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
+                                else if (sub=="LOAD") 
+                                {
+                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    string path = Unquote(ss[2]);
+
+                                    // Om vi har mer än 2 argument (id + path), då är det ett sheet
+                                    // SPRITE LOAD 1, "sheet.png", 32, 32, 7
+                                    if (ss.Count >= 6) // "LOAD", id, path, w, h, count = 6 delar
+                                    {
+                                        int fw = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
+                                        int fh = EvalInt(ss[4], vars, ln, getInkey, isKeyDown, graphics);
+                                        int count = EvalInt(ss[5], vars, ln, getInkey, isKeyDown, graphics);
+                                        graphics.LoadSpriteSheet(id, path, fw, fh, count);
+                                    }
+                                    else 
+                                    {
+                                        // Vanlig laddning av en bild
+                                        graphics.LoadSprite(id, path);
+                                    }
+                                }                                else if (sub=="ADDFRAME") graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), Unquote(ss[2]));
                                 else if (sub=="FRAME") graphics.SetSpriteFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
                                 else if (sub=="HANDLE") graphics.SpriteHandle(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[3],vars,ln,getInkey,isKeyDown, graphics));
                                 else if (sub=="ROTATE") graphics.SpriteRotate(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
