@@ -6,18 +6,9 @@
 /Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/osx-arm64/AmosLikeBasic.AssemblyInfo.cs
 /Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/osx-arm64/AmosLikeBasic.csproj.CoreCompileInputs.cache
 /Users/mattias/RiderProjects/AmosLikeBasic/obj/Debug/net9.0/osx-arm64/AmosLikeBasic.sourcelink.json
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/ANCOOL1.YM
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/ding.mp3
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/ding.wav
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/ding2.wav
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/JOGEIR LILJEDAHL - G-Comp.mod
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/JOGEIR LILJEDAHL - Guitar Slinger.mod
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/JOGEIR LILJEDAHL - Physical Presence.mod
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/JOGEIR LILJEDAHL - Signia.mod
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/mus2.mod
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/music.mod
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/music.ym
-/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/Scout.ym
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Graphics/.DS_Store
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Graphics/background.png
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Graphics/berg.png
@@ -533,3 +524,21 @@
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/test2.amosproj
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Projects/variables.amosproj
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/AvaloniaEdit.dll
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/Modules/JOGEIR LILJEDAHL - G-Comp.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/Modules/JOGEIR LILJEDAHL - Guitar Slinger.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/Modules/JOGEIR LILJEDAHL - Physical Presence.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/Modules/JOGEIR LILJEDAHL - Signia.mod
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/ANCOOL1.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/ding2.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/enchant1.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/jess1.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/jess2.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/ND-Loader.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/ND-Toxygene.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/Scout.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/Union Tcb 2.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/VirtualEscape1.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/VirtualEscape2.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/YMKNUCK.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/-.textClipping
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/rain.mp3

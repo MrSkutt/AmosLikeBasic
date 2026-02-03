@@ -11,7 +11,8 @@ public record AmosTheme(
     Color EditorCursorPosBg,
     Color TitleBarBg,
     Color TitleBarFg,
-    Color AccentColor
+    Color AccentColor,
+    string font
 );
 
 public static class AmosThemes
@@ -25,7 +26,8 @@ public static class AmosThemes
         Color.Parse("#06206F"), // CursorPosBg
         Color.Parse("#FFD400"), // TitleBarBg
         Colors.Black,           // TitleBarFg
-        Color.Parse("#7FB2FF")  // Accent
+        Color.Parse("#7FB2FF"),  // Accent
+        "Courier New"
     );
 
     public static readonly AmosTheme Workbench = new(
@@ -37,7 +39,21 @@ public static class AmosThemes
         Color.Parse("#999999"),
         Color.Parse("#0044AA"),
         Colors.White,
-        Color.Parse("#0044AA")
+        Color.Parse("#0044AA"),  // Accent
+        "Topaz a600a1200a400"
+    );
+    
+    public static readonly AmosTheme C64 = new(
+        "C64 Classic",
+        Color.Parse("#0A1A8F"), // WindowBg      (C64 Blue)
+        Color.Parse("#0A1A8F"), // ToolbarBg     (Same blue, unified look)
+        Color.Parse("#0A1A8F"), // EditorBg      (C64 Blue screen)
+        Color.Parse("#A0A0FF"), // EditorFg      (Light blue text)
+        Color.Parse("#4040A0"), // CursorPosBg   (Darker blue highlight)
+        Color.Parse("#FFD800"), // TitleBarBg    (C64 Yellow)
+        Color.Parse("#000000"), // TitleBarFg    (Black text)
+        Color.Parse("#5FCDE4"), // Accent        (C64 Cyan)
+        "C64 PRO MONO"
     );
 
     public static readonly AmosTheme Emerald = new(
@@ -49,7 +65,8 @@ public static class AmosThemes
         Color.Parse("#003300"),
         Color.Parse("#00AA00"),
         Colors.Black,
-        Color.Parse("#00FF00")
+        Color.Parse("#00FF00"),  // Accent
+        "Courier New"
     );
     
     public static readonly AmosTheme NeonNight = new(
@@ -61,7 +78,8 @@ public static class AmosThemes
         Color.Parse("#3D0080"), // CursorPosBg
         Color.Parse("#00FFFF"), // TitleBarBg (Cyan)
         Colors.Black,           // TitleBarFg
-        Color.Parse("#00FFFF")  // Accent (Cyan)
+        Color.Parse("#00FFFF"),  // Accent
+        "Courier New" // Accent (Cyan)
     );
     
     public static readonly AmosTheme CatppuccinMocha = new(
@@ -73,6 +91,7 @@ public static class AmosThemes
         Color.Parse("#313244"), // Surface0
         Color.Parse("#cba6f7"), // Mauve (TitleBar)
         Color.Parse("#11111b"), // Crust (TitleText)
-        Color.Parse("#89b4fa")  // Blue (Accent)
+        Color.Parse("#89b4fa"),  // Accent
+        "Courier New"  // Blue (Accent)
     );
 }

@@ -23,6 +23,7 @@ public sealed class GpuLayer
     
     public Point Offset { get; set; }
     public double Opacity { get; set; } = 1.0;
+    public bool Visible { get; set; } = true; 
     public float Timer { get; set; } // For animations
     // NYTT: Array för att skicka in t.ex. Y-positioner för 20 bars
     public float[] ShaderParams { get; set; } = new float[22]; 
@@ -243,7 +244,7 @@ public sealed class AmosGpuView : Control
                 foreach (var layer in Graphics.ActiveFrame)
                 {
                     if (layer.Bitmap == null) continue;
-
+                    if (!layer.Visible) continue; 
                   
                     var bmpSize = layer.Bitmap.Size;
                     var offset = layer.Offset;
@@ -280,6 +281,18 @@ public sealed class AmosGpuView : Control
                     }
                 }
 
+                foreach (var bobId in Graphics.GetBobIds())
+                {
+                    var bob = Graphics.GetBob(bobId);
+                    if (bob == null || !bob.Visible) continue;
+
+                    var img = Graphics.GetBobImage(bob.ImageIndex);
+                    if (img == null) continue;
+
+                    // Rita bilden på Bobens position
+                    // Här kan man lägga till stöd för hotspots senare om man vill
+                    fbCtx.DrawImage(img, new Rect(img.Size), new Rect(bob.X, bob.Y, img.Size.Width, img.Size.Height));
+                }
           
 // ... inuti AmosGpuView.Render, i loopen för queued texts ...
                 foreach (var qt in Graphics.GetQueuedTexts().ToList())
@@ -386,6 +399,12 @@ public sealed class AmosGraphics
 {
     public Action<string>? OnError { get; set; }
     
+    // NYTT: Bildbank för BOBs (Resurser)
+    private readonly Dictionary<int, WriteableBitmap> _bobImages = new();
+        
+    // NYTT: Lista över aktiva BOBs (Objekt på skärmen)
+    private readonly Dictionary<int, Bob> _bobs = new();
+
     private readonly List<GpuLayer> _frameA = new();
     private readonly List<GpuLayer> _frameB = new();
     private bool _isAActive = true;
@@ -830,6 +849,14 @@ half4 main(float2 fragCoord) {
         public bool BaseZoomInitialized;
         public string CharMap { get; set; } = "";
     }
+    // NYTT: Bob-klass
+    public sealed class Bob
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+        public int ImageIndex { get; set; }
+        public bool Visible { get; set; } = true;
+    }
     
     internal Font? GetFont(int id) => _fonts.GetValueOrDefault(id);
     internal WriteableBitmap? GetFontChar(Font f, char c)
@@ -885,6 +912,11 @@ half4 main(float2 fragCoord) {
     public readonly List<QueuedFontText> _fontTexts = new(); 
     public IEnumerable<QueuedFontText> GetQueuedTexts() => _fontTexts;
     
+    // NYTT: Metoder för att hämta data till rendern
+    public List<int> GetBobIds() => _bobs.Keys.OrderBy(k => k).ToList();
+    public Bob? GetBob(int id) => _bobs.GetValueOrDefault(id);
+    public WriteableBitmap? GetBobImage(int imgId) => _bobImages.GetValueOrDefault(imgId);
+    
     private readonly List<WriteableBitmap> _tiles = new();
     private int _tilesInWidth = 0;
     private int[,] _map = new int[0, 0];
@@ -912,6 +944,16 @@ half4 main(float2 fragCoord) {
     public int GetActiveScreenNumber()
     {
         return _currentScreen;
+    }
+    
+    public void SetScreenVisible(int layerIdx, bool visible)
+    {
+        lock (LockObject)
+        {
+            // Vi sätter flaggan på både A och B så att den består även efter SwapBuffers
+            if (layerIdx >= 0 && layerIdx < _frameA.Count) _frameA[layerIdx].Visible = visible;
+            if (layerIdx >= 0 && layerIdx < _frameB.Count) _frameB[layerIdx].Visible = visible;
+        }
     }
     
     public void SetShadervalues(int layerIdx, int slot, float nr, float value)
@@ -2127,18 +2169,44 @@ half4 main(float2 fragCoord) {
                         {
                             uint* p = (uint*)fb.Address;
                             int count = layer.Bitmap.PixelSize.Width * layer.Bitmap.PixelSize.Height;
-                            for (int i = 0; i < count; i++)
+                            if (OperatingSystem.IsMacOS())
                             {
-                                uint pixel = p[i];
-                                // Byt plats på R och B (från RGBA till BGRA)
-                                uint a = (pixel >> 24) & 0xFF;
-                                uint r = (pixel >> 16) & 0xFF;
-                                uint g = (pixel >> 8) & 0xFF;
-                                uint bColor = pixel & 0xFF;
+                                // ===== MAC (behåll exakt din logik) =====
+                                for (int i = 0; i < count; i++)
+                                {
+                                    uint pixel = p[i];
 
-                                if (r == 0 && g == 0 && bColor == 0) p[i] = 0;
-                                else
-                                    p[i] = (a << 24) | (r << 0) | (g << 8) | (bColor << 16); // Korrekt ordning för Skia
+                                    uint a = (pixel >> 24) & 0xFF;
+                                    uint r = (pixel >> 16) & 0xFF;
+                                    uint g = (pixel >> 8) & 0xFF;
+                                    uint bColor = pixel & 0xFF;
+
+                                    if (r == 0 && g == 0 && bColor == 0)
+                                        p[i] = 0;
+                                    else
+                                        // RGBA -> BGRA (Skia/Metal)
+                                        p[i] = (a << 24) | (r << 0) | (g << 8) | (bColor << 16);
+                                }
+                            }
+                            else if (OperatingSystem.IsWindows())
+                            {
+                                // ===== WINDOWS (PC) =====
+                                for (int i = 0; i < count; i++)
+                                {
+                                    uint pixel = p[i];
+
+                                    // Windows Skia = BGRA native
+                                    uint a = (pixel >> 24) & 0xFF;
+                                    uint bColor = (pixel >> 16) & 0xFF;
+                                    uint g = (pixel >> 8) & 0xFF;
+                                    uint r = pixel & 0xFF;
+
+                                    if (r == 0 && g == 0 && bColor == 0)
+                                        p[i] = 0;
+                                    else
+                                        // redan korrekt ordning för Windows
+                                        p[i] = (a << 24) | (bColor << 16) | (g << 8) | (r << 0);
+                                }
                             }
                         }
                     }
@@ -2150,6 +2218,77 @@ half4 main(float2 fragCoord) {
             }
         }
 
+        // ---------------- BOBS (NY SEKTION) ----------------
+
+        // Motsvarar: LOAD 1,"bild.png"
+        public void LoadBobImage(int index, string path)
+        {
+            try
+            {
+                using var b = new Bitmap(path);
+                int w = (int)b.Size.Width;
+                int h = (int)b.Size.Height;
+                
+                // Skapa en bitmap kompatibel med motorn
+                var targetBmp = CreateEmptyBitmap(w, h);
+                
+                using (var fb = targetBmp.Lock())
+                {
+                    // Kopiera pixlar
+                    b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
+                    
+                    // Fixa färgordning (BGRA/RGBA) precis som i Sprite/LoadBackground
+                    unsafe
+                    {
+                        var p = (byte*)fb.Address;
+                        for (int i = 0; i < w * h; i++)
+                        {
+                            // Enkel BGR-swizzle för att matcha Skia (oftast BGRA)
+                            byte temp = p[i * 4 + 0];
+                            p[i * 4 + 0] = p[i * 4 + 2];
+                            p[i * 4 + 2] = temp;
+                        }
+                    }
+                }
+                
+                lock (LockObject)
+                {
+                    _bobImages[index] = targetBmp;
+                }
+            }
+            catch (Exception ex)
+            {
+                OnError?.Invoke($"[LOAD BOB IMAGE] Error: {ex.Message}");
+            }
+        }
+
+        // Motsvarar: BOB 1, X, Y, BILD_NR
+        public void SetBob(int bobId, int x, int y, int imageIndex)
+        {
+            lock (LockObject)
+            {
+                if (!_bobs.TryGetValue(bobId, out var bob))
+                {
+                    bob = new Bob();
+                    _bobs[bobId] = bob;
+                }
+                bob.X = x;
+                bob.Y = y;
+                bob.ImageIndex = imageIndex;
+                bob.Visible = true; // Sätts automatiskt på vid uppdatering, likt AMOS
+            }
+        }
+
+        public void BobOn(int id)
+        {
+            if (_bobs.TryGetValue(id, out var b)) b.Visible = true;
+        }
+
+        public void BobOff(int id)
+        {
+            if (_bobs.TryGetValue(id, out var b)) b.Visible = false;
+        }
+        
     // ---------------- Tiles ----------------
     public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
 

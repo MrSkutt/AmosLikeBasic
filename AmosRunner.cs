@@ -275,6 +275,11 @@ public static class AmosRunner
         var selectScanStack = new Stack<int>();
         var selectOwnerMarker = new Dictionary<int, int>(); // markerPc (CASE/DEFAULT/ENDSELECT) -> selectPc
 
+        // --- FELHANTERING STATE ---
+        // 0 = Break (Default), 1 = Resume Next, 2 = Goto Label
+        int errorMode = 0; 
+        int errorGotoPc = 0;
+        
         static bool IsEndSelectLine(string upperScan)
             => upperScan == "ENDSELECT" || upperScan == "END SELECT";
         
@@ -585,21 +590,46 @@ public static class AmosRunner
             bool jumpHappened = false;
 
             foreach (var fullCmd in commands) {
+                try 
+                {
                 var trimmedCmd = fullCmd.Trim();
                 if (string.IsNullOrEmpty(trimmedCmd)) continue;
                 var (cmd, arg) = SplitCommand(trimmedCmd);
 
                 switch (cmd) {
+                    case "ON":
+                        var onArg = arg.ToUpperInvariant();
+                        if (onArg.StartsWith("ERROR GOTO "))
+                        {
+                            var labelName = arg[11..].Trim(); // "ERROR GOTO ".Length == 11
+                            // ÄNDRAT: targetPc -> errorTargetPc för att undvika namnkonflikt med GOTO
+                            if (labels.TryGetValue(labelName, out var errorTargetPc)) {
+                                errorMode = 2; // Goto
+                                errorGotoPc = errorTargetPc;
+                            } else {
+                                throw new Exception($"Label '{labelName}' not found for ON ERROR GOTO");
+                            }
+                        }
+                        else if (onArg == "ERROR RESUME NEXT")
+                        {
+                            errorMode = 1; // Resume Next
+                        }
+                        else if (onArg == "ERROR BREAK" || onArg == "ERROR END")
+                        {
+                            errorMode = 0; // Break/Crash
+                        }
+                        break;   
+                    
                     case "CLS": await appendLineAsync("@@CLS"); await clearAsync(); break;
                     
-                    case "CLSG": 
+                    case "CLSG2": 
                         // Rensa både grafik och text-cursor
                         await clearAsync(); // Om du vill rensa loggen/text-boxen också, annars ta bort
                         graphics.Clear(graphics.PaperColor); // Använd paper color som bakgrund
                         graphics.Locate(0, 0); 
                         break;
                     
-                    case "CLSG2": 
+                    case "CLSG": 
                         var x = graphics.GetActiveScreenNumber();
                         if (!string.IsNullOrWhiteSpace(arg))
                         {
@@ -608,6 +638,7 @@ public static class AmosRunner
                         }
                         graphics.Clear(Colors.Transparent); 
                         graphics.SetDrawingScreen(x);
+                        graphics.Locate(0, 0); 
                         onGraphicsChanged(); 
                         break;
 
@@ -1319,11 +1350,29 @@ public static class AmosRunner
 
                     case "SCREEN":
                         var screenArgs = SplitCsvOrSpaces(arg);
-                        if (screenArgs.Count > 0 && screenArgs[0].Equals("SELECT", StringComparison.OrdinalIgnoreCase)) {
-                            if (screenArgs.Count >= 2) graphics.SetDrawingScreen(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
-                        } else if (screenArgs.Count >= 2) {
-                            graphics.Screen(EvalInt(screenArgs[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
-                            //graphics.Clear(Colors.Transparent);
+                        if (screenArgs.Count > 0)
+                        {
+                            var subCmd = screenArgs[0].ToUpperInvariant();
+
+                            if (subCmd == "SELECT" && screenArgs.Count >= 2)
+                            {
+                                graphics.SetDrawingScreen(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
+                            }
+                            else if (subCmd == "ON" && screenArgs.Count >= 2)
+                            {
+                                graphics.SetScreenVisible(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics), true);
+                                onGraphicsChanged();
+                            }
+                            else if (subCmd == "OFF" && screenArgs.Count >= 2)
+                            {
+                                graphics.SetScreenVisible(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics), false);
+                                onGraphicsChanged();
+                            }
+                            else if (screenArgs.Count >= 2)
+                            {
+                                // Standard: SCREEN width, height
+                                graphics.Screen(EvalInt(screenArgs[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
+                            }
                         }
                         break;
                     case "SCROLL":
@@ -1333,15 +1382,72 @@ public static class AmosRunner
                             var parts = arg.Split(',');
                             if (parts.Length >= 2) graphics.Scroll(0, EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics));
                         }
-                        break;
+                         break;
 
-                    case "LOAD":
-                    {
-                        string str = ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
-                        graphics.LoadBackground(str);
-                        onGraphicsChanged();
-                        break;
-                    }
+                        case "LOAD":
+                        {
+                            // Kolla om vi har ett komma, t.ex: LOAD 1, "fil.png"
+                            // Vi använder IndexOf istället för Split för att inte ha sönder filnamn med kommatecken/mellanslag inuti sig.
+                            int commaIndex = arg.IndexOf(',');
+                            
+                            if (commaIndex > -1)
+                            {
+                                // === LOAD BOB IMAGE ===
+                                // Ex: LOAD 1, "skepp.png"
+                                string p1 = arg[..commaIndex];       // "1"
+                                string p2 = arg[(commaIndex + 1)..]; // "\"skepp.png\""
+                                
+                                int index = EvalInt(p1, vars, ln, getInkey, isKeyDown, graphics);
+                                string path = ValueToString(EvalValue(p2, vars, ln, getInkey, isKeyDown, graphics));
+                                
+                                graphics.LoadBobImage(index, path);
+                            }
+                            else
+                            {
+                                // === LOAD BACKGROUND ===
+                                // Ex: LOAD "bakgrund.png" (Gammalt beteende)
+                                string str = ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
+                                graphics.LoadBackground(str);
+                            }
+                            
+                            onGraphicsChanged();
+                            break;
+                        }
+
+                        case "BOB":
+                        {
+                            var bArgs = SplitCsvOrSpaces(arg);
+                            if (bArgs.Count > 0)
+                            {
+                                string sub = bArgs[0].ToUpperInvariant();
+
+                                if (sub == "OFF" && bArgs.Count >= 2)
+                                {
+                                    // BOB OFF 1
+                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.BobOff(id);
+                                }
+                                else if (sub == "ON" && bArgs.Count >= 2)
+                                {
+                                    // BOB ON 1
+                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.BobOn(id);
+                                }
+                                else if (bArgs.Count >= 4)
+                                {
+                                    // BOB id, x, y, imageIndex
+                                    int id = EvalInt(bArgs[0], vars, ln, getInkey, isKeyDown, graphics);
+                                    int x1 = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int y1 = EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    int img = EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics);
+
+                                    graphics.SetBob(id, x1, y1, img);
+                                }
+                            }
+                            onGraphicsChanged();
+                            break;
+                        }
+
                     case "INC":
                         setVar(arg, GetDoubleVar(arg, vars, ln) + 1.0);
                         break;
@@ -1408,7 +1514,13 @@ public static class AmosRunner
                     case "SAM":
                         var samArgs = SplitCsvOrSpaces(arg);
                         if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "PLAY") {
-                            PlayEffect(Unquote(samArgs[1]), audioEngine); 
+                            PlayEffect(Unquote(samArgs[1]), audioEngine,false); 
+                        }
+                        if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "LOOP") {
+                            PlayEffect(Unquote(samArgs[1]), audioEngine,true); 
+                        }
+                        if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "STOP") {
+                            StopEffect(Unquote(samArgs[1]), audioEngine); 
                         }
                         break;
                     case "MUSIC":
@@ -1574,11 +1686,39 @@ public static class AmosRunner
                 }
                 if (jumpHappened) break;
             }
-            if (!jumpHappened) pc++;
-            continue;
-            next_line: pc++;
+            catch (Exception ex)
+            {
+                // Spara felinformation i BASIC-variabler så man kan kolla vad som hände
+                setVar("ERR$", ex.Message);
+                setVar("ERL", ln);
+
+                if (errorMode == 1) 
+                {
+                    // RESUME NEXT: Ignorera felet och kör vidare till nästa kommando/rad.
+                    // Vi gör ingenting här, loopen fortsätter till nästa kommando i 'commands'
+                    // eller nästa rad om commands är slut.
+                }
+                else if (errorMode == 2)
+                {
+                    // GOTO Label
+                    pc = errorGotoPc;
+                    jumpHappened = true;
+                    break; // Bryt command-loopen för att utföra hoppet
+                }
+                else
+                {
+                    // BREAK (Standard): Rapportera och avsluta
+                    await appendLineAsync($"Runtime Error at line {ln}: {ex.Message}");
+                    // Kasta vidare eller returnera för att stoppa helt
+                    return; 
+                }
+            }
         }
+        if (!jumpHappened) pc++;
+        continue;
+        next_line: pc++;
     }
+}
 
     private static List<string> SplitMultipleCommands(string l) {
         var trimmed = l.TrimStart();
@@ -1677,8 +1817,27 @@ public static class AmosRunner
                 return false;
             case "SAM":
                 var sa = SplitCsvOrSpaces(arg);
-                if (sa.Count >= 2 && sa[0].ToUpperInvariant() == "PLAY") {
-                    PlayEffect(Unquote(sa[1]), audioEngine);
+                if (sa.Count >= 2)
+                {
+                    var cmdType = sa[0].ToUpperInvariant();
+                                
+                    if (cmdType == "PLAY") {
+                        // PLAY körs utan loop (false)
+                        PlayEffect(Unquote(sa[1]), audioEngine, false); 
+                    }
+                    else if (cmdType == "LOOP") {
+                        // NYTT: LOOP körs med loop (true)
+                        PlayEffect(Unquote(sa[1]), audioEngine, true); 
+                    }
+                    else if (cmdType == "STOP") {
+                        string fileToStop = sa.Count >= 2 ? Unquote(sa[1]) : "";
+                        StopEffect(fileToStop, audioEngine); 
+                    }
+                }
+                // Om man skriver bara "SAM STOP" utan argument (sa.Count == 1)
+                else if (sa.Count == 1 && sa[0].ToUpperInvariant() == "STOP")
+                {
+                    StopEffect("", audioEngine);
                 }
                 return false;
             case "END": return true;
@@ -1804,7 +1963,12 @@ public static class AmosRunner
                 else if (t.TryConsume('/')) {
                     var d = ParseFactor(ref t, v, ln, gk, ikd, g);
                     double div = Convert.ToDouble(d, CultureInfo.InvariantCulture);
-                    res = (div == 0) ? 0.0 : Convert.ToDouble(res, CultureInfo.InvariantCulture) / div;
+                        
+                    // ÄNDRAT: Kasta fel om nämnaren är noll (eller extremt nära noll)
+                    if (Math.Abs(div) < 0.000000001)
+                        throw new DivideByZeroException("Division by zero");
+
+                    res = Convert.ToDouble(res, CultureInfo.InvariantCulture) / div;
                 } else break; 
             }
             return res;
@@ -2032,7 +2196,12 @@ public static class AmosRunner
                         double rawIdx = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
                         t.TryConsume(')');
                         int aIdx = (int)Math.Floor(rawIdx + 0.000001);
-                        if (aIdx >= 0 && aIdx < arr.Length) return arr.Get(aIdx);
+                            
+                        // ÄNDRAT: Kasta fel om index är ogiltigt istället för att ignorera
+                        if (aIdx < 0 || aIdx >= arr.Length)
+                            throw new IndexOutOfRangeException($"Array index out of bounds: {id}({aIdx}). Max is {arr.Length - 1}");
+
+                        return arr.Get(aIdx);
                     }
 
                     throw new Exception($"Unknown function: {id} at line {ln}");
@@ -2107,9 +2276,22 @@ static string InputCommand(string[] args)
         return (cmd, arg); 
     }
     
-    private static void PlayEffect(string file, AudioEngine? engine) {
+    private static void PlayEffect(string file, AudioEngine? engine, bool loop) {
         if (engine == null) return;
-        engine.PlaySample(file);
+        engine.PlaySample(file, loop);
+    }
+    
+    private static void StopEffect(string file, AudioEngine? engine) {
+        if (engine == null) return;
+        // Om filsträngen är tom, stoppa allt!
+        if (string.IsNullOrEmpty(file))
+        {
+            engine.StopAllSamples();
+        }
+        else
+        {
+            engine.StopSample(file);
+        }
     }
 
     private static void PlayMusic(string file, AudioEngine? engine) {

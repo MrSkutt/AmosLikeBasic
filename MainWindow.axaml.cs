@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -14,7 +15,9 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using Avalonia.Interactivity;
 using AvaloniaEdit;
+
 
 namespace AmosLikeBasic;
 
@@ -30,14 +33,29 @@ public partial class MainWindow : Window
     private readonly TextScreen _textScreen = new(rows: 30, cols: 80);
     private bool _uiReady;
     private IStorageFile? _currentProjectFile;
+    private bool _isDirty = false;
     private readonly HashSet<string> _pressedKeys = new(StringComparer.OrdinalIgnoreCase);
-
+    private readonly ConfigService configService;
     public MainWindow()
     {
         InitializeComponent();
         
+        Editor.Options.IndentationSize = 2;
+        Editor.Options.ConvertTabsToSpaces = true;
+        
         Opened += MainWindow_OnOpened;
         this.Closing += MainWindow_Closing;
+        
+        configService = new ConfigService("AmosProject");
+        configService.Load();
+        ChangeTheme(configService.Config.DefaultTheme);
+        this.Width = configService.Config.WindowWidth;
+        this.Height = configService.Config.WindowHeight;
+        this.Position = new PixelPoint(configService.Config.WindowTop, configService.Config.WindowLeft);
+        if (!string.IsNullOrWhiteSpace(configService.Config.LastProjectPath))
+        {
+            _ = OpenProjectFromPathAsync(configService.Config.LastProjectPath);
+        }
         
         // KOPPLA IHOP AMOSGRAPHICS MED LOGBOX HÄR
         _gfx.OnError = (msg) => {
@@ -57,7 +75,16 @@ public partial class MainWindow : Window
             UpdateCursorPosition();
         };
 
-    
+        // Check for text changed
+        Editor.TextChanged += (s, e) => {
+            if (!_isDirty)
+            {
+                
+                _isDirty = true;
+                UpdateTitleBar();
+            }
+        };
+        
         _gfx.Screen(640, 480);
         _gfx.Clear(Colors.Black);
 
@@ -71,8 +98,71 @@ public partial class MainWindow : Window
             "  WAIT 100\n" +
             "UNTIL X = 10\n" +
             "END\n";
+        
+        // Nollställ flaggan efter att vi satt starttexten, så den inte tror att vi ändrat något direkt
+        _isDirty = false;
+        UpdateTitleBar();
     }
 
+        private async void OnCut(object? sender, RoutedEventArgs e)
+        {
+            string selected = Editor.SelectedText;
+            if (string.IsNullOrEmpty(selected)) return;
+
+            // Klipp till clipboard
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard != null)
+                await clipboard.SetTextAsync(selected);
+
+            // Spara startpositionen (där texten börjar, oavsett vilket håll man markerat)
+            int startPos = Editor.SelectionStart;
+            int len = Editor.SelectionLength;
+
+            // Ta bort den valda texten
+            Editor.Document.Replace(startPos, len, "");
+
+            // Placera caret där texten togs bort
+            Editor.CaretOffset = startPos;
+            Editor.SelectionLength = 0;
+        }
+
+        private async void OnCopy(object? sender, RoutedEventArgs e)
+        {
+            string selected = Editor.SelectedText;
+            if (!string.IsNullOrEmpty(selected))
+            {
+                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+                if (clipboard != null)
+                    await clipboard.SetTextAsync(selected);
+            }
+        }
+
+        private async void OnPaste(object? sender, RoutedEventArgs e)
+        {
+            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard != null)
+            {
+                string? text = await clipboard.GetTextAsync();
+                if (!string.IsNullOrEmpty(text))
+                {
+                    // Om vi har en markering, skriv över den (både Insert och Replace hanteras av Replace)
+                    int startPos = Editor.SelectionLength > 0 ? Editor.SelectionStart : Editor.CaretOffset;
+                    int lengthToReplace = Editor.SelectionLength;
+
+                    Editor.Document.Replace(startPos, lengthToReplace, text);
+                    
+                    // Flytta caret till slutet av den inklistrade texten
+                    Editor.CaretOffset = startPos + text.Length;
+                    Editor.SelectionLength = 0;
+                }
+            }
+        }
+
+        private void OnSelectAll(object? sender, RoutedEventArgs e)
+        {
+            Editor.SelectAll();
+        }
+    
     private void MainWindow_OnOpened(object? sender, EventArgs e)
     {
         _uiReady = true;
@@ -392,15 +482,27 @@ public partial class MainWindow : Window
 
     private async void Exit_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (!await CheckUnsavedChangesAsync())
+        {
+            // Om användaren svarade "Nej" (vill inte förlora ändringar), avbryt stängningen helt
+            return;
+        }
+        
         var result = await MessageBox(
-            "Avsluta programmet",
-            "Vill du verkligen avsluta?",
-            "Ja",
-            "Nej"
+            "Exit program",
+            "Do you really want to quit?",
+            "Yes",
+            "No"
         );
 
         if (result)
         {
+            configService.Config.WindowTop = this.Position.X;
+            configService.Config.WindowLeft = this.Position.Y;
+            configService.Config.WindowWidth = (int)this.Width;
+            configService.Config.WindowHeight = (int)this.Height;
+            configService.Save();
+            
             Environment.Exit(0);
         }
     }
@@ -409,29 +511,55 @@ public partial class MainWindow : Window
     {
         e.Cancel = true; // Stoppa fönstret direkt
 
+        if (!await CheckUnsavedChangesAsync())
+        {
+            // Om användaren svarade "Nej" (vill inte förlora ändringar), avbryt stängningen helt
+            return;
+        }
+        
         var result = await ShowExitDialog();
 
         if (result)
         {
+            configService.Config.WindowTop = this.Position.X;
+            configService.Config.WindowLeft = this.Position.Y;
+            configService.Config.WindowWidth = (int)this.Width;
+            configService.Config.WindowHeight = (int)this.Height;
+            configService.Save();
             // Stänger fönstret efter dialogen
             this.Closing -= MainWindow_Closing; // Undvik loop
             this.Close();
         }
     }
     
+    // NYTT: Hjälpmetod för att kolla osparade ändringar
+    private async Task<bool> CheckUnsavedChangesAsync()
+    {
+        if (!_isDirty) return true; // Inga ändringar, kör på!
+
+        var result = await MessageBox(
+            "Unsaved changes",
+            "You have unsaved changes. Do you want to continue?",
+            "Yes",  // Fortsätt (släng ändringar)
+            "No"  // Avbryt (gå tillbaka och spara)
+        );
+
+        return result;
+    }
+    
     private async Task<bool> ShowExitDialog()
     {
         var dialog = new Window
         {
-            Title = "Avsluta programmet",
+            Title = "Exit program",
             Width = 300,
-            Height = 130,
+            Height = 75,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
 
-        var yesButton = new Button { Content = "Ja", Width = 80, Margin = new Thickness(5) };
-        var noButton  = new Button { Content = "Nej", Width = 80, Margin = new Thickness(5) };
+        var yesButton = new Button { Content = "Yes", Width = 80, Margin = new Thickness(5) };
+        var noButton  = new Button { Content = "No", Width = 80, Margin = new Thickness(5) };
 
         var tcs = new TaskCompletionSource<bool>();
 
@@ -443,7 +571,7 @@ public partial class MainWindow : Window
             Margin = new Thickness(10),
             Children =
             {
-                new TextBlock { Text = "Vill du verkligen avsluta?", Margin = new Thickness(0,0,0,10) },
+                new TextBlock { Text = "Do you really want to quit?", Margin = new Thickness(0,0,0,10) },
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
@@ -463,8 +591,8 @@ public partial class MainWindow : Window
         var dialog = new Window
         {
             Title = title,
-            Width = 320,
-            Height = 140,
+            Width = 370,
+            Height = 75,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false
         };
@@ -502,6 +630,8 @@ public partial class MainWindow : Window
     
     private Task ClearConsoleAsync()
     {
+        // Vi använder InvokeAsync direkt och returnerar Tasken.
+        // (Det går också att göra metoden 'async Task' och använda 'await' inuti)
         return Dispatcher.UIThread.InvokeAsync(() =>
         {
             _textScreen.Clear();
@@ -510,135 +640,147 @@ public partial class MainWindow : Window
         }).GetTask();
     }
     
-    private async Task StartProgramAsync(bool startPaused)
-    {
-        if (_screenWindow == null || !_screenWindow.IsVisible)
+        private async Task StartProgramAsync(bool startPaused)
         {
-            _screenWindow = new ScreenWindow();
-            _screenWindow.Closed += (s, ev) => {
-                StopButton_OnClick(null, new RoutedEventArgs());
-                _screenWindow = null;
-            };
-            _screenWindow.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
-            _screenWindow.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
-            _screenWindow.Show();
-        }
-        _screenWindow.Activate();
-        _screenWindow.Focus(); 
+            if (_screenWindow == null || !_screenWindow.IsVisible)
+            {
+                _screenWindow = new ScreenWindow();
+                _screenWindow.Closed += (s, ev) => {
+                    StopButton_OnClick(null, new RoutedEventArgs());
+                    _screenWindow = null;
+                };
+                _screenWindow.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
+                _screenWindow.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
+                _screenWindow.Show();
+            }
+            _screenWindow.Activate();
+            _screenWindow.Focus(); 
 
-        _isPaused = startPaused; // Sätt paus-läget direkt här
+            _isPaused = startPaused; 
         
-        Dispatcher.UIThread.Post(() => {
-            PauseButton.Content = _isPaused ? "[ RESUME ]" : "[ PAUSE ]";
-            PauseButton.IsEnabled = true;
-            StepButton.IsEnabled = _isPaused;
-            RunButton.IsEnabled = false;
-            StopButton.IsEnabled = true;
-            StatusText.Text = _isPaused ? "Status: DEBUG (Paused)" : "Status: RUNNING";
-        });
-
-        _gfx.Clear(Colors.Black);
-        _gfx.ClearFrames();
-        _textScreen.Clear();
-        _gfx.CursorX = 0;
-        _gfx.CursorY = 0;
-        foreach(var id in _gfx.GetSpriteIds()) {
-            _gfx.SpriteOff(id);
-        }
-        _screenWindow.Console.Text = "";
-        _screenWindow.ScreenControl.Graphics = _gfx;
-        _runCts?.Cancel();
-        _runCts = new CancellationTokenSource();
-        var token = _runCts.Token;
-        var program = Editor.Text ?? string.Empty;
-
-        try
-        {
-               await Task.Run(async () =>
-                {
-                    var lastCpuUpdateTime = DateTime.MinValue;
-                    var cpuUpdateInterval = TimeSpan.FromMilliseconds(500); 
-
-                    await AmosRunner.ExecuteAsync(
-                        programText: program,
-                        appendLineAsync: AppendConsoleLineAsync,
-                        getConsoleInputAsync: async () => {
-                            if (_screenWindow == null) return "";
-                            return await Dispatcher.UIThread.InvokeAsync(() => _screenWindow.RequestInputAsync());
-                        },
-                        clearAsync: ClearConsoleAsync,
-                        graphics: _gfx,
-                        onGraphicsChanged: () => {
-                            Dispatcher.UIThread.InvokeAsync(() => {
-                                if (_screenWindow != null) {
-                                    var control = _screenWindow.FindControl<AmosGpuView>("ScreenControl");
-                                    if (control != null)
-                                    {
-                                        control.InvalidateMeasure();
-                                        control.InvalidateVisual();
-                                    }
-                                    
-                                    var now = DateTime.Now;
-                                    if (now - lastCpuUpdateTime > cpuUpdateInterval)
-                                    {
-                                        var cpu = _gfx.LastCpuUsagePercent;
-                                        if (_screenWindow != null)
-                                            _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
-                                        StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%";
-                                        lastCpuUpdateTime = now;
-                                    }
-                                }
-                            }, DispatcherPriority.Render);
-                        },
- 
-                        getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
-                        isKeyDown: (k) => _pressedKeys.Contains(k),
-                        audioEngine: _audioEngine,
-                        token: token,
-                        onVariablesChanged: (vars) => {
-                            Dispatcher.UIThread.Post(() => {
-                                VariableListBox.ItemsSource = vars.OrderBy(v => v.Key).ToList();
-                            });
-                        },
-                        waitForStep: async (pc) => {
-                            if (_isPaused)
-                            {
-                                Dispatcher.UIThread.Post(() => { 
-                                    StatusText.Text = "Status: PAUSED";
-                                    CurrentLineText.Text = $"Line: {pc + 1}";
-                                    if (Editor.Text != null)
-                                    {
-                                        var textLines = Editor.Text.Replace("\r\n", "\n").Split('\n');
-                                        int charIndex = 0;
-                                        for (int i = 0; i < pc && i < textLines.Length; i++) charIndex += textLines[i].Length + 1;
-                                    
-                                        int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
-                                        Editor.SelectionStart = charIndex;
-                                        Editor.SelectionLength = lineLength;
-                                        Editor.CaretOffset = charIndex;
-                                        Editor.Focus();
-                                    }
-                            });
-                            _stepSignal = new TaskCompletionSource<bool>();
-                            await _stepSignal.Task;
-                        }
-                    });
-            }, token);
-            await AppendConsoleLineAsync("OK");
-        }
-        catch (OperationCanceledException) { await AppendConsoleLineAsync("STOPPED"); }
-        catch (Exception ex) { await AppendConsoleLineAsync($"ERROR: {ex.Message}"); }
-        finally 
-        { 
             Dispatcher.UIThread.Post(() => {
-                StopButton.IsEnabled = false; 
-                RunButton.IsEnabled = true; 
-                PauseButton.IsEnabled = false; 
-                StepButton.IsEnabled = false;
-                StatusText.Text = "Status: Idle";
+                PauseButton.Content = _isPaused ? "[ RESUME ]" : "[ PAUSE ]";
+                PauseButton.IsEnabled = true;
+                StepButton.IsEnabled = _isPaused;
+                RunButton.IsEnabled = false;
+                StopButton.IsEnabled = true;
+                StatusText.Text = _isPaused ? "Status: DEBUG (Paused)" : "Status: RUNNING";
             });
+
+            _gfx.Clear(Colors.Black);
+            _gfx.ClearFrames();
+            _textScreen.Clear();
+            _gfx.CursorX = 0;
+            _gfx.CursorY = 0;
+            _gfx.PaperColor = Colors.Transparent;
+            _gfx.Ink = Colors.White;
+            _gfx.ConfigureText(8,16,"Topaz a600a1200a400");
+            _gfx.Screen(640,480);
+            foreach(var id in _gfx.GetSpriteIds()) {
+                _gfx.SpriteOff(id);
+            }
+            foreach(var id in _gfx.GetBobIds()) {
+                _gfx.BobOff(id);
+            }
+            if (_screenWindow.Console != null) _screenWindow.Console.Text = "";
+            _screenWindow.ScreenControl.Graphics = _gfx;
+            _runCts?.Cancel();
+            _runCts = new CancellationTokenSource();
+            var token = _runCts.Token;
+            var program = Editor.Text ?? string.Empty;
+
+            try
+            {
+                   // VIKTIGT: async här i lambdan till Task.Run
+                   await Task.Run(async () =>
+                    {
+                        var lastCpuUpdateTime = DateTime.MinValue;
+                        var cpuUpdateInterval = TimeSpan.FromMilliseconds(500); 
+
+                        await AmosRunner.ExecuteAsync(
+                            programText: program,
+                            appendLineAsync: AppendConsoleLineAsync,
+                            // VIKTIGT: async här också för input
+                            getConsoleInputAsync: async () => {
+                                if (_screenWindow == null) return "";
+                                return await Dispatcher.UIThread.InvokeAsync(() => _screenWindow.RequestInputAsync());
+                            },
+                            clearAsync: ClearConsoleAsync,
+                            graphics: _gfx,
+                            onGraphicsChanged: () => {
+                                Dispatcher.UIThread.InvokeAsync(() => {
+                                    if (_screenWindow != null) {
+                                        var control = _screenWindow.FindControl<AmosGpuView>("ScreenControl");
+                                        if (control != null)
+                                        {
+                                            control.InvalidateMeasure();
+                                            control.InvalidateVisual();
+                                        }
+                                    
+                                        var now = DateTime.Now;
+                                        if (now - lastCpuUpdateTime > cpuUpdateInterval)
+                                        {
+                                            var cpu = _gfx.LastCpuUsagePercent;
+                                            if (_screenWindow != null)
+                                                _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
+                                            //StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%"; // UI-thread access error risk fixad i ExecuteAsync
+                                            lastCpuUpdateTime = now;
+                                        }
+                                    }
+                                }, DispatcherPriority.Render);
+                            },
+ 
+                            getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
+                            isKeyDown: (k) => _pressedKeys.Contains(k),
+                            audioEngine: _audioEngine,
+                            token: token,
+                            onVariablesChanged: (vars) => {
+                                Dispatcher.UIThread.Post(() => {
+                                    VariableListBox.ItemsSource = vars.OrderBy(v => v.Key).ToList();
+                                });
+                            },
+                            // VIKTIGT: async här för debug-steget
+                            waitForStep: async (pc) => {
+                                if (_isPaused)
+                                {
+                                    Dispatcher.UIThread.Post(() => { 
+                                        StatusText.Text = "Status: PAUSED";
+                                        CurrentLineText.Text = $"Line: {pc + 1}";
+                                        if (Editor.Text != null)
+                                        {
+                                            var textLines = Editor.Text.Replace("\r\n", "\n").Split('\n');
+                                            int charIndex = 0;
+                                            for (int i = 0; i < pc && i < textLines.Length; i++) charIndex += textLines[i].Length + 1;
+                                    
+                                            int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
+                                            Editor.SelectionStart = charIndex;
+                                            Editor.SelectionLength = lineLength;
+                                            Editor.CaretOffset = charIndex;
+                                            Editor.Focus();
+                                        }
+                                    });
+                                    _stepSignal = new TaskCompletionSource<bool>();
+                                    await _stepSignal.Task;
+                                }
+                            }
+                        ); // Slut på ExecuteAsync
+                }, token); // Slut på Task.Run
+
+                await AppendConsoleLineAsync("OK");
+            }
+            catch (OperationCanceledException) { await AppendConsoleLineAsync("STOPPED"); }
+            catch (Exception ex) { await AppendConsoleLineAsync($"ERROR: {ex.Message}"); }
+            finally 
+            { 
+                Dispatcher.UIThread.Post(() => {
+                    StopButton.IsEnabled = false; 
+                    RunButton.IsEnabled = true; 
+                    PauseButton.IsEnabled = false; 
+                    StepButton.IsEnabled = false;
+                    StatusText.Text = "Status: Idle";
+                });
+            }
         }
-    }
 
     private async void RunButton_OnClick(object? sender, RoutedEventArgs e)
     {
@@ -679,6 +821,7 @@ public partial class MainWindow : Window
         _stepSignal?.TrySetResult(false);
         _runCts?.Cancel();
         _audioEngine?.StopMod();
+        _audioEngine?.StopAllSamples();
         ManagedBass.Bass.Start(); // Säkerställ att ljudet inte fastnar i paus
 
         // Stäng spelfönstret om det är öppet
@@ -720,23 +863,57 @@ public partial class MainWindow : Window
     private void UpdateTitleBar()
     {
         string name = _currentProjectFile?.Name ?? "Untitled";
-        FileNameText.Text = name;
+        string dirtyMarker = _isDirty ? "*" : "";
+            
+        FileNameText.Text = name + dirtyMarker;
         // Valfritt: Uppdatera även fönstertiteln (det som syns i Windows/macOS-listen)
         this.Title = $"AMOS Professional IDE - [{name}]";
     }
 
-    private void NewProject_OnClick(object? sender, RoutedEventArgs e)
+    private async void NewProject_OnClick(object? sender, RoutedEventArgs e)
     {
+        // NYTT: Kolla innan vi rensar
+        if (!await CheckUnsavedChangesAsync()) return;
+        
         Editor.Text = "";
         _currentProjectFile = null; // Nollställ filreferensen
         _gfx.Clear(Colors.Black);
         _textScreen.Clear();
         if (_screenWindow?.Console != null) _screenWindow.Console.Text = "";
         LogBox.Text = "New project started.\n";
-        
+        _isDirty = false; // Nollställ flaggan
         UpdateTitleBar(); // Uppdatera till "Untitled"
     }
 
+    private async void SaveAsProject_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var sp = StorageProvider;
+        if (sp is null) return;
+        IStorageFile? file = _currentProjectFile;
+        //if ()
+        //{
+            file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Save AMOS Project",
+                SuggestedFileName = "project.amosproj",
+                FileTypeChoices = [new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }]
+            });
+        //}
+        if (file is null) return;
+
+        try 
+        {
+            var project = _gfx.ExportProject(Editor.Text ?? string.Empty);
+            using var stream = await file.OpenWriteAsync();
+            await AmosProjectSerializer.SaveAsync(stream, project);
+            _currentProjectFile = file;
+            
+            _isDirty = false; // NYTT: Markera som sparad
+            UpdateTitleBar(); // Visa det nya namnet (utan stjärna)
+            await AppendConsoleLineAsync($"Saved: {file.Name}");
+        }
+        catch (Exception ex) { await AppendConsoleLineAsync($"ERROR saving: {ex.Message}"); }
+    }   
     private async void SaveProject_OnClick(object? sender, RoutedEventArgs e)
     {
         var sp = StorageProvider;
@@ -760,7 +937,8 @@ public partial class MainWindow : Window
             await AmosProjectSerializer.SaveAsync(stream, project);
             _currentProjectFile = file;
             
-            UpdateTitleBar(); // Visa det nya namnet
+            _isDirty = false; // NYTT: Markera som sparad
+            UpdateTitleBar(); // Visa det nya namnet (utan stjärna)
             await AppendConsoleLineAsync($"Saved: {file.Name}");
         }
         catch (Exception ex) { await AppendConsoleLineAsync($"ERROR saving: {ex.Message}"); }
@@ -768,45 +946,127 @@ public partial class MainWindow : Window
 
     private async void OpenProject_OnClick(object? sender, RoutedEventArgs e)
     {
+        // Unsaved check
+        if (!await CheckUnsavedChangesAsync()) return;
+
         var sp = StorageProvider;
         if (sp is null) return;
+
         var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open AMOS-like Project",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }]
+            FileTypeFilter =
+            [
+                new FilePickerFileType("AMOS Project")
+                {
+                    Patterns = ["*.amosproj"]
+                }
+            ]
         });
+
         var file = files.FirstOrDefault();
         if (file is null) return;
-        try 
+
+        await OpenProjectFromStorageFileAsync(file);
+    }
+    
+    public async Task OpenProjectFromStorageFileAsync(IStorageFile file)
+    {
+        try
         {
-            using var stream = await file.OpenReadAsync();
+            await using var stream = await file.OpenReadAsync();
             var project = await AmosProjectSerializer.LoadAsync(stream);
+
             _gfx.ImportProject(project);
             Editor.Text = project.ProgramText ?? string.Empty;
-            _currentProjectFile = file; // Spara referensen
-            
-            UpdateTitleBar(); // Visa namnet på filen vi öppnade
+
+            _currentProjectFile = file;
+
+            _isDirty = false;
+            UpdateTitleBar();
+
             await AppendConsoleLineAsync($"Opened: {file.Name}");
+            
+            // ✅ SPARA SENAST ÖPPNADE FIL
+            configService.Config.LastProjectPath = file.Path.LocalPath;
+            configService.Save();
         }
-        catch (Exception ex) { await AppendConsoleLineAsync($"ERROR loading: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            await AppendConsoleLineAsync($"ERROR loading: {ex.Message}");
+        }
     }
 
+    public async Task OpenProjectFromPathAsync(string filePath)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                await AppendConsoleLineAsync($"Project not found: {filePath}");
+                return;
+            }
+
+            // Unsaved check
+            if (!await CheckUnsavedChangesAsync()) 
+                return;
+
+            await using var stream = File.OpenRead(filePath);
+
+            var project = await AmosProjectSerializer.LoadAsync(stream);
+
+            _gfx.ImportProject(project);
+            Editor.Text = project.ProgramText ?? string.Empty;
+
+            // Skapa IStorageFile-referens från path
+            _currentProjectFile = await StorageProvider.TryGetFileFromPathAsync(filePath);
+
+            _isDirty = false;
+            UpdateTitleBar();
+
+            await AppendConsoleLineAsync($"Opened: {Path.GetFileName(filePath)}");
+        }
+        catch (Exception ex)
+        {
+            await AppendConsoleLineAsync($"ERROR loading: {ex.Message}");
+        }
+    }
+    
+    
     private void ChangeTheme_OnClick(object? sender, RoutedEventArgs e)
     {
         if (sender is MenuItem mi && mi.Tag is string themeName)
         {
-            var theme = themeName switch
-            {
-                "Workbench" => AmosThemes.Workbench,
-                "Emerald" => AmosThemes.Emerald,
-                "NeonNight" => AmosThemes.NeonNight,
-                "CatppuccinMocha" => AmosThemes.CatppuccinMocha,
-                _ => AmosThemes.ClassicBlue
-            };
-            ApplyTheme(theme);
+            ApplyThemeByName(themeName);
         }
     }
+    
+    public void ChangeTheme(string themeName)
+    {
+        ApplyThemeByName(themeName);
+    }
+    
+    private void ApplyThemeByName(string themeName)
+    {
+        var theme = themeName switch
+        {
+            "Workbench" => AmosThemes.Workbench,
+            "C64" => AmosThemes.C64,
+            "Emerald" => AmosThemes.Emerald,
+            "NeonNight" => AmosThemes.NeonNight,
+            "CatppuccinMocha" => AmosThemes.CatppuccinMocha,
+            _ => AmosThemes.ClassicBlue
+        };
+    
+        ApplyTheme(theme);
+
+        // Spara temat i config
+        configService.Config.DefaultTheme = themeName;
+        configService.Save();
+    }
+    
+    
     
     private async void About_OnClick(object? sender, RoutedEventArgs e)
     {
@@ -816,11 +1076,11 @@ public partial class MainWindow : Window
 
     private void ApplyTheme(AmosTheme theme)
     {
-        var amosFont = new FontFamily("Topaz a600a1200a400");
+        var amosFont = new FontFamily(theme.font);
         this.Background = new SolidColorBrush(theme.WindowBg);
         ToolbarBorder.Background = new SolidColorBrush(theme.ToolbarBg);
         Editor.FontFamily = amosFont;
-        Editor.FontSize = 16;
+        Editor.FontSize = 20;
         LogBox.FontFamily = amosFont;
         Editor.Background = new SolidColorBrush(theme.EditorBg);
         Editor.Foreground = new SolidColorBrush(theme.EditorFg);

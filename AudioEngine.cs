@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using ManagedBass;
 using ManagedBass.Mix;
@@ -9,13 +10,13 @@ public sealed class AudioEngine : IDisposable
     private int _musicStream; 
     private bool _isDisposed;
 
+    private readonly Dictionary<string, int> _activeSamples = new(StringComparer.OrdinalIgnoreCase);
+
+    
     public AudioEngine()
     {
         Bass.Configure(Configuration.PlaybackBufferLength, 200);
-
-
-
-
+        
         if (!Bass.Init(-1, 44100))
         {
             throw new Exception($"Kunde inte initiera BASS: {Bass.LastError}");
@@ -69,32 +70,85 @@ public sealed class AudioEngine : IDisposable
         }
     }
 
-    public void PlaySample(string filePath)
-    {
-        if (!File.Exists(filePath)) return;
+        public void PlaySample(string filePath, bool loop = false)
+        {
+            if (!File.Exists(filePath)) return;
 
-        // Vi skapar en vanlig stream som INTE går via mixern. 
-        // Utan BassFlags.Decode spelas den direkt på ljudkortet.
-        int effectStream = Bass.CreateStream(filePath, 0, 0, BassFlags.Default);
+            // Stoppa eventuell gammal instans av samma sample först
+            StopSample(filePath);
         
-        if (effectStream != 0)
-        {
-            // Sätt volymen lite högre för effekter om det behövs
-            Bass.ChannelSetAttribute(effectStream, ChannelAttribute.Volume, 1.0);
-                
-            // Spela direkt! Detta går förbi mixern och har minimal latency.
-            Bass.ChannelPlay(effectStream);
-                
-            // Vi flaggar inte för AutoFree här eftersom det är en direkt-stream, 
-            // men BASS städar oftast upp ändå. För korta SAM-klipp är detta säkrast.
+            // Lägg till Loop-flaggan om det önskas
+            var flags = BassFlags.Default;
+            if (loop) flags |= BassFlags.Loop;
+        
+            // Vi skapar en vanlig stream som INTE går via mixern. 
+            // Utan BassFlags.Decode spelas den direkt på ljudkortet.
+            // ÄNDRAT HÄR: Använder variabeln 'flags' istället för BassFlags.Default
+            int effectStream = Bass.CreateStream(filePath, 0, 0, flags);
+        
+            if (effectStream != 0)
+            {
+                // Spara handle så vi kan stoppa den senare
+                _activeSamples[filePath] = effectStream;
+            
+                // Sätt volymen lite högre för effekter om det behövs
+                Bass.ChannelSetAttribute(effectStream, ChannelAttribute.Volume, 1.0);
+            
+                // Sätt callback för att ta bort från listan när den spelat klart (SyncEnd)
+                // OBS: Om den loopar körs aldrig SyncEnd, så vi slipper städa bort den för tidigt.
+                if (!loop)
+                {
+                    Bass.ChannelSetSync(effectStream, SyncFlags.End, 0, (handle, channel, data, user) => 
+                    {
+                        if (!_isDisposed)
+                        {
+                            lock(_activeSamples) 
+                            {
+                                if (_activeSamples.ContainsKey(filePath) && _activeSamples[filePath] == effectStream)
+                                {
+                                    _activeSamples.Remove(filePath);
+                                }
+                            }
+                        }
+                    });
+                }
+            
+                // Spela direkt! Detta går förbi mixern och har minimal latency.
+                Bass.ChannelPlay(effectStream);
+            }
+            else
+            {
+                Console.WriteLine($"BASS Error {Bass.LastError} vid laddning av: {filePath}");
+            }
         }
-        else
+    
+    public void StopSample(string filePath)
+    {
+        lock (_activeSamples)
         {
-            Console.WriteLine($"BASS Error {Bass.LastError} vid laddning av: {filePath}");
+            if (_activeSamples.TryGetValue(filePath, out int handle))
+            {
+                Bass.ChannelStop(handle);
+                Bass.StreamFree(handle);
+                _activeSamples.Remove(filePath);
+            }
+        }
+    }
+    
+    public void StopAllSamples()
+    {
+        lock (_activeSamples)
+        {
+            foreach (var handle in _activeSamples.Values)
+            {
+                Bass.ChannelStop(handle);
+                Bass.StreamFree(handle);
+            }
+            _activeSamples.Clear();
         }
     }
 
-    // Fix för felet i AmosRunner: Lägg till StopMod som anropas därifrån
+
     public void StopMod()
     {
         if (_musicStream != 0)
@@ -108,7 +162,8 @@ public sealed class AudioEngine : IDisposable
     public void Dispose()
     {
         if (_isDisposed) return;
-        StopMod();
+        StopAllSamples(); // Stoppa alla ljudeffekter
+        StopMod();        // Stoppa modulen
         Bass.StreamFree(_mixer);
         Bass.Free();
         _isDisposed = true;

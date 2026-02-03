@@ -3,12 +3,11 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:avaloniaEdit="https://github.com/avaloniaui/avaloniaedit"
-        mc:Ignorable="d" d:DesignWidth="1100" d:DesignHeight="720"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="1024"
         x:Class="AmosLikeBasic.MainWindow"
         Title="AMOS Professional IDE"
         Background="#00134D"
-        Width="1280" Height="1024" 
-        WindowStartupLocation="CenterScreen">
+        Width="1280" Height="1024" >
     <DockPanel>
 
         <!-- Top Menu -->
@@ -16,13 +15,15 @@
             <MenuItem Header="_Project">
                 <MenuItem Header="New" Click="NewProject_OnClick"/>
                 <MenuItem Header="Open..." Click="OpenProject_OnClick"/>
+                <MenuItem Header="Save" Click="SaveProject_OnClick"/>
+                <MenuItem Header="Save as..." Click="SaveAsProject_OnClick"/>
                 <Separator/>
-                <MenuItem Header="Exit"/>
+                <MenuItem Header="Exit"  Click="Exit_OnClick"/>
             </MenuItem>
             <MenuItem Header="_Edit">
-                <MenuItem Header="Cut"/>
-                <MenuItem Header="Copy"/>
-                <MenuItem Header="Paste"/>
+                <MenuItem Header="Cut" Click="OnCut"/>
+                <MenuItem Header="Copy" Click="OnCopy"/>
+                <MenuItem Header="Paste" Click="OnPaste"/>
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Toggle Fullscreen (F10)" Click="ToggleFullscreen_OnClick"/>
@@ -31,6 +32,7 @@
             <MenuItem Header="Themes">
                 <MenuItem Header="Classic AMOS" Click="ChangeTheme_OnClick" Tag="Classic"/>
                 <MenuItem Header="Workbench" Click="ChangeTheme_OnClick" Tag="Workbench"/>
+                <MenuItem Header="C64" Click="ChangeTheme_OnClick" Tag="C64"/>
                 <MenuItem Header="Emerald" Click="ChangeTheme_OnClick" Tag="Emerald"/>
                 <MenuItem Header="Neon Night" Click="ChangeTheme_OnClick" Tag="NeonNight"/>
                 <MenuItem Header="Catppuccin Mocha" Click="ChangeTheme_OnClick" Tag="CatppuccinMocha"/>
@@ -66,7 +68,8 @@
                 <Separator Background="#7FB2FF" Width="2"/>
                 <Button Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Button Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
-                <Button Classes="amos-button" Content="CLEAR" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Separator Background="#7FB2FF" Width="2"/>
+                <Button Classes="amos-button" Content="CLEAR LOGS" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
             </StackPanel>
         </Border>
     
@@ -75,11 +78,24 @@
             <!-- Left side: Editor -->
             <Grid Grid.Column="0" RowDefinitions="*, 4, 150">
                 <Grid Grid.Row="0" RowDefinitions="*, Auto" KeyboardNavigation.TabNavigation="None">
-                    <avaloniaEdit:TextEditor Grid.Row="0" x:Name="Editor" 
+                    <avaloniaEdit:TextEditor Grid.Row="0"
+                                             x:Name="Editor" 
                                              Classes="amos-editor" 
-                                             ShowLineNumbers="False"
+                                             ShowLineNumbers="True"
                                              BorderThickness="0" 
-                                             Padding="10"/>
+                                             Padding="10">
+
+                        <avaloniaEdit:TextEditor.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Cut" Click="OnCut"/>
+                                <MenuItem Header="Copy" Click="OnCopy"/>
+                                <MenuItem Header="Paste" Click="OnPaste"/>
+                                <Separator/>
+                                <MenuItem Header="Mark all" Click="OnSelectAll"/>
+                            </ContextMenu>
+                        </avaloniaEdit:TextEditor.ContextMenu>
+
+                    </avaloniaEdit:TextEditor>
                     
                     <TextBlock Grid.Row="1" Name="CursorPosText" 
                                Text="Line: 1, Col: 1" 
