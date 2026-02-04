@@ -1,1 +1,0 @@
-{"Version":1,"ProgramText":"A$ = \u0022 GO NORTH \u0022\nPRINT A$\nPRINT TRIM$(A$) \nPRINT LEN(A$)\nPRINT LOWER$(A$)\nPRINT LEFT$(A$,3)\nPRINT RIGHT$(A$,3)\nPRINT MID$(A$,3,3)\nPRINT INSTR(A$,\u0022NORTH\u0022)\nPRINT WORD$(A$,2)\nPRINT REPLACE$(A$,\u0022NORTH\u0022,\u0022SOUTH\u0022)","ScreenWidth":640,"ScreenHeight":480,"Sprites":[],"MapWidth":1,"MapHeight":1,"MapData":[-1]}

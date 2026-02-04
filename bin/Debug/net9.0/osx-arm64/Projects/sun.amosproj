@@ -1,1 +1,0 @@
-{"Version":1,"ProgramText":"J=16\nFOR I = 239 to 0 STEP -1\n   A$=\u0022#\u0022 \u0026 HEX(J) \u0026 HEX(J) \u0026 \u002200\u0022\n   J=J\u002B1\n   INKG A$\n   CIRCLEF 320,240,I,I\nNEXT I\n\n\n\n","ScreenWidth":640,"ScreenHeight":480,"Sprites":[],"MapWidth":1,"MapHeight":1,"MapData":[-1]}
