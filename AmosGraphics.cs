@@ -2009,13 +2009,60 @@ public sealed class AmosGraphics
             }
         }
     
+        // -------------------------------------------------------------------------------
+        //  HJÄLPMETOD FÖR FÄRGKORRIGERING (MAC vs PC)
+        // -------------------------------------------------------------------------------
+        private unsafe void FixupImageColors(void* address, int pixelCount)
+        {
+            uint* p = (uint*)address;
+
+            if (OperatingSystem.IsMacOS())
+            {
+                // ===== MAC LOGIK (Från din fungerande LoadBackground) =====
+                for (int i = 0; i < pixelCount; i++)
+                {
+                    uint pixel = p[i];
+
+                    uint a = (pixel >> 24) & 0xFF;
+                    uint r = (pixel >> 16) & 0xFF;
+                    uint g = (pixel >> 8) & 0xFF;
+                    uint b = pixel & 0xFF;
+
+                    // Om helt svart (0,0,0), gör transparent om så önskas
+                    if (r == 0 && g == 0 && b == 0)
+                        p[i] = 0;
+                    else
+                        // RGBA -> BGRA (Skia på Mac vill ofta ha BGRA)
+                        p[i] = (a << 24) | (r << 0) | (g << 8) | (b << 16);
+                }
+            }
+            else 
+            {
+                // ===== WINDOWS LOGIK (Från din fungerande LoadBackground) =====
+                // Fallback för Windows (och Linux om det beter sig likadant)
+                for (int i = 0; i < pixelCount; i++)
+                {
+                    uint pixel = p[i];
+
+                    uint a = (pixel >> 24) & 0xFF;
+                    uint b = (pixel >> 16) & 0xFF; // OBS: Windows-logiken du hade tolkade input lite annorlunda
+                    uint g = (pixel >> 8) & 0xFF;
+                    uint r = pixel & 0xFF;
+
+                    if (r == 0 && g == 0 && b == 0)
+                        p[i] = 0;
+                    else
+                        p[i] = (a << 24) | (b << 16) | (g << 8) | (r << 0);
+                }
+            }
+        }
         
         public void LoadBackground(string f)
         {
             try
             {
                 string fullPath = ResourceLoader.GetPath(f);
-                
+            
                 using var b = new Bitmap(fullPath);
                 lock (LockObject)
                 {
@@ -2025,49 +2072,12 @@ public sealed class AmosGraphics
                     {
                         b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address,
                             fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
+                        
+                        // ANVÄND HJÄLPMETODEN
                         unsafe
                         {
-                            uint* p = (uint*)fb.Address;
                             int count = layer.Bitmap.PixelSize.Width * layer.Bitmap.PixelSize.Height;
-                            if (OperatingSystem.IsMacOS())
-                            {
-                                // ===== MAC (behåll exakt din logik) =====
-                                for (int i = 0; i < count; i++)
-                                {
-                                    uint pixel = p[i];
-
-                                    uint a = (pixel >> 24) & 0xFF;
-                                    uint r = (pixel >> 16) & 0xFF;
-                                    uint g = (pixel >> 8) & 0xFF;
-                                    uint bColor = pixel & 0xFF;
-
-                                    if (r == 0 && g == 0 && bColor == 0)
-                                        p[i] = 0;
-                                    else
-                                        // RGBA -> BGRA (Skia/Metal)
-                                        p[i] = (a << 24) | (r << 0) | (g << 8) | (bColor << 16);
-                                }
-                            }
-                            else if (OperatingSystem.IsWindows())
-                            {
-                                // ===== WINDOWS (PC) =====
-                                for (int i = 0; i < count; i++)
-                                {
-                                    uint pixel = p[i];
-
-                                    // Windows Skia = BGRA native
-                                    uint a = (pixel >> 24) & 0xFF;
-                                    uint bColor = (pixel >> 16) & 0xFF;
-                                    uint g = (pixel >> 8) & 0xFF;
-                                    uint r = pixel & 0xFF;
-
-                                    if (r == 0 && g == 0 && bColor == 0)
-                                        p[i] = 0;
-                                    else
-                                        // redan korrekt ordning för Windows
-                                        p[i] = (a << 24) | (bColor << 16) | (g << 8) | (r << 0);
-                                }
-                            }
+                            FixupImageColors(fb.Address.ToPointer(), count);
                         }
                     }
                 }
@@ -2089,29 +2099,22 @@ public sealed class AmosGraphics
                 using var b = new Bitmap(fullPath);
                 int w = (int)b.Size.Width;
                 int h = (int)b.Size.Height;
-                
+            
                 // Skapa en bitmap kompatibel med motorn
                 var targetBmp = CreateEmptyBitmap(w, h);
-                
+            
                 using (var fb = targetBmp.Lock())
                 {
                     // Kopiera pixlar
                     b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
-                    
-                    // Fixa färgordning (BGRA/RGBA) precis som i Sprite/LoadBackground
+                
+                    // Fixa färgordning med central metod
                     unsafe
                     {
-                        var p = (byte*)fb.Address;
-                        for (int i = 0; i < w * h; i++)
-                        {
-                            // Enkel BGR-swizzle för att matcha Skia (oftast BGRA)
-                            byte temp = p[i * 4 + 0];
-                            p[i * 4 + 0] = p[i * 4 + 2];
-                            p[i * 4 + 2] = temp;
-                        }
+                        FixupImageColors(fb.Address.ToPointer(), w * h);
                     }
                 }
-                
+            
                 lock (LockObject)
                 {
                     _bobImages[index] = targetBmp;
@@ -2153,89 +2156,78 @@ public sealed class AmosGraphics
     // ---------------- Tiles ----------------
     public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
 
-    public void LoadTileBank(string f, int tw, int th) {
-        try {
-            string fullPath = ResourceLoader.GetPath(f);
+        public void LoadTileBank(string f, int tw, int th) {
+            try {
+                string fullPath = ResourceLoader.GetPath(f);
             
-            using var b = new Bitmap(fullPath); 
-            _tileWidth = tw; 
-            _tileHeight = th; 
-            _tiles.Clear();
+                using var b = new Bitmap(fullPath); 
+                _tileWidth = tw; 
+                _tileHeight = th; 
+                _tiles.Clear();
             
-            // Uppdatera klassvariabeln för att undvika division med noll i paletten
-            _tilesInWidth = (int)b.Size.Width / tw;
+                // Uppdatera klassvariabeln för att undvika division med noll i paletten
+                _tilesInWidth = (int)b.Size.Width / tw;
             
-            int cs = _tilesInWidth; 
-            int rs = (int)b.Size.Height / th;
+                int cs = _tilesInWidth; 
+                int rs = (int)b.Size.Height / th;
 
-            for (int y = 0; y < rs; y++) {
-                for (int x = 0; x < cs; x++) {
-                    var t = CreateEmptyBitmap(tw, th);
-                    using (var fb = t.Lock()) {
-                        b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
-                        unsafe {
-                            var p = (byte*)fb.Address;
-                            for (int i = 0; i < tw * th; i++) {
-                                byte temp = p[i * 4 + 0];
-                                p[i * 4 + 0] = p[i * 4 + 2];
-                                p[i * 4 + 2] = temp;
+                for (int y = 0; y < rs; y++) {
+                    for (int x = 0; x < cs; x++) {
+                        var t = CreateEmptyBitmap(tw, th);
+                        using (var fb = t.Lock()) {
+                            b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
+                            unsafe {
+                                FixupImageColors(fb.Address.ToPointer(), tw * th);
                             }
                         }
+                        _tiles.Add(t);
                     }
-                    _tiles.Add(t);
                 }
             }
+            catch (Exception ex) {
+                OnError?.Invoke($"[TILE LOAD] Error loading '{f}': {ex.Message}");
+            }
         }
-        catch (Exception ex) {
-            OnError?.Invoke($"[TILE LOAD] Error loading '{f}': {ex.Message}");
-        }
-    }
 
-    public void LoadTileBank(System.IO.Stream stream, int tw, int th)
-    {
-        try
+        public void LoadTileBank(System.IO.Stream stream, int tw, int th)
         {
-            using var b = new Bitmap(stream);
-            _tileWidth = tw;
-            _tileHeight = th;
-            _tiles.Clear();
-
-            // Deklarera tilesInWidth här och spara den i klassvariabeln _tilesInWidth
-            int tilesInWidth = (int)b.Size.Width / tw;
-            _tilesInWidth = tilesInWidth;
-
-            int tilesInHeight = (int)b.Size.Height / th;
-
-            for (int y = 0; y < tilesInHeight; y++)
+            try
             {
-                for (int x = 0; x < tilesInWidth; x++)
+                using var b = new Bitmap(stream);
+                _tileWidth = tw;
+                _tileHeight = th;
+                _tiles.Clear();
+
+                // Deklarera tilesInWidth här och spara den i klassvariabeln _tilesInWidth
+                int tilesInWidth = (int)b.Size.Width / tw;
+                _tilesInWidth = tilesInWidth;
+
+                int tilesInHeight = (int)b.Size.Height / th;
+
+                for (int y = 0; y < tilesInHeight; y++)
                 {
-                    var t = CreateEmptyBitmap(tw, th);
-                    using (var fb = t.Lock())
+                    for (int x = 0; x < tilesInWidth; x++)
                     {
-                        // Kopiera exakt den rutan från källbilden
-                        b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
-                        unsafe
+                        var t = CreateEmptyBitmap(tw, th);
+                        using (var fb = t.Lock())
                         {
-                            var p = (byte*)fb.Address;
-                            for (int i = 0; i < tw * th; i++)
+                            // Kopiera exakt den rutan från källbilden
+                            b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
+                            unsafe
                             {
-                                byte temp = p[i * 4 + 0];
-                                p[i * 4 + 0] = p[i * 4 + 2];
-                                p[i * 4 + 2] = temp;
+                                FixupImageColors(fb.Address.ToPointer(), tw * th);
                             }
                         }
-                    }
 
-                    _tiles.Add(t);
+                        _tiles.Add(t);
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                OnError?.Invoke($"[TILE STREAM] Error: {ex.Message}");
+            }
         }
-        catch (Exception ex)
-        {
-            OnError?.Invoke($"[TILE STREAM] Error: {ex.Message}");
-        }
-    }
 
     public void SetMapSize(int newW, int newH)
     {
@@ -2400,127 +2392,116 @@ public sealed class AmosGraphics
     public WriteableBitmap GetSpriteBitmap(int id) => GetSprite(id).Bitmap;
     public List<int> GetSpriteIds() => _sprites.Keys.OrderBy(id => id).ToList();
 
-    public void LoadSprite(int id, string fileName)
-    {
-        try
-        {
-            string fullPath = ResourceLoader.GetPath(fileName);
-            using var b = new Bitmap(fullPath);
-            int w = (int)b.Size.Width, h = (int)b.Size.Height;
-            CreateSprite(id, w, h);
-            var s = GetSprite(id);
-            using (var fb = s.Bitmap.Lock())
-            {
-                b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
-                unsafe
-                {
-                    var p = (byte*)fb.Address;
-                    for (int i = 0; i < w * h; i++)
-                    {
-                        byte temp = p[i * 4 + 0];
-                        p[i * 4 + 0] = p[i * 4 + 2];
-                        p[i * 4 + 2] = temp;
-                    }
-
-                    s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            OnError?.Invoke($"[SPRITE LOAD] Error loading '{fileName}': {ex.Message}");
-        }
-    }
-
-         public void LoadSpriteSheet(int id, string fileName, int frameW, int frameH, int count)
+        public void LoadSprite(int id, string fileName)
         {
             try
             {
                 string fullPath = ResourceLoader.GetPath(fileName);
-                
-                using var sourceInfo = new Bitmap(fullPath);
-                int sheetW = (int)sourceInfo.Size.Width;
-                int sheetH = (int)sourceInfo.Size.Height;
-                int cols = sheetW / frameW; // Hur många får plats på en rad?
-
-                // Skapa spriten (initierar listan och properties)
-                CreateSprite(id, frameW, frameH);
+                using var b = new Bitmap(fullPath);
+                int w = (int)b.Size.Width, h = (int)b.Size.Height;
+                CreateSprite(id, w, h);
                 var s = GetSprite(id);
-                
-                // Rensa den tomma standard-framen som skapades av CreateSprite
-                s.Frames.Clear(); 
-
-                for (int i = 0; i < count; i++)
+                using (var fb = s.Bitmap.Lock())
                 {
-                    // Räkna ut X och Y i texturen
-                    int col = i % cols;
-                    int row = i / cols;
+                    b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
                     
-                    int srcX = col * frameW;
-                    int srcY = row * frameH;
-
-                    // Om vi försöker läsa utanför bilden, avbryt eller ignorera
-                    if (srcY + frameH > sheetH) break;
-
-                    var f = CreateEmptyBitmap(frameW, frameH);
-                    using (var fb = f.Lock())
+                    unsafe
                     {
-                        // Kopiera snittet från stora bilden
-                        sourceInfo.CopyPixels(new PixelRect(srcX, srcY, frameW, frameH), fb.Address, fb.RowBytes * frameH, fb.RowBytes);
-                        
-                        // Fixa färgordning (BGRA <-> RGBA)
-                        unsafe
-                        {
-                            var p = (byte*)fb.Address;
-                            for (int px = 0; px < frameW * frameH; px++)
-                            {
-                                byte temp = p[px * 4 + 0];
-                                p[px * 4 + 0] = p[px * 4 + 2];
-                                p[px * 4 + 2] = temp;
-                            }
-                            
-                            // Sätt transparent key baserat på första pixeln i FÖRSTA framen
-                            if (i == 0) 
-                            {
-                                s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
-                            }
-                        }
+                        // Fixa färger först
+                        FixupImageColors(fb.Address.ToPointer(), w * h);
+
+                        // Läs sedan av transparent key från den fixade datan (första pixeln)
+                        var p = (byte*)fb.Address;
+                        // Skia/WriteableBitmap är BGRA (Little Endian uint: B, G, R, A)
+                        // Så p[0]=B, p[1]=G, p[2]=R, p[3]=A
+                        s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
                     }
-                    s.Frames.Add(f);
                 }
-                
-                // Se till att current frame är 0
-                s.CurrentFrame = 0;
             }
             catch (Exception ex)
             {
-                OnError?.Invoke($"[SPRITE SHEET LOAD] Error loading '{fileName}': {ex.Message}");
-            }
-        }
-         
-    public void AddFrame(int id, string file)
-    {
-        var s = GetSprite(id);
-        using var b = new Bitmap(file);
-        var f = CreateEmptyBitmap(s.Width, s.Height);
-        using (var fb = f.Lock())
-        {
-            b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address, fb.RowBytes * s.Height,
-                fb.RowBytes);
-            unsafe
-            {
-                var p = (byte*)fb.Address;
-                for (int i = 0; i < s.Width * s.Height; i++)
-                {
-                    byte temp = p[i * 4 + 0];
-                    p[i * 4 + 0] = p[i * 4 + 2];
-                    p[i * 4 + 2] = temp;
-                }
+                OnError?.Invoke($"[SPRITE LOAD] Error loading '{fileName}': {ex.Message}");
             }
         }
 
-        s.Frames.Add(f);
-    }
+             public void LoadSpriteSheet(int id, string fileName, int frameW, int frameH, int count)
+            {
+                try
+                {
+                    string fullPath = ResourceLoader.GetPath(fileName);
+                
+                    using var sourceInfo = new Bitmap(fullPath);
+                    int sheetW = (int)sourceInfo.Size.Width;
+                    int sheetH = (int)sourceInfo.Size.Height;
+                    int cols = sheetW / frameW; // Hur många får plats på en rad?
+
+                    // Skapa spriten (initierar listan och properties)
+                    CreateSprite(id, frameW, frameH);
+                    var s = GetSprite(id);
+                
+                    // Rensa den tomma standard-framen som skapades av CreateSprite
+                    s.Frames.Clear(); 
+
+                    for (int i = 0; i < count; i++)
+                    {
+                        // Räkna ut X och Y i texturen
+                        int col = i % cols;
+                        int row = i / cols;
+                    
+                        int srcX = col * frameW;
+                        int srcY = row * frameH;
+
+                        // Om vi försöker läsa utanför bilden, avbryt eller ignorera
+                        if (srcY + frameH > sheetH) break;
+
+                        var f = CreateEmptyBitmap(frameW, frameH);
+                        using (var fb = f.Lock())
+                        {
+                            // Kopiera snittet från stora bilden
+                            sourceInfo.CopyPixels(new PixelRect(srcX, srcY, frameW, frameH), fb.Address, fb.RowBytes * frameH, fb.RowBytes);
+                        
+                            unsafe
+                            {
+                                // Fixa färger
+                                FixupImageColors(fb.Address.ToPointer(), frameW * frameH);
+
+                                // Sätt transparent key baserat på första pixeln i FÖRSTA framen
+                                if (i == 0) 
+                                {
+                                    var p = (byte*)fb.Address;
+                                    s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
+                                }
+                            }
+                        }
+                        s.Frames.Add(f);
+                    }
+                
+                    // Se till att current frame är 0
+                    s.CurrentFrame = 0;
+                }
+                catch (Exception ex)
+                {
+                    OnError?.Invoke($"[SPRITE SHEET LOAD] Error loading '{fileName}': {ex.Message}");
+                }
+            }
+         
+        public void AddFrame(int id, string file)
+        {
+            var s = GetSprite(id);
+            using var b = new Bitmap(file);
+            var f = CreateEmptyBitmap(s.Width, s.Height);
+            using (var fb = f.Lock())
+            {
+                b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address, fb.RowBytes * s.Height,
+                    fb.RowBytes);
+                unsafe
+                {
+                    FixupImageColors(fb.Address.ToPointer(), s.Width * s.Height);
+                }
+            }
+
+            s.Frames.Add(f);
+        }
 
     public void SetSpriteFrame(int id, int idx)
     {
