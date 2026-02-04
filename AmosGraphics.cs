@@ -1714,7 +1714,9 @@ public sealed class AmosGraphics
     {
     try
     {
-        using var b = new Bitmap(file);
+        string fullPath = ResourceLoader.GetPath(file);
+        
+        using var b = new Bitmap(fullPath);
         var font = new Font { CharWidth = tw, CharHeight = th };
         int cols = (int)b.Size.Width / tw;
         int rows = (int)b.Size.Height / th;
@@ -2012,7 +2014,9 @@ public sealed class AmosGraphics
         {
             try
             {
-                using var b = new Bitmap(f);
+                string fullPath = ResourceLoader.GetPath(f);
+                
+                using var b = new Bitmap(fullPath);
                 lock (LockObject)
                 {
                     EnsureScreen();
@@ -2081,7 +2085,8 @@ public sealed class AmosGraphics
         {
             try
             {
-                using var b = new Bitmap(path);
+                string fullPath = ResourceLoader.GetPath(path);
+                using var b = new Bitmap(fullPath);
                 int w = (int)b.Size.Width;
                 int h = (int)b.Size.Height;
                 
@@ -2150,7 +2155,9 @@ public sealed class AmosGraphics
 
     public void LoadTileBank(string f, int tw, int th) {
         try {
-            using var b = new Bitmap(f); 
+            string fullPath = ResourceLoader.GetPath(f);
+            
+            using var b = new Bitmap(fullPath); 
             _tileWidth = tw; 
             _tileHeight = th; 
             _tiles.Clear();
@@ -2397,7 +2404,8 @@ public sealed class AmosGraphics
     {
         try
         {
-            using var b = new Bitmap(fileName);
+            string fullPath = ResourceLoader.GetPath(fileName);
+            using var b = new Bitmap(fullPath);
             int w = (int)b.Size.Width, h = (int)b.Size.Height;
             CreateSprite(id, w, h);
             var s = GetSprite(id);
@@ -2428,7 +2436,9 @@ public sealed class AmosGraphics
         {
             try
             {
-                using var sourceInfo = new Bitmap(fileName);
+                string fullPath = ResourceLoader.GetPath(fileName);
+                
+                using var sourceInfo = new Bitmap(fullPath);
                 int sheetW = (int)sourceInfo.Size.Width;
                 int sheetH = (int)sourceInfo.Size.Height;
                 int cols = sheetW / frameW; // Hur många får plats på en rad?

@@ -28,7 +28,8 @@ public sealed class AudioEngine : IDisposable
 
     public void PlayMod(string filePath)
     {
-        if (!File.Exists(filePath))
+        string fullPath = ResourceLoader.GetPath(filePath);
+        if (!File.Exists(fullPath))
         {
             Console.WriteLine($"Fil saknas: {filePath}");
             return;
@@ -42,7 +43,7 @@ public sealed class AudioEngine : IDisposable
 
         // Vi laddar MOD-filen med standardinställningar + Decode
         // MusicRamp tar bort "knäppar" i ljudet.
-        _musicStream = Bass.MusicLoad(filePath, 0, 0, BassFlags.MusicRamp | BassFlags.Decode | BassFlags.Float);
+        _musicStream = Bass.MusicLoad(fullPath, 0, 0, BassFlags.MusicRamp | BassFlags.Decode | BassFlags.Float);
         
         if (_musicStream != 0)
         {
@@ -57,7 +58,7 @@ public sealed class AudioEngine : IDisposable
             {
                 // Trigga igång uppspelningen i mixern
                 Bass.ChannelSetPosition(_musicStream, 0);
-                Console.WriteLine($"Nu spelas: {filePath}");
+                Console.WriteLine($"Nu spelas: {fullPath}");
             }
             else
             {
@@ -72,10 +73,11 @@ public sealed class AudioEngine : IDisposable
 
         public void PlaySample(string filePath, bool loop = false)
         {
-            if (!File.Exists(filePath)) return;
+            string fullPath = ResourceLoader.GetPath(filePath);
+            if (!File.Exists(fullPath)) return;
 
             // Stoppa eventuell gammal instans av samma sample först
-            StopSample(filePath);
+            StopSample(fullPath);
         
             // Lägg till Loop-flaggan om det önskas
             var flags = BassFlags.Default;
@@ -84,12 +86,12 @@ public sealed class AudioEngine : IDisposable
             // Vi skapar en vanlig stream som INTE går via mixern. 
             // Utan BassFlags.Decode spelas den direkt på ljudkortet.
             // ÄNDRAT HÄR: Använder variabeln 'flags' istället för BassFlags.Default
-            int effectStream = Bass.CreateStream(filePath, 0, 0, flags);
+            int effectStream = Bass.CreateStream(fullPath, 0, 0, flags);
         
             if (effectStream != 0)
             {
                 // Spara handle så vi kan stoppa den senare
-                _activeSamples[filePath] = effectStream;
+                _activeSamples[fullPath] = effectStream;
             
                 // Sätt volymen lite högre för effekter om det behövs
                 Bass.ChannelSetAttribute(effectStream, ChannelAttribute.Volume, 1.0);
@@ -104,9 +106,9 @@ public sealed class AudioEngine : IDisposable
                         {
                             lock(_activeSamples) 
                             {
-                                if (_activeSamples.ContainsKey(filePath) && _activeSamples[filePath] == effectStream)
+                                if (_activeSamples.ContainsKey(fullPath) && _activeSamples[filePath] == effectStream)
                                 {
-                                    _activeSamples.Remove(filePath);
+                                    _activeSamples.Remove(fullPath);
                                 }
                             }
                         }
@@ -124,13 +126,14 @@ public sealed class AudioEngine : IDisposable
     
     public void StopSample(string filePath)
     {
+        string fullPath = ResourceLoader.GetPath(filePath);
         lock (_activeSamples)
         {
-            if (_activeSamples.TryGetValue(filePath, out int handle))
+            if (_activeSamples.TryGetValue(fullPath, out int handle))
             {
                 Bass.ChannelStop(handle);
                 Bass.StreamFree(handle);
-                _activeSamples.Remove(filePath);
+                _activeSamples.Remove(fullPath);
             }
         }
     }
