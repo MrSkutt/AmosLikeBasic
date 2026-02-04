@@ -1053,6 +1053,8 @@ public partial class MainWindow : Window
         {
             "Workbench" => AmosThemes.Workbench,
             "C64" => AmosThemes.C64,
+            "StosClassic"  => AmosThemes.StosClassic,
+            "StosEditor"   => AmosThemes.StosEditor,
             "Emerald" => AmosThemes.Emerald,
             "NeonNight" => AmosThemes.NeonNight,
             "CatppuccinMocha" => AmosThemes.CatppuccinMocha,

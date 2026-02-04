@@ -56,6 +56,32 @@ public static class AmosThemes
         "C64 PRO MONO"
     );
 
+    public static readonly AmosTheme StosClassic = new(
+        "STOS Atari ST",
+        Color.Parse("#BFBFBF"), // WindowBg  (klassisk GEM-ljusgrå)
+        Color.Parse("#9FA6B2"), // ToolbarBg (ST-toolbar grå/blåton)
+        Color.Parse("#FFFFFF"), // EditorBg  (STOS editor var ofta vit)
+        Color.Parse("#000000"), // EditorFg  (svart text)
+        Color.Parse("#0000AA"), // CursorPosBg (Atari-blå markering)
+        Color.Parse("#0000AA"), // TitleBarBg (klassisk ST-blå titlebar)
+        Color.Parse("#FFFFFF"), // TitleBarFg (vit text)
+        Color.Parse("#0000AA"), // Accent
+        "Atari ST 8x16 System Font"           // ersätter Atari mono-font
+    );
+    
+    public static readonly AmosTheme StosEditor = new(
+        "STOS Editor",
+        Color.Parse("#BFBFBF"),
+        Color.Parse("#A0A0A0"),
+        Color.Parse("#000000"), // svart editorbakgrund
+        Color.Parse("#00FF00"), // grön fosfor-text
+        Color.Parse("#003300"),
+        Color.Parse("#0000AA"),
+        Color.Parse("#FFFFFF"),
+        Color.Parse("#00FF00"),
+        "Atari ST 8x16 System Font"
+    );
+    
     public static readonly AmosTheme Emerald = new(
         "Emerald",
         Color.Parse("#002200"),

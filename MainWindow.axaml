@@ -33,6 +33,8 @@
                 <MenuItem Header="Classic AMOS" Click="ChangeTheme_OnClick" Tag="Classic"/>
                 <MenuItem Header="Workbench" Click="ChangeTheme_OnClick" Tag="Workbench"/>
                 <MenuItem Header="C64" Click="ChangeTheme_OnClick" Tag="C64"/>
+                <MenuItem Header="Stos Classic" Click="ChangeTheme_OnClick" Tag="StosClassic"/>
+                <MenuItem Header="Stos Editor" Click="ChangeTheme_OnClick" Tag="StosEditor"/>
                 <MenuItem Header="Emerald" Click="ChangeTheme_OnClick" Tag="Emerald"/>
                 <MenuItem Header="Neon Night" Click="ChangeTheme_OnClick" Tag="NeonNight"/>
                 <MenuItem Header="Catppuccin Mocha" Click="ChangeTheme_OnClick" Tag="CatppuccinMocha"/>

@@ -542,3 +542,4 @@
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/YMKNUCK.mp3
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/-.textClipping
 /Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/rain.mp3
+/Users/mattias/RiderProjects/AmosLikeBasic/bin/Debug/net9.0/osx-arm64/Sound/stairs.mp3
