@@ -29,45 +29,53 @@ public sealed class AudioEngine : IDisposable
     public void PlayMod(string filePath)
     {
         string fullPath = ResourceLoader.GetPath(filePath);
+            
+        // Läs in filen till minnet i C# först (kringgår filsystemsproblem i BASS på Mac)
         if (!File.Exists(fullPath))
         {
-            Console.WriteLine($"Fil saknas: {filePath}");
+            Console.WriteLine($"Fil saknas: {fullPath}");
             return;
         }
 
+        // Städa undan gammal musik
         if (_musicStream != 0)
         {
             BassMix.MixerRemoveChannel(_musicStream);
             Bass.StreamFree(_musicStream);
+            _musicStream = 0;
         }
 
-        // Vi laddar MOD-filen med standardinställningar + Decode
-        // MusicRamp tar bort "knäppar" i ljudet.
-        _musicStream = Bass.MusicLoad(fullPath, 0, 0, BassFlags.MusicRamp | BassFlags.Decode | BassFlags.Float);
-        
-        if (_musicStream != 0)
+        try 
         {
-            // Vi använder standardvolym till att börja med.
-            // Om det är tyst, kan vi justera volymen på mixernivå istället.
-                
-            // Lägg till i mixern. 
-            // Flaggan 0x2000 (NORAMPIN) förhindrar en mjukstart (fade-in).
-            bool added = BassMix.MixerAddChannel(_mixer, _musicStream, BassFlags.Default | (BassFlags)0x2000);
+            byte[] data = File.ReadAllBytes(fullPath);
+
+            // Använd överlagringen som tar en byte-array (data) istället för filnamn
+            // Parametrar: Data, Offset, Length, Flags, Frequency (0 = default)
+            _musicStream = Bass.MusicLoad(data, 0, data.Length, BassFlags.MusicRamp | BassFlags.Decode | BassFlags.Float | BassFlags.Prescan, 0);
             
-            if (added)
+            if (_musicStream != 0)
             {
-                // Trigga igång uppspelningen i mixern
-                Bass.ChannelSetPosition(_musicStream, 0);
-                Console.WriteLine($"Nu spelas: {fullPath}");
+                // Lägg till i mixern
+                bool added = BassMix.MixerAddChannel(_mixer, _musicStream, BassFlags.Default | (BassFlags)0x2000);
+            
+                if (added)
+                {
+                    Bass.ChannelSetPosition(_musicStream, 0);
+                    Console.WriteLine($"Nu spelas: {fullPath}");
+                }
+                else
+                {
+                    Console.WriteLine($"Mixer-fel: {Bass.LastError}");
+                }
             }
             else
             {
-                Console.WriteLine($"Mixer-fel: {Bass.LastError}");
+                Console.WriteLine($"Kunde inte ladda MOD-fil ({Bass.LastError})");
             }
         }
-        else
+        catch (Exception ex)
         {
-            Console.WriteLine($"Kunde inte ladda MOD-fil ({Bass.LastError})");
+            Console.WriteLine($"Fel vid inläsning av MOD: {ex.Message}");
         }
     }
 

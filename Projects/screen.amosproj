@@ -1,0 +1,1 @@
+{"Version":1,"ProgramText":"SCREEN SELECT 1\nLOAD \u0022Graphics/berg.png\u0022\n\nWAIT 1000\nSCREEN OFF 1\n\nWAIT 1000\nSCREEN ON 1","ScreenWidth":640,"ScreenHeight":480,"Sprites":[],"MapWidth":0,"MapHeight":0,"MapData":[]}
