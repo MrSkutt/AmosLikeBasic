@@ -23,6 +23,10 @@ The engine provides a structured BASIC-like language, graphics/audio primitives,
 - Developer-focused tooling
 - Extensible command system
 - AMOS-compatible concepts and workflows
+- Retro Graphics Engine: Supports classic AMOS concepts like Screens, Sprites, Bobs (Blitter Objects), and Tilemaps.
+- Hardware Acceleration: Uses SkiaSharp (via Avalonia) for high-performance rendering.
+- Shader Support: Includes support for GPU-accelerated effects and raster manipulation (SkSL).
+- Asset Management: Custom resource loader for handling fonts, images, and project files.
 
 ---
 
@@ -41,6 +45,48 @@ It is a **modern engine inspired by AMOS**, built to:
 
 This project is under active development.  
 APIs, commands, and internal architecture may change.
+
+---
+
+## Prerequisites
+To compile and run this project, you need to have the following installed on your development machine:
+- .NET 9.0 SDK (or later)
+- IDE: JetBrains Rider, Visual Studio 2022, or VS Code.
+
+## Dependencies
+The project relies on the following NuGet packages. These should restore automatically during the build process, but ensure your project file references them:
+- Avalonia (UI Framework and Windowing)
+- Avalonia.Desktop
+- Avalonia.Skia (Rendering backend)
+- Avalonia.ReactiveUI
+- ManageBass (For Audio/Sound playback)
+- SkiaSharp
+
+## How to Compile and Run
+1. Clone the repository:
+   - git clone https://github.com/MrSkutt/AmosLikeBasic
+   - cd AmosLikeBasic
+2. Restore dependencies:
+   - dotnet restore
+3. Build the project:
+   - dotnet build
+4. Run the application:
+   - dotnet run
+
+## A Note on Resources
+The application uses a custom ResourceLoader to find assets (images, fonts, sounds). Ensure your assets are placed in one of the following locations relative to the executable:
+- Directly in the application folder.
+- In a folder named Resources next to the executable.
+- (For macOS Bundles) In the ../Resources directory.
+
+## Optional: How to add dependencies manually
+If you are starting from scratch or need to add the packages manually, use the following commands
+- dotnet add package Avalonia
+- dotnet add package Avalonia.Desktop
+- dotnet add package Avalonia.Themes.Fluent
+- dotnet add package Avalonia.Skia
+- dotnet add package ManageBass
+
 
 ---
 
@@ -68,8 +114,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE  
 SOFTWARE.
 
-
-
+---
 
 IDE
 ![Applikation](images/Applikation.png)
