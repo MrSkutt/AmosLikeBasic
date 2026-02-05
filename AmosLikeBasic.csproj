@@ -13,6 +13,10 @@
         <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</RuntimeIdentifier>
     </PropertyGroup>
 
+    <PropertyGroup>
+        <ApplicationIcon>Assets/AmosLikeBasic.ico</ApplicationIcon>
+    </PropertyGroup>
+
     <ItemGroup>
         <PackageReference Include="Avalonia" Version="11.2.3" />
         <PackageReference Include="Avalonia.AvaloniaEdit" Version="11.3.0" />

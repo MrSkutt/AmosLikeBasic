@@ -46,6 +46,14 @@ public partial class MainWindow : Window
         Opened += MainWindow_OnOpened;
         this.Closing += MainWindow_Closing;
         
+        _ = EnsureExampleProjectsExistAsync();
+        
+        string userDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "AmosLikeBasic",
+            "Projects"
+        );
+        
         configService = new ConfigService("AmosProject");
         configService.Load();
         ChangeTheme(configService.Config.DefaultTheme);
@@ -325,6 +333,52 @@ public partial class MainWindow : Window
         _pressedKeys.Add(e.Key.ToString());
     }
 
+    private async Task EnsureExampleProjectsExistAsync()
+        {
+            try 
+            {
+                // 1. Destination: Documents/AmosLikeBasic/Projects
+                string docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                string targetDir = Path.Combine(docPath, "AmosLikeBasic", "Projects");
+
+                if (!Directory.Exists(targetDir))
+                {
+                    Directory.CreateDirectory(targetDir);
+                }
+
+                // 2. Källa: Inuti AppBundle
+                // AppContext.BaseDirectory pekar oftast på .../AmosLikeBasic.app/Contents/MacOS/
+                // Vi vill gå upp ett steg och in i Resources
+                string bundleBase = AppContext.BaseDirectory;
+                string sourceDir = Path.Combine(bundleBase, "..", "Resources", "Projects");
+                
+                // Normalisera sökvägen (tar bort ".." ur strängen)
+                sourceDir = Path.GetFullPath(sourceDir);
+
+                if (Directory.Exists(sourceDir))
+                {
+                    var files = Directory.GetFiles(sourceDir);
+                    foreach (var file in files)
+                    {
+                        string fileName = Path.GetFileName(file);
+                        string destFile = Path.Combine(targetDir, fileName);
+
+                        // Kopiera bara om filen inte redan finns (så vi inte skriver över användarens eventuella ändringar)
+                        if (!File.Exists(destFile))
+                        {
+                            // Async copy för att inte låsa UI vid start
+                            await Task.Run(() => File.Copy(file, destFile));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Logga eller ignorera tyst om något går fel med rättigheter
+                System.Diagnostics.Debug.WriteLine($"Could not copy example projects: {ex.Message}");
+            }
+        }
+           
     private void HandleGlobalKeyUp(object? sender, KeyEventArgs e)
     {
         _pressedKeys.Remove(e.Key.ToString());
@@ -951,6 +1005,16 @@ public partial class MainWindow : Window
 
         var sp = StorageProvider;
         if (sp is null) return;
+
+        // FÖRBERED START-MAPPEN
+        string userProjectsPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "AmosLikeBasic",
+            "Projects"
+        );
+            
+        // Försök hämta en IStorageFolder referens till mappen
+        var startLocation = await sp.TryGetFolderFromPathAsync(userProjectsPath);
 
         var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions
         {
