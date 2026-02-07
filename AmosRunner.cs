@@ -160,6 +160,20 @@ public static class AmosRunner
         public required int EndSelectPc;
     }
     
+    private sealed class FunctionDefinition
+    {
+        public required string Name;
+        public required List<string> Parameters;
+        public required int StartPc;
+        public required int EndPc;
+    }
+
+    private sealed class FunctionCallFrame
+    {
+        public required int ReturnPc;
+        public required Dictionary<string, object> SavedVariables;
+    }
+    
     private static readonly Random _rng = new();
     private static IntPtr _currentXmpContext = IntPtr.Zero;
 
@@ -240,6 +254,7 @@ public static class AmosRunner
         Func<int, Task> waitForStep, 
         Func<Task<string>> getConsoleInputAsync) 
     {
+        
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         var lastVarUpdateTime = DateTime.MinValue;
         var updateInterval = TimeSpan.FromMilliseconds(500);
@@ -260,6 +275,9 @@ public static class AmosRunner
         var selectRuntimeStack = new Stack<SelectRuntimeFrame>();
 
         var gosubStack = new Stack<int>();
+        var functions = new Dictionary<string, FunctionDefinition>(StringComparer.OrdinalIgnoreCase);
+        var functionCallStack = new Stack<FunctionCallFrame>();
+        var functionScanStack = new Stack<int>();
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         
         var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -492,10 +510,63 @@ public static class AmosRunner
                 if (int.TryParse(firstWord, out _)) labels[firstWord] = i;
                 if (rawLine.EndsWith(':')) labels[rawLine.TrimEnd(':').Trim()] = i;
             
-                // WHILE/WEND scan
+
                 var scanLine = StripLeadingLineNumber(StripComments(rawLine)).Trim();
                 var upperScan = scanLine.ToUpperInvariant();
 
+                // FUNCTION scan
+                if (upperScan.StartsWith("FUNCTION "))
+                {
+                    functionScanStack.Push(i);
+    
+                    var funcDecl = scanLine.Substring(9).Trim();
+                    var parenIdx = funcDecl.IndexOf('(');
+    
+                    string funcName;
+                    var parameters = new List<string>();
+    
+                    if (parenIdx > 0)
+                    {
+                        funcName = funcDecl[..parenIdx].Trim();
+                        var closeParenIdx = funcDecl.IndexOf(')');
+                        if (closeParenIdx > parenIdx)
+                        {
+                            var paramStr = funcDecl[(parenIdx + 1)..closeParenIdx].Trim();
+                            if (!string.IsNullOrWhiteSpace(paramStr))
+                            {
+                                parameters.AddRange(
+                                    paramStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                );
+                            }
+                        }
+                    }
+                    else
+                    {
+                        funcName = funcDecl.Trim();
+                    }
+    
+                    functions[funcName] = new FunctionDefinition
+                    {
+                        Name = funcName,
+                        Parameters = parameters,
+                        StartPc = i + 1,
+                        EndPc = -1
+                    };
+                }
+                else if (upperScan == "END FUNCTION" || upperScan == "ENDFUNCTION")
+                {
+                    if (functionScanStack.Count == 0)
+                        throw new Exception($"END FUNCTION without FUNCTION at line {i + 1}");
+    
+                    var funcPc = functionScanStack.Pop();
+                    var funcDef = functions.Values.FirstOrDefault(f => f.StartPc == funcPc + 1);
+                    if (funcDef != null)
+                    {
+                        funcDef.EndPc = i;
+                    }
+                }
+                
+                // WHILE/WEND scan
                 if (upperScan.StartsWith("WHILE "))
                 {
                     whileScanStack.Push(i);
@@ -576,8 +647,98 @@ public static class AmosRunner
 
             if (ifStack.Count > 0)
                 throw new Exception("IF without ENDIF detected at end of program");
+        
+            // Registrera functions som tillgängliga för ParseFactor
+            vars["__functions__"] = functions;
+            vars["__callFunction__"] = (Func<string, List<object>, int, object>)((funcName, args, line) => CallFunction(funcName, args, line));
+            
+        // Helper för synkront funktionsanrop
+        object CallFunction(string funcName, List<object> argValues, int callerLine)
+        {
+            if (!functions.TryGetValue(funcName, out var funcDef))
+                throw new Exception($"Unknown function: {funcName} at line {callerLine}");
 
-            int pc = 0;
+            if (argValues.Count != funcDef.Parameters.Count)
+                throw new Exception($"Function {funcName} expects {funcDef.Parameters.Count} parameters, got {argValues.Count} at line {callerLine}");  
+    
+            // Spara gamla värden
+    var savedVars = new Dictionary<string, object>();
+    foreach (var param in funcDef.Parameters)
+    {
+        if (vars.ContainsKey(param))
+            savedVars[param] = vars[param];
+    }
+    
+    // Sätt parametrar
+    for (int i = 0; i < funcDef.Parameters.Count; i++)
+    {
+        setVar(funcDef.Parameters[i], argValues[i]);
+    }
+    
+    // Kör funktionen rad för rad
+    int funcPc = funcDef.StartPc;
+    object? returnValue = 0.0;
+    
+    while (funcPc <= funcDef.EndPc && funcPc < lines.Length)
+    {
+        var funcLine = StripComments((lines[funcPc] ?? "").Trim());
+        if (!string.IsNullOrWhiteSpace(funcLine) && !funcLine.EndsWith(':'))
+        {
+            funcLine = StripLeadingLineNumber(funcLine);
+            var funcCommands = SplitMultipleCommands(funcLine);
+            
+            foreach (var funcCmd in funcCommands)
+            {
+                var (fcmd, farg) = SplitCommand(funcCmd.Trim());
+                
+                if (fcmd == "RETURN")
+                {
+                    if (!string.IsNullOrWhiteSpace(farg))
+                        returnValue = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
+                    goto cleanup;
+                }
+                else if (fcmd == "PRINT" || fcmd == "PRINTG")
+                {
+                    // Tillåt PRINT i funktioner
+                    if (fcmd == "PRINT")
+                    {
+                        var valToPrint = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
+                        EmitPrintAsync(appendLineAsync, ValueToString(valToPrint)).Wait();
+                    }
+                    else
+                    {
+                        var valToPrint = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
+                        graphics.ConsolePrint(ValueToString(valToPrint));
+                        onGraphicsChanged();
+                    }
+                }
+                else if (funcCmd.Contains('='))
+                {
+                    var (leftSide, varValue) = SplitAssignment(funcCmd);
+                    setVar(leftSide, EvalValue(varValue, vars, funcPc + 1, getInkey, isKeyDown, graphics));
+                }
+            }
+        }
+        funcPc++;
+    }
+    
+cleanup:
+    // Återställ variabler
+    foreach (var kvp in savedVars)
+        vars[kvp.Key] = kvp.Value;
+    
+    // Ta bort parametrar som inte fanns innan
+    foreach (var param in funcDef.Parameters)
+    {
+        if (!savedVars.ContainsKey(param))
+            vars.Remove(param);
+    }
+    
+    return returnValue ?? 0.0;
+}
+        
+            
+        int pc = 0;
         while (pc < lines.Length) {
             token.ThrowIfCancellationRequested();
             await waitForStep(pc);
@@ -597,6 +758,50 @@ public static class AmosRunner
                 var (cmd, arg) = SplitCommand(trimmedCmd);
 
                 switch (cmd) {
+                    case "RETURN":
+                        if (functionCallStack.Count > 0)
+                        {
+                            var frame = functionCallStack.Pop();
+                            foreach (var kvp in frame.SavedVariables)
+                                vars[kvp.Key] = kvp.Value;
+                            pc = frame.ReturnPc;
+                            jumpHappened = true;
+                        }
+                        else if (gosubStack.Count > 0)
+                        {
+                            pc = gosubStack.Pop();
+                            jumpHappened = true;
+                        }
+                        else
+                        {
+                            throw new Exception($"RETURN without GOSUB or FUNCTION at line {ln}");
+                        }
+                        break;
+
+                    case "FUNCTION":
+                        // Hoppa över funktionsdefinitioner
+                    {
+                        var funcDef = functions.Values.FirstOrDefault(f => f.StartPc == pc + 1);
+                        if (funcDef != null && funcDef.EndPc > 0)
+                        {
+                            pc = funcDef.EndPc + 1;
+                            jumpHappened = true;
+                        }
+                    }
+                        break;
+
+                    case "ENDFUNCTION":
+                        // Implicit return
+                        if (functionCallStack.Count > 0)
+                        {
+                            var frame = functionCallStack.Pop();
+                            foreach (var kvp in frame.SavedVariables)
+                                vars[kvp.Key] = kvp.Value;
+                            pc = frame.ReturnPc;
+                            jumpHappened = true;
+                        }
+                        break;
+                    
                     case "ON":
                         var onArg = arg.ToUpperInvariant();
                         if (onArg.StartsWith("ERROR GOTO "))
@@ -1072,7 +1277,7 @@ public static class AmosRunner
                         if (labels.TryGetValue(arg, out var subPc)) { pc = subPc; jumpHappened = true; }
                         else throw new Exception($"Label {arg} not found at line {ln}");
                         break;
-                    case "RETURN":
+                    case "RETURN2":
                         if (gosubStack.Count > 0) { pc = gosubStack.Pop(); jumpHappened = true; }
                         else throw new Exception($"RETURN without GOSUB at line {ln}");
                         break;
@@ -2002,6 +2207,24 @@ public static class AmosRunner
                 t.SkipWs();
                 if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
                 if (t.TryConsume('(')) {
+                    if (v.ContainsKey("__functions__"))
+                    {
+                        var funcs = (Dictionary<string, FunctionDefinition>)v["__functions__"];
+                        if (funcs.ContainsKey(id))
+                        {
+                            var argExprs = new List<object>();
+                            bool first = true;
+                            while (!t.TryConsume(')'))
+                            {
+                                if (!first) t.TryConsume(',');
+                                argExprs.Add(ParseExpr(ref t, v, ln, gk, ikd, g));
+                                first = false;
+                            }
+
+                            var callFunc = (Func<string, List<object>, int, object>)v["__callFunction__"];
+                            return callFunc(id, argExprs, ln);
+                        }
+                    }
                     if (id.Equals("STR$", StringComparison.OrdinalIgnoreCase)) {
                         object val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return ValueToString(val);
                     }
