@@ -1,15 +1,21 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using System.Linq;
+using System.Text;
+using AmoslikeBasic;
 
 namespace AmosLikeBasic;
 
 public static class AmosRunner
 {
+    // Lägg till i din klass
+    private static Dictionary<int, FileChannel> _openFiles = new Dictionary<int, FileChannel>();
+    private const int MaxChannels = 15;
     
     public static MainWindow _mainWindow;
     
@@ -239,6 +245,33 @@ public static class AmosRunner
             return $"Array$({Data.Length - 1}) [{content}]";
         }
     }
+    
+    private sealed class FileChannel
+    {
+        public int Channel { get; set; }
+        public string FilePath { get; set; }
+        public FileMode Mode { get; set; }  // Input, Output, Append
+        public StreamReader? Reader { get; set; }
+        public StreamWriter? Writer { get; set; }
+        public bool IsOpen { get; set; }
+    
+        public FileChannel(int channel, string path, FileMode mode)
+        {
+            Channel = channel;
+            FilePath = path;
+            Mode = mode;
+            IsOpen = true;
+        }
+    }
+
+    public enum FileMode
+    {
+        Input,   // Läsning
+        Output,  // Skrivning (skapar ny/skriver över)
+        Append   // Lägg till i slutet
+    }
+
+
     
     public static async Task ExecuteAsync(
         string programText, 
@@ -846,21 +879,64 @@ cleanup:
                         graphics.Locate(0, 0); 
                         onGraphicsChanged(); 
                         break;
-
-                    case "CONFIGFONT":
-                    {
-                        var bC = ParsePrintAtArguments(arg); 
-                        int width = EvalInt(bC.RowExpr, vars, ln, getInkey, isKeyDown, graphics);
-                        int height = EvalInt(bC.ColExpr, vars, ln, getInkey, isKeyDown, graphics);
-                        object fnt = EvalValue(bC.RestExpr, vars, ln, getInkey, isKeyDown, graphics);
-                        graphics.ConfigureText(width, height, ValueToString(fnt));
-                        break;
-                    }
                     case "PRINT":
                     {
                         var printArg = arg.Trim();
-
-                        if (printArg.StartsWith("AT ", StringComparison.OrdinalIgnoreCase))
+                        
+                        // Kolla om det är PRINT #channel (fil-output)
+                        if (printArg.StartsWith("#"))
+                        {
+                            // PRINT #channel, data
+                            int commaIdx2 = printArg.IndexOf(',');
+                            if (commaIdx2 < 0)
+                                throw new Exception("PRINT #: Syntax är PRINT #channel, data");
+                            
+                            string channelExpr = printArg[1..commaIdx2].Trim(); // Ta bort # och läs kanalnummer
+                            int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
+                            
+                            if (!_openFiles.ContainsKey(channel))
+                                throw new Exception($"PRINT #: Kanal {channel} är inte öppen");
+                            
+                            var fileChannel = _openFiles[channel];
+                            
+                            if (fileChannel.Mode == FileMode.Input)
+                                throw new Exception($"PRINT #: Kanal {channel} är öppnad för läsning, inte skrivning");
+                            
+                            if (fileChannel.Writer == null)
+                                throw new Exception($"PRINT #: Kanal {channel} har ingen writer");
+                            
+                            // Läs data att skriva
+                            string dataExpr = printArg[(commaIdx2 + 1)..].Trim();
+                            
+                            // Kolla om det slutar med semikolon (ingen nyrad)
+                            bool addNewLine = true;
+                            if (dataExpr.EndsWith(";"))
+                            {
+                                addNewLine = false;
+                                dataExpr = dataExpr[..^1].Trim();
+                            }
+                            
+                            if (!string.IsNullOrWhiteSpace(dataExpr))
+                            {
+                                var valToPrint = EvalValue(dataExpr, vars, ln, getInkey, isKeyDown, graphics);
+                                string output = ValueToString(valToPrint);
+                                
+                                if (addNewLine)
+                                    fileChannel.Writer.WriteLine(output);
+                                else
+                                    fileChannel.Writer.Write(output);
+                                
+                                fileChannel.Writer.Flush(); // Säkerställ att data skrivs direkt
+                            }
+                            else if (addNewLine)
+                            {
+                                // Tom PRINT #channel för nyrad
+                                fileChannel.Writer.WriteLine();
+                                fileChannel.Writer.Flush();
+                            }
+                        }
+                        // Vanlig PRINT till skärm
+                        else if (printArg.StartsWith("AT ", StringComparison.OrdinalIgnoreCase))
                         {
                             var at = ParsePrintAtArguments(printArg);
 
@@ -880,7 +956,8 @@ cleanup:
                             var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
                             await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
                         }
-                    } break;
+                    } 
+                    break;
                     
                     case "PRINTG":
                         {
@@ -921,43 +998,104 @@ cleanup:
                         }
                         break; 
                     case "INPUT":
+                    {
                         string inputArg = arg.Trim();
-                        string promptInput = "";
-                        string varNameInput = "A$";
-
-                        // Hitta kommat som INTE är inuti citattecken
-                        int commaIdx = -1;
-                        bool inQuotes = false;
-                        for (int i = 0; i < inputArg.Length; i++) {
-                            if (inputArg[i] == '\"') inQuotes = !inQuotes;
-                            if (!inQuotes && inputArg[i] == ',') {
-                                commaIdx = i;
-                                break;
+                        
+                        // Kolla om det är INPUT #channel (fil-input)
+                        if (inputArg.StartsWith("#"))
+                        {
+                            // INPUT #channel, variable
+                            int commaIdx = inputArg.IndexOf(',');
+                            if (commaIdx < 0)
+                                throw new Exception("INPUT #: Syntax är INPUT #channel, variabel");
+                            
+                            string channelExpr = inputArg[1..commaIdx].Trim();
+                            int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
+                            
+                            if (!_openFiles.ContainsKey(channel))
+                                throw new Exception($"INPUT #: Kanal {channel} är inte öppen");
+                            
+                            var fileChannel = _openFiles[channel];
+                            
+                            if (fileChannel.Mode != FileMode.Input)
+                                throw new Exception($"INPUT #: Kanal {channel} är inte öppnad för läsning");
+                            
+                            if (fileChannel.Reader == null)
+                                throw new Exception($"INPUT #: Kanal {channel} har ingen reader");
+                            
+                            string varName = inputArg[(commaIdx + 1)..].Trim();
+                            
+                            // Läs en rad från filen
+                            string? line2 = fileChannel.Reader.ReadLine();
+                            
+                            if (line2 == null)
+                            {
+                                // End of file - sätt tom sträng eller 0
+                                if (varName.EndsWith("$"))
+                                    setVar(varName, "");
+                                else
+                                    setVar(varName, 0);
+                            }
+                            else
+                            {
+                                // Försök konvertera till nummer om det är numerisk variabel
+                                if (varName.EndsWith("$"))
+                                {
+                                    setVar(varName, line2);
+                                }
+                                else
+                                {
+                                    // Numerisk variabel
+                                    if (double.TryParse(line2.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double numValue))
+                                        setVar(varName, numValue);
+                                    else
+                                        setVar(varName, 0); // Default till 0 om konvertering misslyckas
+                                }
                             }
                         }
-
-                        if (commaIdx >= 0)
-                        {
-                            promptInput = Unquote(inputArg[..commaIdx].Trim());
-                            varNameInput = inputArg[(commaIdx + 1)..].Trim();
-                        }
+                        // Vanlig INPUT från användare
                         else
                         {
-                            varNameInput = inputArg;
+                            string promptInput = "";
+                            string varNameInput = "A$";
+
+                            // Hitta kommat som INTE är inuti citattecken
+                            int commaIdx = -1;
+                            bool inQuotes = false;
+                            for (int i = 0; i < inputArg.Length; i++) 
+                            {
+                                if (inputArg[i] == '\"') inQuotes = !inQuotes;
+                                if (!inQuotes && inputArg[i] == ',') 
+                                {
+                                    commaIdx = i;
+                                    break;
+                                }
+                            }
+
+                            if (commaIdx >= 0)
+                            {
+                                promptInput = Unquote(inputArg[..commaIdx].Trim());
+                                varNameInput = inputArg[(commaIdx + 1)..].Trim();
+                            }
+                            else
+                            {
+                                varNameInput = inputArg;
+                            }
+
+                            // Skriv ut prompten
+                            if (!string.IsNullOrEmpty(promptInput))
+                            {
+                                await appendLineAsync("@@PRINT " + promptInput);
+                            }
+
+                            // Vänta på användarens inmatning
+                            string userInput = await getConsoleInputAsync();
+
+                            // Spara resultatet
+                            setVar(varNameInput, userInput.Trim());
                         }
-
-                        // Skriv ut prompten
-                        if (!string.IsNullOrEmpty(promptInput))
-                        {
-                            await appendLineAsync("@@PRINT " + promptInput);
-                        }
-
-                        // Vänta på användarens inmatning
-                        string userInput = await getConsoleInputAsync();
-
-                        // Spara resultatet
-                        setVar(varNameInput, userInput.Trim());
-                        break;
+                    }
+                    break;
                     
                     case "INPUTG":
                         {
@@ -1286,17 +1424,41 @@ cleanup:
                         setVar(n, EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics)); 
                         break;
                     case "DIM":
-                        // DIM A(10) eller DIM A$(10)
-                        var dimParts = arg.Split('(', ')');
+                        // DIM A(10) eller DIM A$(10) eller DIM A(10)=[0,4,2,5,6,7,4,3,2,1]
+                        var eqIdx = arg.IndexOf('=');
+                        string dimDecl = eqIdx >= 0 ? arg[..eqIdx].Trim() : arg;
+                        string? initValues = eqIdx >= 0 ? arg[(eqIdx + 1)..].Trim() : null;
+    
+                        var dimParts = dimDecl.Split('(', ')');
                         if (dimParts.Length >= 2)
                         {
                             var arrName = dimParts[0].Trim();
                             var size = EvalInt(dimParts[1], vars, ln, getInkey, isKeyDown, graphics);
 
+                            IAmosArray array;
                             if (arrName.EndsWith("$", StringComparison.Ordinal))
-                                vars[arrName] = new AmosStringArray(size);
+                                array = new AmosStringArray(size);
                             else
-                                vars[arrName] = new AmosNumericArray(size);
+                                array = new AmosNumericArray(size);
+        
+                            vars[arrName] = array;
+        
+                            // Om vi har initialvärden: [0,4,2,5,6,7,4,3,2,1] eller ["hej", "då"]
+                            if (initValues != null)
+                            {
+                                // Ta bort [ och ]
+                                initValues = initValues.Trim();
+                                if (initValues.StartsWith("[")) initValues = initValues[1..];
+                                if (initValues.EndsWith("]")) initValues = initValues[..^1];
+            
+                                // Använd SplitTopLevelCsv för att hantera komman inuti citattecken korrekt
+                                var values = SplitTopLevelCsv(initValues);
+                                for (int i = 0; i < values.Count && i < array.Length; i++)
+                                {
+                                    var val = EvalValue(values[i].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                                    array.Set(i, val);
+                                }
+                            }
                         }
                         break;
                     case "WAIT": 
@@ -1754,6 +1916,33 @@ cleanup:
                             StopMusic(audioEngine);
                         }
                         break;
+                    case "PLAY":
+                        var playArgs = SplitCsvOrSpaces(arg);
+                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "JUMP")
+                        {
+                            ChiptuneSynth.PlayJump();
+                        }
+                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "LASER")
+                        {
+                            ChiptuneSynth.PlayLaser();
+                        }
+                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "EXPLOSION")
+                        {
+                            ChiptuneSynth.PlayExplosion();
+                        }
+                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "COIN")
+                        {
+                            ChiptuneSynth.PlayCoin();
+                        }
+                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "BLIP")
+                        {
+                            ChiptuneSynth.PlayBlip();
+                        }
+                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "HIT")
+                        {
+                            ChiptuneSynth.PlayHit();
+                        }
+                        break;
                     case "RASTER":
                             int currentLayer = graphics.GetActiveScreenNumber();
 
@@ -1767,9 +1956,9 @@ cleanup:
                                 var val = EvalValue(inner, vars, ln, getInkey, isKeyDown, graphics);
                                 int rbNum = Convert.ToInt32(val);
                                 
-                                int eqIdx = arg.IndexOf('=');
-                                if (eqIdx > 0) {
-                                    string colorStr = ValueToString(EvalValue(arg[(eqIdx + 1)..].Trim(), vars, ln, getInkey, isKeyDown, graphics));
+                                int eqIdx2 = arg.IndexOf('=');
+                                if (eqIdx2 > 0) {
+                                    string colorStr = ValueToString(EvalValue(arg[(eqIdx2 + 1)..].Trim(), vars, ln, getInkey, isKeyDown, graphics));
                                     var parts = colorStr.Split(',').Select(c => c.Trim()).ToList();
                                     var c1 = ParseColor(parts[0]);
                                     var c2 = parts.Count > 1 ? ParseColor(parts[1]) : c1;
@@ -1833,6 +2022,14 @@ cleanup:
                                     double fzy = (fArgs.Count >= 4) ? EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics) / 100.0 : fzx;
                                     graphics.FontZoom(fid, fzx, fzy);
                                 }
+                                else if (fSub == "SET" && fArgs.Count >= 3)
+                                {
+                                    var fArgs2 = SplitArgsRespectQuotes(arg);
+                                    int width = EvalInt(fArgs2[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int height = EvalInt(fArgs2[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    object fnt = fArgs2[3]; //EvalValue(fArgs2[3], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.ConfigureText(width, height, ValueToString(fnt));
+                                }
                                 else if (fSub == "CLEAR")
                                 {
                                     graphics.FontClear();
@@ -1865,6 +2062,127 @@ cleanup:
                             }
                         }
                         break;
+                    case "OPEN":
+                    {
+                    // Syntax: OPEN IN/OUT/APPEND channel, "filename"
+                    string openArg = arg.Trim();
+                    
+                    // Läs mode (IN/OUT/APPEND)
+                    string[] parts = openArg.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length < 2)
+                        throw new Exception("OPEN: Syntax är OPEN IN/OUT/APPEND channel, \"filename\"");
+                    
+                    string modeStr = parts[0].ToUpperInvariant();
+                    FileMode mode;
+                    
+                    if (modeStr == "IN" || modeStr == "INPUT")
+                        mode = FileMode.Input;
+                    else if (modeStr == "OUT" || modeStr == "OUTPUT")
+                        mode = FileMode.Output;
+                    else if (modeStr == "APPEND")
+                        mode = FileMode.Append;
+                    else
+                        throw new Exception($"OPEN: Okänd mode '{modeStr}'. Använd IN, OUT eller APPEND");
+                    
+                    // Hitta kommat mellan channel och filename
+                    string restArg = parts[1];
+                    int commaIdx2 = restArg.IndexOf(',');
+                    if (commaIdx2 < 0)
+                        throw new Exception("OPEN: Syntax är OPEN mode channel, \"filename\"");
+                    
+                    // Läs kanalnummer
+                    string channelExpr = restArg[..commaIdx2].Trim();
+                    int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
+                    
+                    if (channel < 1 || channel > MaxChannels)
+                        throw new Exception($"OPEN: Kanal {channel} utanför giltigt intervall (1-{MaxChannels})");
+                    
+                    if (_openFiles.ContainsKey(channel))
+                        throw new Exception($"OPEN: Kanal {channel} är redan öppen");
+                    
+                    // Läs filnamn
+                    string fileExpr = restArg[(commaIdx2 + 1)..].Trim();
+                    object fileObj = EvalValue(fileExpr, vars, ln, getInkey, isKeyDown, graphics);
+                    string filePath = ValueToString(fileObj);
+                    
+                    // Konvertera relativ sökväg till absolut
+                    if (!Path.IsPathRooted(filePath))
+                    {
+                        filePath = Path.Combine(Environment.CurrentDirectory, filePath);
+                    }
+                    
+                    // Öppna filen
+                    try
+                    {
+                        var fileChannel = new FileChannel(channel, filePath, mode);
+                        
+                        switch (mode)
+                        {
+                            case FileMode.Input:
+                                if (!File.Exists(filePath))
+                                    throw new FileNotFoundException($"Filen '{filePath}' hittades inte");
+                                fileChannel.Reader = new StreamReader(filePath, Encoding.UTF8);
+                                break;
+                                
+                            case FileMode.Output:
+                                // Skapa katalog om den inte finns
+                                var dir = Path.GetDirectoryName(filePath);
+                                if (!string.IsNullOrEmpty(dir))
+                                    Directory.CreateDirectory(dir);
+                                fileChannel.Writer = new StreamWriter(filePath, false, Encoding.UTF8);
+                                break;
+                                
+                            case FileMode.Append:
+                                var dirAppend = Path.GetDirectoryName(filePath);
+                                if (!string.IsNullOrEmpty(dirAppend))
+                                    Directory.CreateDirectory(dirAppend);
+                                fileChannel.Writer = new StreamWriter(filePath, true, Encoding.UTF8);
+                                break;
+                        }
+                        
+                        _openFiles[channel] = fileChannel;
+                        
+                        //await appendLineAsync($"@@PRINT File opened on channel {channel}");
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception($"OPEN: Kunde inte öppna fil '{filePath}': {ex.Message}");
+                    }
+                }
+                break;
+
+                case "CLOSE":
+                {
+                    // Syntax: CLOSE channel
+                    int channel = EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics);
+                    
+                    if (!_openFiles.ContainsKey(channel))
+                    {
+                        // Ignorera om kanalen inte är öppen (som klassisk BASIC)
+                        break;
+                    }
+                    
+                    var fileChannel = _openFiles[channel];
+                    
+                    try
+                    {
+                        fileChannel.Reader?.Close();
+                        fileChannel.Reader?.Dispose();
+                        fileChannel.Writer?.Flush();
+                        fileChannel.Writer?.Close();
+                        fileChannel.Writer?.Dispose();
+                        fileChannel.IsOpen = false;
+                        
+                        _openFiles.Remove(channel);
+                        
+                        //await appendLineAsync($"@@PRINT File closed on channel {channel}");
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new Exception($"CLOSE: Fel vid stängning av kanal {channel}: {ex.Message}");
+                    }
+                }
+                break;
                     default:
                         if (!string.IsNullOrWhiteSpace(cmd))
                         {
@@ -2241,6 +2559,54 @@ cleanup:
                         object val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')');
                         double.TryParse(ValueToString(val), CultureInfo.InvariantCulture, out var dv); return dv;
                     }
+                    if (id.Equals("ABS", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Abs(a);
+                    }
+                    if (id.Equals("SGN", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Sign(a);
+                    }
+                    if (id.Equals("SQR", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Sqrt(a);
+                    }
+                    if (id.Equals("LOG", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Log(a);
+                    }
+                    if (id.Equals("LOG2", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Log2(a);
+                    }
+                    if (id.Equals("LOG10", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Log10(a);
+                    }
+                    if (id.Equals("EXP", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Exp(a);
+                    }
+                    if (id.Equals("TAN", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Tan(a);
+                    }
+                    if (id.Equals("ATN", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Atan(a);
+                    }
+                    if (id.Equals("MIN", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(',');
+                        double b = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Min(a,b);
+                    }
+                    if (id.Equals("MAX", StringComparison.OrdinalIgnoreCase)) {
+                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(',');
+                        double b = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                        t.TryConsume(')'); return Math.Max(a,b);
+                    }
                     if (id.Equals("SIN", StringComparison.OrdinalIgnoreCase)) {
                         double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
                         t.TryConsume(')'); return Math.Sin(a * Math.PI / 180.0);
@@ -2309,6 +2675,13 @@ cleanup:
                             t.TryConsume(')');
                             return ValueToString(val).ToLowerInvariant();
                         }
+                    
+                    if (id.Equals("UPPER$", StringComparison.OrdinalIgnoreCase))
+                    {
+                        object val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                        t.TryConsume(')');
+                        return ValueToString(val).ToUpperInvariant();
+                    }
 
                     if (id.Equals("LEFT$", StringComparison.OrdinalIgnoreCase))
                         {
@@ -2429,6 +2802,195 @@ cleanup:
 
                             if (n3 > parts.Length) return "";
                             return parts[n3 - 1];
+                        }
+                    
+                        if (id.Equals("JOIN$", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Första argumentet är array-variabeln
+                            object arrayObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(',');
+                            object separatorObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(')');
+
+                            string separator = ValueToString(separatorObj);
+    
+                            // Hantera både AmosStringArray och AmosNumericArray
+                            if (arrayObj is AmosStringArray strArray)
+                            {
+                                // Filtrera bort null-värden och sista elementet om det är tomt
+                                var validParts = strArray.Data.Where(s => s != null).ToArray();
+                                return string.Join(separator, validParts);
+                            }
+                            else if (arrayObj is AmosNumericArray numArray)
+                            {
+                                // Konvertera numerisk array till strängar
+                                var parts = numArray.Data.Select(d => d.ToString(CultureInfo.InvariantCulture)).ToArray();
+                                return string.Join(separator, parts);
+                            }
+                            else if (arrayObj is IAmosArray genericArray)
+                            {
+                                // Fallback för andra IAmosArray-implementationer
+                                var parts = new string[genericArray.Length];
+                                for (int i = 0; i < genericArray.Length; i++)
+                                    parts[i] = ValueToString(genericArray.Get(i));
+                                return string.Join(separator, parts);
+                            }
+    
+                            return ""; // Ingen array hittades
+                        }                     
+                        
+                        if (id.Equals("SPLIT$", StringComparison.OrdinalIgnoreCase))
+                        {
+                            object strObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(',');
+                            object delimiterObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(')');
+
+                            string input = ValueToString(strObj);
+                            string delimiter = ValueToString(delimiterObj);
+    
+                            if (string.IsNullOrEmpty(delimiter))
+                            {
+                                // Tom delimiter = dela i enskilda tecken
+                                var chars = input.Select(c => c.ToString()).ToArray();
+                                var result = new AmosStringArray(chars.Length - 1);
+                                for (int i = 0; i < chars.Length; i++)
+                                    result.Data[i] = chars[i];
+                                return result;
+                            }
+    
+                            string[] parts = input.Split(new[] { delimiter }, StringSplitOptions.None);
+                            var strArray = new AmosStringArray(parts.Length - 1);
+                            for (int i = 0; i < parts.Length; i++)
+                                strArray.Data[i] = parts[i];
+    
+                            return strArray;
+                        }
+                        
+                        if (id.Equals("FIND", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Första argumentet: sträng att söka i
+                            object textObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(',');
+    
+                            // Andra argumentet: söksträng
+                            object searchObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+    
+                            // Tredje argumentet (valfritt): startposition
+                            int startPos = 0;
+                            if (t.TryConsume(','))
+                            {
+                                object startObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                                startPos = (int)Math.Round(Convert.ToDouble(startObj, CultureInfo.InvariantCulture));
+                            }
+    
+                            t.TryConsume(')');
+
+                            string text = ValueToString(textObj);
+                            string search = ValueToString(searchObj);
+    
+                            if (startPos < 0 || startPos >= text.Length) return -1;
+    
+                            return text.IndexOf(search, startPos);
+                        }
+
+                        if (id.Equals("FINDLAST", StringComparison.OrdinalIgnoreCase))
+                        {
+                            object textObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(',');
+                            object searchObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(')');
+
+                            string text = ValueToString(textObj);
+                            string search = ValueToString(searchObj);
+    
+                            return text.LastIndexOf(search);
+                        }
+                        
+                        if (id.Equals("REPEAT$", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Första argumentet: sträng att upprepa
+                            object strObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(',');
+    
+                            // Andra argumentet: antal gånger
+                            object countObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(')');
+
+                            string str = ValueToString(strObj);
+                            int count = (int)Math.Round(Convert.ToDouble(countObj, CultureInfo.InvariantCulture));
+    
+                            if (count <= 0) return "";
+    
+                            // Optimera för enstaka tecken
+                            if (str.Length == 1)
+                            {
+                                return new string(str[0], count);
+                            }
+    
+                            return string.Concat(Enumerable.Repeat(str, count));
+                        }
+                        
+                        if (id.Equals("EOF", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Syntax: EOF(channel)
+                            object channelObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                            t.TryConsume(')');
+    
+                            int channel = (int)Math.Round(Convert.ToDouble(channelObj, CultureInfo.InvariantCulture));
+    
+                            // Kolla om kanalen finns
+                            if (!_openFiles.ContainsKey(channel))
+                            {
+                                // Om kanalen inte är öppen, returnera 1 (true/EOF)
+                                // Alternativt: throw new Exception($"EOF: Kanal {channel} är inte öppen");
+                                return 1;
+                            }
+    
+                            var fileChannel = _openFiles[channel];
+    
+                            // Kolla att det är en läskanal
+                            if (fileChannel.Mode != FileMode.Input)
+                            {
+                                throw new Exception($"EOF: Kanal {channel} är inte öppnad för läsning");
+                            }
+    
+                            if (fileChannel.Reader == null)
+                            {
+                                return 1; // Ingen reader = EOF
+                            }
+    
+                            // Returnera 1 om EOF, annars 0
+                            return fileChannel.Reader.EndOfStream ? 1 : 0;
+                        }
+                        
+                        if (id.Equals("DIM", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // DIM(A) eller DIM(A()) returnerar arrayens storlek
+                            // Vi läser namnet direkt utan att parsa som uttryck
+                            t.SkipWs();
+                            if (!t.TryReadIdentifier(out var arrName))
+                                throw new Exception($"DIM() expects array name at line {ln}");
+                            
+                            // Skippa eventuella tomma parenteser: A()
+                            t.SkipWs();
+                            if (t.TryConsume('('))
+                            {
+                                t.SkipWs();
+                                t.TryConsume(')');
+                            }
+                            
+                            // Stäng DIM-funktionens parentes
+                            t.SkipWs();
+                            t.TryConsume(')');
+                            
+                            if (v.TryGetValue(arrName, out var arrObj2) && arrObj2 is IAmosArray arr2)
+                            {
+                                // Returnera storleken (längd - 1 eftersom AMOS indexerar 0-baserat men DIM A(10) ger 11 element)
+                                return (double)(arr2.Length - 1);
+                            }
+                            
+                            throw new Exception($"Array '{arrName}' not found at line {ln}");
                         }
                         
                     // Om vi kommer hit och det inte var en funktion, kolla om det är en array
@@ -2574,6 +3136,46 @@ static string InputCommand(string[] args)
         if (string.IsNullOrWhiteSpace(a)) return new List<string>();
         return a.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
     }
+    private static List<string> SplitCsv(string a) {
+        if (string.IsNullOrWhiteSpace(a)) return new List<string>();
+        return a.Split(new[] { ','}, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+    private static List<string> SplitArgsRespectQuotes(string input)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(input)) return result;
+
+        bool inQuotes = false;
+        var current = new StringBuilder();
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            char c = input[i];
+
+            if (c == '"')
+            {
+                inQuotes = !inQuotes;
+                continue; // ta bort citattecken
+            }
+
+            if (!inQuotes && (c == ',' || char.IsWhiteSpace(c)))
+            {
+                if (current.Length > 0)
+                {
+                    result.Add(current.ToString());
+                    current.Clear();
+                }
+                continue;
+            }
+
+            current.Append(c);
+        }
+
+        if (current.Length > 0)
+            result.Add(current.ToString());
+
+        return result;
+    }
     //private static Color ParseColor(string t) { try { return Color.Parse(t); } catch { return Colors.Transparent; } }
     private static Color ParseColor(string t) { try { return ParseColorFlexible(t); } catch { return Colors.Transparent; } }
 
@@ -2692,7 +3294,7 @@ static string InputCommand(string[] args)
             return new PrintAtArgs(rowExpr, colExpr, rest);
         }
 
-    
+
     
     private static DateTime _lastFrameTime = DateTime.MinValue;
 

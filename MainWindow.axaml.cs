@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using AmoslikeBasic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -47,6 +48,8 @@ public partial class MainWindow : Window
         this.Closing += MainWindow_Closing;
         
         _ = EnsureExampleProjectsExistAsync();
+        
+        AmosAudioCommands.InitializeAudio();
         
         string userDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
