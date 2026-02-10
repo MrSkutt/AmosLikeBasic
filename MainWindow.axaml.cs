@@ -115,64 +115,64 @@ public partial class MainWindow : Window
         UpdateTitleBar();
     }
 
-        private async void OnCut(object? sender, RoutedEventArgs e)
-        {
-            string selected = Editor.SelectedText;
-            if (string.IsNullOrEmpty(selected)) return;
+    private async void OnCut(object? sender, RoutedEventArgs e)
+    {
+        string selected = Editor.SelectedText;
+        if (string.IsNullOrEmpty(selected)) return;
 
-            // Klipp till clipboard
+        // Klipp till clipboard
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard != null)
+            await clipboard.SetTextAsync(selected);
+
+        // Spara startpositionen (där texten börjar, oavsett vilket håll man markerat)
+        int startPos = Editor.SelectionStart;
+        int len = Editor.SelectionLength;
+
+        // Ta bort den valda texten
+        Editor.Document.Replace(startPos, len, "");
+
+        // Placera caret där texten togs bort
+        Editor.CaretOffset = startPos;
+        Editor.SelectionLength = 0;
+    }
+
+    private async void OnCopy(object? sender, RoutedEventArgs e)
+    {
+        string selected = Editor.SelectedText;
+        if (!string.IsNullOrEmpty(selected))
+        {
             var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
             if (clipboard != null)
                 await clipboard.SetTextAsync(selected);
-
-            // Spara startpositionen (där texten börjar, oavsett vilket håll man markerat)
-            int startPos = Editor.SelectionStart;
-            int len = Editor.SelectionLength;
-
-            // Ta bort den valda texten
-            Editor.Document.Replace(startPos, len, "");
-
-            // Placera caret där texten togs bort
-            Editor.CaretOffset = startPos;
-            Editor.SelectionLength = 0;
         }
+    }
 
-        private async void OnCopy(object? sender, RoutedEventArgs e)
+    private async void OnPaste(object? sender, RoutedEventArgs e)
+    {
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard != null)
         {
-            string selected = Editor.SelectedText;
-            if (!string.IsNullOrEmpty(selected))
+            string? text = await clipboard.GetTextAsync();
+            if (!string.IsNullOrEmpty(text))
             {
-                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-                if (clipboard != null)
-                    await clipboard.SetTextAsync(selected);
-            }
-        }
+                // Om vi har en markering, skriv över den (både Insert och Replace hanteras av Replace)
+                int startPos = Editor.SelectionLength > 0 ? Editor.SelectionStart : Editor.CaretOffset;
+                int lengthToReplace = Editor.SelectionLength;
 
-        private async void OnPaste(object? sender, RoutedEventArgs e)
-        {
-            var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-            if (clipboard != null)
-            {
-                string? text = await clipboard.GetTextAsync();
-                if (!string.IsNullOrEmpty(text))
-                {
-                    // Om vi har en markering, skriv över den (både Insert och Replace hanteras av Replace)
-                    int startPos = Editor.SelectionLength > 0 ? Editor.SelectionStart : Editor.CaretOffset;
-                    int lengthToReplace = Editor.SelectionLength;
-
-                    Editor.Document.Replace(startPos, lengthToReplace, text);
+                Editor.Document.Replace(startPos, lengthToReplace, text);
                     
-                    // Flytta caret till slutet av den inklistrade texten
-                    Editor.CaretOffset = startPos + text.Length;
-                    Editor.SelectionLength = 0;
-                }
+                // Flytta caret till slutet av den inklistrade texten
+                Editor.CaretOffset = startPos + text.Length;
+                Editor.SelectionLength = 0;
             }
         }
+    }
 
-        private void OnSelectAll(object? sender, RoutedEventArgs e)
-        {
-            Editor.SelectAll();
-        }
+    private void OnSelectAll(object? sender, RoutedEventArgs e)
+    {
+        Editor.SelectAll();
+    }
     
     private void MainWindow_OnOpened(object? sender, EventArgs e)
     {
@@ -286,7 +286,7 @@ public partial class MainWindow : Window
         // F5 - RUN / DEBUG
         if (e.Key == Key.F5) 
         { 
-           // Editor.IsEnabled = false;
+            // Editor.IsEnabled = false;
             bool debug = (e.KeyModifiers & KeyModifiers.Shift) != 0;
             _ = StartProgramAsync(debug); 
             e.Handled = true; 
@@ -337,50 +337,50 @@ public partial class MainWindow : Window
     }
 
     private async Task EnsureExampleProjectsExistAsync()
+    {
+        try 
         {
-            try 
+            // 1. Destination: Documents/AmosLikeBasic/Projects
+            string docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            string targetDir = Path.Combine(docPath, "AmosLikeBasic", "Projects");
+
+            if (!Directory.Exists(targetDir))
             {
-                // 1. Destination: Documents/AmosLikeBasic/Projects
-                string docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-                string targetDir = Path.Combine(docPath, "AmosLikeBasic", "Projects");
+                Directory.CreateDirectory(targetDir);
+            }
 
-                if (!Directory.Exists(targetDir))
-                {
-                    Directory.CreateDirectory(targetDir);
-                }
-
-                // 2. Källa: Inuti AppBundle
-                // AppContext.BaseDirectory pekar oftast på .../AmosLikeBasic.app/Contents/MacOS/
-                // Vi vill gå upp ett steg och in i Resources
-                string bundleBase = AppContext.BaseDirectory;
-                string sourceDir = Path.Combine(bundleBase, "..", "Resources", "Projects");
+            // 2. Källa: Inuti AppBundle
+            // AppContext.BaseDirectory pekar oftast på .../AmosLikeBasic.app/Contents/MacOS/
+            // Vi vill gå upp ett steg och in i Resources
+            string bundleBase = AppContext.BaseDirectory;
+            string sourceDir = Path.Combine(bundleBase, "..", "Resources", "Projects");
                 
-                // Normalisera sökvägen (tar bort ".." ur strängen)
-                sourceDir = Path.GetFullPath(sourceDir);
+            // Normalisera sökvägen (tar bort ".." ur strängen)
+            sourceDir = Path.GetFullPath(sourceDir);
 
-                if (Directory.Exists(sourceDir))
+            if (Directory.Exists(sourceDir))
+            {
+                var files = Directory.GetFiles(sourceDir);
+                foreach (var file in files)
                 {
-                    var files = Directory.GetFiles(sourceDir);
-                    foreach (var file in files)
-                    {
-                        string fileName = Path.GetFileName(file);
-                        string destFile = Path.Combine(targetDir, fileName);
+                    string fileName = Path.GetFileName(file);
+                    string destFile = Path.Combine(targetDir, fileName);
 
-                        // Kopiera bara om filen inte redan finns (så vi inte skriver över användarens eventuella ändringar)
-                        if (!File.Exists(destFile))
-                        {
-                            // Async copy för att inte låsa UI vid start
-                            await Task.Run(() => File.Copy(file, destFile));
-                        }
+                    // Kopiera bara om filen inte redan finns (så vi inte skriver över användarens eventuella ändringar)
+                    if (!File.Exists(destFile))
+                    {
+                        // Async copy för att inte låsa UI vid start
+                        await Task.Run(() => File.Copy(file, destFile));
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                // Logga eller ignorera tyst om något går fel med rättigheter
-                System.Diagnostics.Debug.WriteLine($"Could not copy example projects: {ex.Message}");
-            }
         }
+        catch (Exception ex)
+        {
+            // Logga eller ignorera tyst om något går fel med rättigheter
+            System.Diagnostics.Debug.WriteLine($"Could not copy example projects: {ex.Message}");
+        }
+    }
            
     private void HandleGlobalKeyUp(object? sender, KeyEventArgs e)
     {
@@ -697,147 +697,147 @@ public partial class MainWindow : Window
         }).GetTask();
     }
     
-        private async Task StartProgramAsync(bool startPaused)
+    private async Task StartProgramAsync(bool startPaused)
+    {
+        if (_screenWindow == null || !_screenWindow.IsVisible)
         {
-            if (_screenWindow == null || !_screenWindow.IsVisible)
-            {
-                _screenWindow = new ScreenWindow();
-                _screenWindow.Closed += (s, ev) => {
-                    StopButton_OnClick(null, new RoutedEventArgs());
-                    _screenWindow = null;
-                };
-                _screenWindow.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
-                _screenWindow.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
-                _screenWindow.Show();
-            }
-            _screenWindow.Activate();
-            _screenWindow.Focus(); 
+            _screenWindow = new ScreenWindow();
+            _screenWindow.Closed += (s, ev) => {
+                StopButton_OnClick(null, new RoutedEventArgs());
+                _screenWindow = null;
+            };
+            _screenWindow.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
+            _screenWindow.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
+            _screenWindow.Show();
+        }
+        _screenWindow.Activate();
+        _screenWindow.Focus(); 
 
-            _isPaused = startPaused; 
+        _isPaused = startPaused; 
         
-            Dispatcher.UIThread.Post(() => {
-                PauseButton.Content = _isPaused ? "[ RESUME ]" : "[ PAUSE ]";
-                PauseButton.IsEnabled = true;
-                StepButton.IsEnabled = _isPaused;
-                RunButton.IsEnabled = false;
-                StopButton.IsEnabled = true;
-                StatusText.Text = _isPaused ? "Status: DEBUG (Paused)" : "Status: RUNNING";
-            });
+        Dispatcher.UIThread.Post(() => {
+            PauseButton.Content = _isPaused ? "[ RESUME ]" : "[ PAUSE ]";
+            PauseButton.IsEnabled = true;
+            StepButton.IsEnabled = _isPaused;
+            RunButton.IsEnabled = false;
+            StopButton.IsEnabled = true;
+            StatusText.Text = _isPaused ? "Status: DEBUG (Paused)" : "Status: RUNNING";
+        });
 
-            _gfx.Clear(Colors.Black);
-            _gfx.ClearFrames();
-            _textScreen.Clear();
-            _gfx.CursorX = 0;
-            _gfx.CursorY = 0;
-            _gfx.PaperColor = Colors.Transparent;
-            _gfx.Ink = Colors.White;
-            _gfx.ConfigureText(8,16,"Topaz a600a1200a400");
-            _gfx.Screen(640,480);
-            foreach(var id in _gfx.GetSpriteIds()) {
-                _gfx.SpriteOff(id);
-            }
-            foreach(var id in _gfx.GetBobIds()) {
-                _gfx.BobOff(id);
-            }
-            if (_screenWindow.Console != null) _screenWindow.Console.Text = "";
-            _screenWindow.ScreenControl.Graphics = _gfx;
-            _runCts?.Cancel();
-            _runCts = new CancellationTokenSource();
-            var token = _runCts.Token;
-            var program = Editor.Text ?? string.Empty;
+        _gfx.Clear(Colors.Black);
+        _gfx.ClearFrames();
+        _textScreen.Clear();
+        _gfx.CursorX = 0;
+        _gfx.CursorY = 0;
+        _gfx.PaperColor = Colors.Transparent;
+        _gfx.Ink = Colors.White;
+        _gfx.ConfigureText(8,16,"Topaz a600a1200a400");
+        _gfx.Screen(640,480);
+        foreach(var id in _gfx.GetSpriteIds()) {
+            _gfx.SpriteOff(id);
+        }
+        foreach(var id in _gfx.GetBobIds()) {
+            _gfx.BobOff(id);
+        }
+        if (_screenWindow.Console != null) _screenWindow.Console.Text = "";
+        _screenWindow.ScreenControl.Graphics = _gfx;
+        _runCts?.Cancel();
+        _runCts = new CancellationTokenSource();
+        var token = _runCts.Token;
+        var program = Editor.Text ?? string.Empty;
 
-            try
+        try
+        {
+            // VIKTIGT: async här i lambdan till Task.Run
+            await Task.Run(async () =>
             {
-                   // VIKTIGT: async här i lambdan till Task.Run
-                   await Task.Run(async () =>
-                    {
-                        var lastCpuUpdateTime = DateTime.MinValue;
-                        var cpuUpdateInterval = TimeSpan.FromMilliseconds(500); 
+                var lastCpuUpdateTime = DateTime.MinValue;
+                var cpuUpdateInterval = TimeSpan.FromMilliseconds(500); 
 
-                        await AmosRunner.ExecuteAsync(
-                            programText: program,
-                            appendLineAsync: AppendConsoleLineAsync,
-                            // VIKTIGT: async här också för input
-                            getConsoleInputAsync: async () => {
-                                if (_screenWindow == null) return "";
-                                return await Dispatcher.UIThread.InvokeAsync(() => _screenWindow.RequestInputAsync());
-                            },
-                            clearAsync: ClearConsoleAsync,
-                            graphics: _gfx,
-                            onGraphicsChanged: () => {
-                                Dispatcher.UIThread.InvokeAsync(() => {
-                                    if (_screenWindow != null) {
-                                        var control = _screenWindow.FindControl<AmosGpuView>("ScreenControl");
-                                        if (control != null)
-                                        {
-                                            control.InvalidateMeasure();
-                                            control.InvalidateVisual();
-                                        }
-                                    
-                                        var now = DateTime.Now;
-                                        if (now - lastCpuUpdateTime > cpuUpdateInterval)
-                                        {
-                                            var cpu = _gfx.LastCpuUsagePercent;
-                                            if (_screenWindow != null)
-                                                _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
-                                            //StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%"; // UI-thread access error risk fixad i ExecuteAsync
-                                            lastCpuUpdateTime = now;
-                                        }
-                                    }
-                                }, DispatcherPriority.Render);
-                            },
- 
-                            getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
-                            isKeyDown: (k) => _pressedKeys.Contains(k),
-                            audioEngine: _audioEngine,
-                            token: token,
-                            onVariablesChanged: (vars) => {
-                                Dispatcher.UIThread.Post(() => {
-                                    VariableListBox.ItemsSource = vars.OrderBy(v => v.Key).ToList();
-                                });
-                            },
-                            // VIKTIGT: async här för debug-steget
-                            waitForStep: async (pc) => {
-                                if (_isPaused)
+                await AmosRunner.ExecuteAsync(
+                    programText: program,
+                    appendLineAsync: AppendConsoleLineAsync,
+                    // VIKTIGT: async här också för input
+                    getConsoleInputAsync: async () => {
+                        if (_screenWindow == null) return "";
+                        return await Dispatcher.UIThread.InvokeAsync(() => _screenWindow.RequestInputAsync());
+                    },
+                    clearAsync: ClearConsoleAsync,
+                    graphics: _gfx,
+                    onGraphicsChanged: () => {
+                        Dispatcher.UIThread.InvokeAsync(() => {
+                            if (_screenWindow != null) {
+                                var control = _screenWindow.FindControl<AmosGpuView>("ScreenControl");
+                                if (control != null)
                                 {
-                                    Dispatcher.UIThread.Post(() => { 
-                                        StatusText.Text = "Status: PAUSED";
-                                        CurrentLineText.Text = $"Line: {pc + 1}";
-                                        if (Editor.Text != null)
-                                        {
-                                            var textLines = Editor.Text.Replace("\r\n", "\n").Split('\n');
-                                            int charIndex = 0;
-                                            for (int i = 0; i < pc && i < textLines.Length; i++) charIndex += textLines[i].Length + 1;
+                                    control.InvalidateMeasure();
+                                    control.InvalidateVisual();
+                                }
                                     
-                                            int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
-                                            Editor.SelectionStart = charIndex;
-                                            Editor.SelectionLength = lineLength;
-                                            Editor.CaretOffset = charIndex;
-                                            Editor.Focus();
-                                        }
-                                    });
-                                    _stepSignal = new TaskCompletionSource<bool>();
-                                    await _stepSignal.Task;
+                                var now = DateTime.Now;
+                                if (now - lastCpuUpdateTime > cpuUpdateInterval)
+                                {
+                                    var cpu = _gfx.LastCpuUsagePercent;
+                                    if (_screenWindow != null)
+                                        _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
+                                    //StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%"; // UI-thread access error risk fixad i ExecuteAsync
+                                    lastCpuUpdateTime = now;
                                 }
                             }
-                        ); // Slut på ExecuteAsync
-                }, token); // Slut på Task.Run
+                        }, DispatcherPriority.Render);
+                    },
+ 
+                    getInkey: () => _pressedKeys.FirstOrDefault() ?? "",
+                    isKeyDown: (k) => _pressedKeys.Contains(k),
+                    audioEngine: _audioEngine,
+                    token: token,
+                    onVariablesChanged: (vars) => {
+                        Dispatcher.UIThread.Post(() => {
+                            VariableListBox.ItemsSource = vars.OrderBy(v => v.Key).ToList();
+                        });
+                    },
+                    // VIKTIGT: async här för debug-steget
+                    waitForStep: async (pc) => {
+                        if (_isPaused)
+                        {
+                            Dispatcher.UIThread.Post(() => { 
+                                StatusText.Text = "Status: PAUSED";
+                                CurrentLineText.Text = $"Line: {pc + 1}";
+                                if (Editor.Text != null)
+                                {
+                                    var textLines = Editor.Text.Replace("\r\n", "\n").Split('\n');
+                                    int charIndex = 0;
+                                    for (int i = 0; i < pc && i < textLines.Length; i++) charIndex += textLines[i].Length + 1;
+                                    
+                                    int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
+                                    Editor.SelectionStart = charIndex;
+                                    Editor.SelectionLength = lineLength;
+                                    Editor.CaretOffset = charIndex;
+                                    Editor.Focus();
+                                }
+                            });
+                            _stepSignal = new TaskCompletionSource<bool>();
+                            await _stepSignal.Task;
+                        }
+                    }
+                ); // Slut på ExecuteAsync
+            }, token); // Slut på Task.Run
 
-                await AppendConsoleLineAsync("OK");
-            }
-            catch (OperationCanceledException) { await AppendConsoleLineAsync("STOPPED"); }
-            catch (Exception ex) { await AppendConsoleLineAsync($"ERROR: {ex.Message}"); }
-            finally 
-            { 
-                Dispatcher.UIThread.Post(() => {
-                    StopButton.IsEnabled = false; 
-                    RunButton.IsEnabled = true; 
-                    PauseButton.IsEnabled = false; 
-                    StepButton.IsEnabled = false;
-                    StatusText.Text = "Status: Idle";
-                });
-            }
+            await AppendConsoleLineAsync("OK");
         }
+        catch (OperationCanceledException) { await AppendConsoleLineAsync("STOPPED"); }
+        catch (Exception ex) { await AppendConsoleLineAsync($"ERROR: {ex.Message}"); }
+        finally 
+        { 
+            Dispatcher.UIThread.Post(() => {
+                StopButton.IsEnabled = false; 
+                RunButton.IsEnabled = true; 
+                PauseButton.IsEnabled = false; 
+                StepButton.IsEnabled = false;
+                StatusText.Text = "Status: Idle";
+            });
+        }
+    }
 
     private async void RunButton_OnClick(object? sender, RoutedEventArgs e)
     {
@@ -949,12 +949,12 @@ public partial class MainWindow : Window
         IStorageFile? file = _currentProjectFile;
         //if ()
         //{
-            file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
-            {
-                Title = "Save AMOS Project",
-                SuggestedFileName = "project.amosproj",
-                FileTypeChoices = [new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }]
-            });
+        file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save AMOS Project",
+            SuggestedFileName = "project.amosproj",
+            FileTypeChoices = [new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }]
+        });
         //}
         if (file is null) return;
 

@@ -184,67 +184,6 @@ public static class AmosRunner
     private static IntPtr _currentXmpContext = IntPtr.Zero;
 
     private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
-
-    private sealed class AmosArray
-    {
-        public double[] Data { get; }
-        public AmosArray(int size) { Data = new double[size + 1]; } // +1 för att AMOS ofta tillåter index upp till storleken
-        public override string ToString()
-        {
-            var content = string.Join(", ", Data.Take(5).Select(d => d.ToString("G5")));
-            if (Data.Length > 5) content += "...";
-            return $"Array({Data.Length - 1}) [{content}]";
-        }
-    }
-    
-    private interface IAmosArray
-    {
-        int Length { get; }
-        object Get(int index);
-        void Set(int index, object value);
-    }
-
-    private sealed class AmosNumericArray : IAmosArray
-    {
-        public double[] Data { get; }
-        public AmosNumericArray(int size) { Data = new double[size + 1]; }
-        public int Length => Data.Length;
-
-        public object Get(int index) => Data[index];
-
-        public void Set(int index, object value)
-        {
-            Data[index] = Convert.ToDouble(value, CultureInfo.InvariantCulture);
-        }
-
-        public override string ToString()
-        {
-            var content = string.Join(", ", Data.Take(5).Select(d => d.ToString("G5", CultureInfo.InvariantCulture)));
-            if (Data.Length > 5) content += "...";
-            return $"Array({Data.Length - 1}) [{content}]";
-        }
-    }
-
-    private sealed class AmosStringArray : IAmosArray
-    {
-        public string[] Data { get; }
-        public AmosStringArray(int size) { Data = new string[size + 1]; }
-        public int Length => Data.Length;
-
-        public object Get(int index) => Data[index] ?? "";
-
-        public void Set(int index, object value)
-        {
-            Data[index] = ValueToString(value);
-        }
-
-        public override string ToString()
-        {
-            var content = string.Join(", ", Data.Take(5).Select(s => s ?? ""));
-            if (Data.Length > 5) content += "...";
-            return $"Array$({Data.Length - 1}) [{content}]";
-        }
-    }
     
     private sealed class FileChannel
     {
@@ -271,7 +210,41 @@ public static class AmosRunner
         Append   // Lägg till i slutet
     }
 
+    static List<string> SplitTopLevelCsv(string s)
+    {
+        var res = new List<string>();
+        if (string.IsNullOrWhiteSpace(s)) return res;
 
+        bool inQuotes = false;
+        int parenDepth = 0;
+        int start = 0;
+
+        for (int i = 0; i < s.Length; i++)
+        {
+            char ch = s[i];
+
+            if (ch == '"')
+            {
+                inQuotes = !inQuotes;
+                continue;
+            }
+
+            if (!inQuotes)
+            {
+                if (ch == '(') { parenDepth++; continue; }
+                if (ch == ')') { if (parenDepth > 0) parenDepth--; continue; }
+
+                if (parenDepth == 0 && ch == ',')
+                {
+                    res.Add(s[start..i].Trim());
+                    start = i + 1;
+                }
+            }
+        }
+
+        res.Add(s[start..].Trim());
+        return res;
+    }
     
     public static async Task ExecuteAsync(
         string programText, 
@@ -354,7 +327,7 @@ public static class AmosRunner
                 selectRuntimeStack.Pop();
         }       
         
-         // --- DATA/READ/RESTORE (AMOS-like) ------------------------------------
+        // --- DATA/READ/RESTORE (AMOS-like) ------------------------------------
         // DATA definieras efter en label:
         //   Room:
         //   DATA "Hall",2,0
@@ -363,42 +336,7 @@ public static class AmosRunner
         // RESTORE Room  -> ställ läspekare till början av Room
         // READ A$, B    -> läs nästa värden från aktuell label
         var dataAreas = new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
-
-        static List<string> SplitTopLevelCsv(string s)
-        {
-            var res = new List<string>();
-            if (string.IsNullOrWhiteSpace(s)) return res;
-
-            bool inQuotes = false;
-            int parenDepth = 0;
-            int start = 0;
-
-            for (int i = 0; i < s.Length; i++)
-            {
-                char ch = s[i];
-
-                if (ch == '"')
-                {
-                    inQuotes = !inQuotes;
-                    continue;
-                }
-
-                if (!inQuotes)
-                {
-                    if (ch == '(') { parenDepth++; continue; }
-                    if (ch == ')') { if (parenDepth > 0) parenDepth--; continue; }
-
-                    if (parenDepth == 0 && ch == ',')
-                    {
-                        res.Add(s[start..i].Trim());
-                        start = i + 1;
-                    }
-                }
-            }
-
-            res.Add(s[start..].Trim());
-            return res;
-        }
+        
 
 // ... existing code ...
         static List<object> ParseDataValues(string dataArg)
@@ -455,23 +393,25 @@ public static class AmosRunner
             {
                 int openParen = leftSide.IndexOf('(');
                 int closeParen = leftSide.LastIndexOf(')');
+    
                 if (openParen != -1 && closeParen != -1)
                 {
                     var arrayName = leftSide[..openParen].Trim();
-                    var idxStr = leftSide[(openParen + 1)..closeParen];
+                    var indicesStr = leftSide[(openParen + 1)..closeParen];
 
                     if (vars.TryGetValue(arrayName, out var aVal) && aVal is IAmosArray array)
                     {
-                        var rawIdx = EvalValue(idxStr, vars, ln, getInkey, isKeyDown, graphics);
-                        int aIdx = (int)Math.Round(Convert.ToDouble(rawIdx, CultureInfo.InvariantCulture));
-
-                        if (aIdx >= 0 && aIdx < array.Length)
+                        var indexParts = SplitTopLevelCsv(indicesStr);
+                        var indices = new int[indexParts.Count];
+            
+                        for (int i = 0; i < indexParts.Count; i++)
                         {
-                            array.Set(aIdx, value);
-                            return;
+                            var rawIdx = EvalValue(indexParts[i].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                            indices[i] = (int)Math.Round(Convert.ToDouble(rawIdx, CultureInfo.InvariantCulture));
                         }
 
-                        throw new Exception($"Array index out of range in READ at line {ln}: {leftSide}");
+                        array.Set(value, indices);
+                        return;
                     }
 
                     throw new Exception($"Unknown array in READ at line {ln}: {arrayName}");
@@ -533,157 +473,157 @@ public static class AmosRunner
         // ---------------------------------------------------------------------       
         
         
-            // Pre-scan: Labels, WHILE/WEND OCH IF/ELSE/ENDIF logik
-            for (int i = 0; i < lines.Length; i++) {
-                var rawLine = lines[i].Trim();
-                if (string.IsNullOrWhiteSpace(rawLine)) continue;
+        // Pre-scan: Labels, WHILE/WEND OCH IF/ELSE/ENDIF logik
+        for (int i = 0; i < lines.Length; i++) {
+            var rawLine = lines[i].Trim();
+            if (string.IsNullOrWhiteSpace(rawLine)) continue;
                 
-                // Labels
-                var firstWord = rawLine.Split(' ')[0];
-                if (int.TryParse(firstWord, out _)) labels[firstWord] = i;
-                if (rawLine.EndsWith(':')) labels[rawLine.TrimEnd(':').Trim()] = i;
+            // Labels
+            var firstWord = rawLine.Split(' ')[0];
+            if (int.TryParse(firstWord, out _)) labels[firstWord] = i;
+            if (rawLine.EndsWith(':')) labels[rawLine.TrimEnd(':').Trim()] = i;
             
 
-                var scanLine = StripLeadingLineNumber(StripComments(rawLine)).Trim();
-                var upperScan = scanLine.ToUpperInvariant();
+            var scanLine = StripLeadingLineNumber(StripComments(rawLine)).Trim();
+            var upperScan = scanLine.ToUpperInvariant();
 
-                // FUNCTION scan
-                if (upperScan.StartsWith("FUNCTION "))
+            // FUNCTION scan
+            if (upperScan.StartsWith("FUNCTION "))
+            {
+                functionScanStack.Push(i);
+    
+                var funcDecl = scanLine.Substring(9).Trim();
+                var parenIdx = funcDecl.IndexOf('(');
+    
+                string funcName;
+                var parameters = new List<string>();
+    
+                if (parenIdx > 0)
                 {
-                    functionScanStack.Push(i);
-    
-                    var funcDecl = scanLine.Substring(9).Trim();
-                    var parenIdx = funcDecl.IndexOf('(');
-    
-                    string funcName;
-                    var parameters = new List<string>();
-    
-                    if (parenIdx > 0)
+                    funcName = funcDecl[..parenIdx].Trim();
+                    var closeParenIdx = funcDecl.IndexOf(')');
+                    if (closeParenIdx > parenIdx)
                     {
-                        funcName = funcDecl[..parenIdx].Trim();
-                        var closeParenIdx = funcDecl.IndexOf(')');
-                        if (closeParenIdx > parenIdx)
+                        var paramStr = funcDecl[(parenIdx + 1)..closeParenIdx].Trim();
+                        if (!string.IsNullOrWhiteSpace(paramStr))
                         {
-                            var paramStr = funcDecl[(parenIdx + 1)..closeParenIdx].Trim();
-                            if (!string.IsNullOrWhiteSpace(paramStr))
-                            {
-                                parameters.AddRange(
-                                    paramStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                                );
-                            }
+                            parameters.AddRange(
+                                paramStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                            );
                         }
                     }
-                    else
-                    {
-                        funcName = funcDecl.Trim();
-                    }
+                }
+                else
+                {
+                    funcName = funcDecl.Trim();
+                }
     
-                    functions[funcName] = new FunctionDefinition
-                    {
-                        Name = funcName,
-                        Parameters = parameters,
-                        StartPc = i + 1,
-                        EndPc = -1
-                    };
-                }
-                else if (upperScan == "END FUNCTION" || upperScan == "ENDFUNCTION")
+                functions[funcName] = new FunctionDefinition
                 {
-                    if (functionScanStack.Count == 0)
-                        throw new Exception($"END FUNCTION without FUNCTION at line {i + 1}");
+                    Name = funcName,
+                    Parameters = parameters,
+                    StartPc = i + 1,
+                    EndPc = -1
+                };
+            }
+            else if (upperScan == "END FUNCTION" || upperScan == "ENDFUNCTION")
+            {
+                if (functionScanStack.Count == 0)
+                    throw new Exception($"END FUNCTION without FUNCTION at line {i + 1}");
     
-                    var funcPc = functionScanStack.Pop();
-                    var funcDef = functions.Values.FirstOrDefault(f => f.StartPc == funcPc + 1);
-                    if (funcDef != null)
-                    {
-                        funcDef.EndPc = i;
-                    }
-                }
-                
-                // WHILE/WEND scan
-                if (upperScan.StartsWith("WHILE "))
+                var funcPc = functionScanStack.Pop();
+                var funcDef = functions.Values.FirstOrDefault(f => f.StartPc == funcPc + 1);
+                if (funcDef != null)
                 {
-                    whileScanStack.Push(i);
-                }
-                else if (upperScan == "WEND")
-                {
-                    if (whileScanStack.Count == 0)
-                        throw new Exception($"WEND without WHILE at line {i + 1}");
-
-                    var whilePc = whileScanStack.Pop();
-                    whileMap[whilePc] = i;
-                    wendMap[i] = whilePc;
-                }
-            
-                // SELECT/CASE
-                if (upperScan.StartsWith("SELECT "))
-                {
-                    selectScanStack.Push(i);
-                    selectMap[i] = new SelectInfo { SelectPc = i, EndSelectPc = -1 };
-                }
-                else if (upperScan.StartsWith("CASE "))
-                {
-                    if (selectScanStack.Count == 0)
-                        throw new Exception($"CASE without SELECT at line {i + 1}");
-
-                    var selPc = selectScanStack.Peek();
-                    var expr = scanLine[4..].Trim(); // efter "CASE"
-                    selectMap[selPc].Cases.Add((expr, i));
-                    selectOwnerMarker[i] = selPc;
-                }
-                else if (upperScan == "DEFAULT")
-                {
-                    if (selectScanStack.Count == 0)
-                        throw new Exception($"DEFAULT without SELECT at line {i + 1}");
-
-                    var selPc = selectScanStack.Peek();
-                    selectMap[selPc].DefaultPc = i;
-                    selectOwnerMarker[i] = selPc;
-                }
-                else if (IsEndSelectLine(upperScan))
-                {
-                    if (selectScanStack.Count == 0)
-                        throw new Exception($"ENDSELECT without SELECT at line {i + 1}");
-
-                    var selPc = selectScanStack.Pop();
-                    selectMap[selPc].EndSelectPc = i;
-                    selectOwnerMarker[i] = selPc;
-                }
-                
-                // IF/ELSE/ENDIF Mapping
-                if (upperScan.StartsWith("IF "))
-                {
-                    int thenIdx = upperScan.IndexOf("THEN");
-                    if (thenIdx >= 0)
-                    {
-                        var afterThen = scanLine[(thenIdx + 4)..].Trim();
-                        if (!string.IsNullOrEmpty(afterThen)) continue; // Inline-IF, ignorera i stacken
-                    }
-                    ifStack.Push(i);
-                }
-                else if (upperScan == "ELSE")
-                {
-                    if (ifStack.Count == 0) throw new Exception($"ELSE without IF at line {i + 1}");
-                    var ifPc = ifStack.Pop();
-                    ifJumps[ifPc] = i + 1; 
-                    ifStack.Push(i); 
-                }
-                else if (upperScan == "ENDIF")
-                {
-                    if (ifStack.Count == 0) throw new Exception($"ENDIF without IF at line {i + 1}");
-                    var sourcePc = ifStack.Pop();
-                    if (StripLeadingLineNumber(StripComments(lines[sourcePc])).Trim().ToUpperInvariant() == "ELSE")
-                        elseJumps[sourcePc] = i + 1;
-                    else
-                        ifJumps[sourcePc] = i + 1;
+                    funcDef.EndPc = i;
                 }
             }
+                
+            // WHILE/WEND scan
+            if (upperScan.StartsWith("WHILE "))
+            {
+                whileScanStack.Push(i);
+            }
+            else if (upperScan == "WEND")
+            {
+                if (whileScanStack.Count == 0)
+                    throw new Exception($"WEND without WHILE at line {i + 1}");
 
-            if (ifStack.Count > 0)
-                throw new Exception("IF without ENDIF detected at end of program");
+                var whilePc = whileScanStack.Pop();
+                whileMap[whilePc] = i;
+                wendMap[i] = whilePc;
+            }
+            
+            // SELECT/CASE
+            if (upperScan.StartsWith("SELECT "))
+            {
+                selectScanStack.Push(i);
+                selectMap[i] = new SelectInfo { SelectPc = i, EndSelectPc = -1 };
+            }
+            else if (upperScan.StartsWith("CASE "))
+            {
+                if (selectScanStack.Count == 0)
+                    throw new Exception($"CASE without SELECT at line {i + 1}");
+
+                var selPc = selectScanStack.Peek();
+                var expr = scanLine[4..].Trim(); // efter "CASE"
+                selectMap[selPc].Cases.Add((expr, i));
+                selectOwnerMarker[i] = selPc;
+            }
+            else if (upperScan == "DEFAULT")
+            {
+                if (selectScanStack.Count == 0)
+                    throw new Exception($"DEFAULT without SELECT at line {i + 1}");
+
+                var selPc = selectScanStack.Peek();
+                selectMap[selPc].DefaultPc = i;
+                selectOwnerMarker[i] = selPc;
+            }
+            else if (IsEndSelectLine(upperScan))
+            {
+                if (selectScanStack.Count == 0)
+                    throw new Exception($"ENDSELECT without SELECT at line {i + 1}");
+
+                var selPc = selectScanStack.Pop();
+                selectMap[selPc].EndSelectPc = i;
+                selectOwnerMarker[i] = selPc;
+            }
+                
+            // IF/ELSE/ENDIF Mapping
+            if (upperScan.StartsWith("IF "))
+            {
+                int thenIdx = upperScan.IndexOf("THEN");
+                if (thenIdx >= 0)
+                {
+                    var afterThen = scanLine[(thenIdx + 4)..].Trim();
+                    if (!string.IsNullOrEmpty(afterThen)) continue; // Inline-IF, ignorera i stacken
+                }
+                ifStack.Push(i);
+            }
+            else if (upperScan == "ELSE")
+            {
+                if (ifStack.Count == 0) throw new Exception($"ELSE without IF at line {i + 1}");
+                var ifPc = ifStack.Pop();
+                ifJumps[ifPc] = i + 1; 
+                ifStack.Push(i); 
+            }
+            else if (upperScan == "ENDIF")
+            {
+                if (ifStack.Count == 0) throw new Exception($"ENDIF without IF at line {i + 1}");
+                var sourcePc = ifStack.Pop();
+                if (StripLeadingLineNumber(StripComments(lines[sourcePc])).Trim().ToUpperInvariant() == "ELSE")
+                    elseJumps[sourcePc] = i + 1;
+                else
+                    ifJumps[sourcePc] = i + 1;
+            }
+        }
+
+        if (ifStack.Count > 0)
+            throw new Exception("IF without ENDIF detected at end of program");
         
-            // Registrera functions som tillgängliga för ParseFactor
-            vars["__functions__"] = functions;
-            vars["__callFunction__"] = (Func<string, List<object>, int, object>)((funcName, args, line) => CallFunction(funcName, args, line));
+        // Registrera functions som tillgängliga för ParseFactor
+        vars["__functions__"] = functions;
+        vars["__callFunction__"] = (Func<string, List<object>, int, object>)((funcName, args, line) => CallFunction(funcName, args, line));
             
         // Helper för synkront funktionsanrop
         object CallFunction(string funcName, List<object> argValues, int callerLine)
@@ -695,80 +635,80 @@ public static class AmosRunner
                 throw new Exception($"Function {funcName} expects {funcDef.Parameters.Count} parameters, got {argValues.Count} at line {callerLine}");  
     
             // Spara gamla värden
-    var savedVars = new Dictionary<string, object>();
-    foreach (var param in funcDef.Parameters)
-    {
-        if (vars.ContainsKey(param))
-            savedVars[param] = vars[param];
-    }
-    
-    // Sätt parametrar
-    for (int i = 0; i < funcDef.Parameters.Count; i++)
-    {
-        setVar(funcDef.Parameters[i], argValues[i]);
-    }
-    
-    // Kör funktionen rad för rad
-    int funcPc = funcDef.StartPc;
-    object? returnValue = 0.0;
-    
-    while (funcPc <= funcDef.EndPc && funcPc < lines.Length)
-    {
-        var funcLine = StripComments((lines[funcPc] ?? "").Trim());
-        if (!string.IsNullOrWhiteSpace(funcLine) && !funcLine.EndsWith(':'))
-        {
-            funcLine = StripLeadingLineNumber(funcLine);
-            var funcCommands = SplitMultipleCommands(funcLine);
-            
-            foreach (var funcCmd in funcCommands)
+            var savedVars = new Dictionary<string, object>();
+            foreach (var param in funcDef.Parameters)
             {
-                var (fcmd, farg) = SplitCommand(funcCmd.Trim());
-                
-                if (fcmd == "RETURN")
-                {
-                    if (!string.IsNullOrWhiteSpace(farg))
-                        returnValue = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
-                    goto cleanup;
-                }
-                else if (fcmd == "PRINT" || fcmd == "PRINTG")
-                {
-                    // Tillåt PRINT i funktioner
-                    if (fcmd == "PRINT")
-                    {
-                        var valToPrint = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
-                        EmitPrintAsync(appendLineAsync, ValueToString(valToPrint)).Wait();
-                    }
-                    else
-                    {
-                        var valToPrint = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
-                        graphics.ConsolePrint(ValueToString(valToPrint));
-                        onGraphicsChanged();
-                    }
-                }
-                else if (funcCmd.Contains('='))
-                {
-                    var (leftSide, varValue) = SplitAssignment(funcCmd);
-                    setVar(leftSide, EvalValue(varValue, vars, funcPc + 1, getInkey, isKeyDown, graphics));
-                }
+                if (vars.ContainsKey(param))
+                    savedVars[param] = vars[param];
             }
+    
+            // Sätt parametrar
+            for (int i = 0; i < funcDef.Parameters.Count; i++)
+            {
+                setVar(funcDef.Parameters[i], argValues[i]);
+            }
+    
+            // Kör funktionen rad för rad
+            int funcPc = funcDef.StartPc;
+            object? returnValue = 0.0;
+    
+            while (funcPc <= funcDef.EndPc && funcPc < lines.Length)
+            {
+                var funcLine = StripComments((lines[funcPc] ?? "").Trim());
+                if (!string.IsNullOrWhiteSpace(funcLine) && !funcLine.EndsWith(':'))
+                {
+                    funcLine = StripLeadingLineNumber(funcLine);
+                    var funcCommands = SplitMultipleCommands(funcLine);
+            
+                    foreach (var funcCmd in funcCommands)
+                    {
+                        var (fcmd, farg) = SplitCommand(funcCmd.Trim());
+                
+                        if (fcmd == "RETURN")
+                        {
+                            if (!string.IsNullOrWhiteSpace(farg))
+                                returnValue = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
+                            goto cleanup;
+                        }
+                        else if (fcmd == "PRINT" || fcmd == "PRINTG")
+                        {
+                            // Tillåt PRINT i funktioner
+                            if (fcmd == "PRINT")
+                            {
+                                var valToPrint = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
+                                EmitPrintAsync(appendLineAsync, ValueToString(valToPrint)).Wait();
+                            }
+                            else
+                            {
+                                var valToPrint = EvalValue(farg, vars, funcPc + 1, getInkey, isKeyDown, graphics);
+                                graphics.ConsolePrint(ValueToString(valToPrint));
+                                onGraphicsChanged();
+                            }
+                        }
+                        else if (funcCmd.Contains('='))
+                        {
+                            var (leftSide, varValue) = SplitAssignment(funcCmd);
+                            setVar(leftSide, EvalValue(varValue, vars, funcPc + 1, getInkey, isKeyDown, graphics));
+                        }
+                    }
+                }
+                funcPc++;
+            }
+    
+            cleanup:
+            // Återställ variabler
+            foreach (var kvp in savedVars)
+                vars[kvp.Key] = kvp.Value;
+    
+            // Ta bort parametrar som inte fanns innan
+            foreach (var param in funcDef.Parameters)
+            {
+                if (!savedVars.ContainsKey(param))
+                    vars.Remove(param);
+            }
+    
+            return returnValue ?? 0.0;
         }
-        funcPc++;
-    }
-    
-cleanup:
-    // Återställ variabler
-    foreach (var kvp in savedVars)
-        vars[kvp.Key] = kvp.Value;
-    
-    // Ta bort parametrar som inte fanns innan
-    foreach (var param in funcDef.Parameters)
-    {
-        if (!savedVars.ContainsKey(param))
-            vars.Remove(param);
-    }
-    
-    return returnValue ?? 0.0;
-}
         
             
         int pc = 0;
@@ -786,180 +726,180 @@ cleanup:
             foreach (var fullCmd in commands) {
                 try 
                 {
-                var trimmedCmd = fullCmd.Trim();
-                if (string.IsNullOrEmpty(trimmedCmd)) continue;
-                var (cmd, arg) = SplitCommand(trimmedCmd);
+                    var trimmedCmd = fullCmd.Trim();
+                    if (string.IsNullOrEmpty(trimmedCmd)) continue;
+                    var (cmd, arg) = SplitCommand(trimmedCmd);
 
-                switch (cmd) {
-                    case "RETURN":
-                        if (functionCallStack.Count > 0)
-                        {
-                            var frame = functionCallStack.Pop();
-                            foreach (var kvp in frame.SavedVariables)
-                                vars[kvp.Key] = kvp.Value;
-                            pc = frame.ReturnPc;
-                            jumpHappened = true;
-                        }
-                        else if (gosubStack.Count > 0)
-                        {
-                            pc = gosubStack.Pop();
-                            jumpHappened = true;
-                        }
-                        else
-                        {
-                            throw new Exception($"RETURN without GOSUB or FUNCTION at line {ln}");
-                        }
-                        break;
+                    switch (cmd) {
+                        case "RETURN":
+                            if (functionCallStack.Count > 0)
+                            {
+                                var frame = functionCallStack.Pop();
+                                foreach (var kvp in frame.SavedVariables)
+                                    vars[kvp.Key] = kvp.Value;
+                                pc = frame.ReturnPc;
+                                jumpHappened = true;
+                            }
+                            else if (gosubStack.Count > 0)
+                            {
+                                pc = gosubStack.Pop();
+                                jumpHappened = true;
+                            }
+                            else
+                            {
+                                throw new Exception($"RETURN without GOSUB or FUNCTION at line {ln}");
+                            }
+                            break;
 
-                    case "FUNCTION":
-                        // Hoppa över funktionsdefinitioner
-                    {
-                        var funcDef = functions.Values.FirstOrDefault(f => f.StartPc == pc + 1);
-                        if (funcDef != null && funcDef.EndPc > 0)
+                        case "FUNCTION":
+                            // Hoppa över funktionsdefinitioner
                         {
-                            pc = funcDef.EndPc + 1;
-                            jumpHappened = true;
-                        }
-                    }
-                        break;
-
-                    case "ENDFUNCTION":
-                        // Implicit return
-                        if (functionCallStack.Count > 0)
-                        {
-                            var frame = functionCallStack.Pop();
-                            foreach (var kvp in frame.SavedVariables)
-                                vars[kvp.Key] = kvp.Value;
-                            pc = frame.ReturnPc;
-                            jumpHappened = true;
-                        }
-                        break;
-                    
-                    case "ON":
-                        var onArg = arg.ToUpperInvariant();
-                        if (onArg.StartsWith("ERROR GOTO "))
-                        {
-                            var labelName = arg[11..].Trim(); // "ERROR GOTO ".Length == 11
-                            // ÄNDRAT: targetPc -> errorTargetPc för att undvika namnkonflikt med GOTO
-                            if (labels.TryGetValue(labelName, out var errorTargetPc)) {
-                                errorMode = 2; // Goto
-                                errorGotoPc = errorTargetPc;
-                            } else {
-                                throw new Exception($"Label '{labelName}' not found for ON ERROR GOTO");
+                            var funcDef = functions.Values.FirstOrDefault(f => f.StartPc == pc + 1);
+                            if (funcDef != null && funcDef.EndPc > 0)
+                            {
+                                pc = funcDef.EndPc + 1;
+                                jumpHappened = true;
                             }
                         }
-                        else if (onArg == "ERROR RESUME NEXT")
-                        {
-                            errorMode = 1; // Resume Next
-                        }
-                        else if (onArg == "ERROR BREAK" || onArg == "ERROR END")
-                        {
-                            errorMode = 0; // Break/Crash
-                        }
-                        break;   
+                            break;
+
+                        case "ENDFUNCTION":
+                            // Implicit return
+                            if (functionCallStack.Count > 0)
+                            {
+                                var frame = functionCallStack.Pop();
+                                foreach (var kvp in frame.SavedVariables)
+                                    vars[kvp.Key] = kvp.Value;
+                                pc = frame.ReturnPc;
+                                jumpHappened = true;
+                            }
+                            break;
                     
-                    case "CLS": await appendLineAsync("@@CLS"); await clearAsync(); break;
+                        case "ON":
+                            var onArg = arg.ToUpperInvariant();
+                            if (onArg.StartsWith("ERROR GOTO "))
+                            {
+                                var labelName = arg[11..].Trim(); // "ERROR GOTO ".Length == 11
+                                // ÄNDRAT: targetPc -> errorTargetPc för att undvika namnkonflikt med GOTO
+                                if (labels.TryGetValue(labelName, out var errorTargetPc)) {
+                                    errorMode = 2; // Goto
+                                    errorGotoPc = errorTargetPc;
+                                } else {
+                                    throw new Exception($"Label '{labelName}' not found for ON ERROR GOTO");
+                                }
+                            }
+                            else if (onArg == "ERROR RESUME NEXT")
+                            {
+                                errorMode = 1; // Resume Next
+                            }
+                            else if (onArg == "ERROR BREAK" || onArg == "ERROR END")
+                            {
+                                errorMode = 0; // Break/Crash
+                            }
+                            break;   
                     
-                    case "CLSG2": 
-                        // Rensa både grafik och text-cursor
-                        await clearAsync(); // Om du vill rensa loggen/text-boxen också, annars ta bort
-                        graphics.Clear(graphics.PaperColor); // Använd paper color som bakgrund
-                        graphics.Locate(0, 0); 
-                        break;
+                        case "CLS": await appendLineAsync("@@CLS"); await clearAsync(); break;
                     
-                    case "CLSG": 
-                        var x = graphics.GetActiveScreenNumber();
-                        if (!string.IsNullOrWhiteSpace(arg))
+                        case "CLSG2": 
+                            // Rensa både grafik och text-cursor
+                            await clearAsync(); // Om du vill rensa loggen/text-boxen också, annars ta bort
+                            graphics.Clear(graphics.PaperColor); // Använd paper color som bakgrund
+                            graphics.Locate(0, 0); 
+                            break;
+                    
+                        case "CLSG": 
+                            var x = graphics.GetActiveScreenNumber();
+                            if (!string.IsNullOrWhiteSpace(arg))
+                            {
+                                // Om ett argument skickades med, välj det lagret först
+                                graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
+                            }
+                            graphics.Clear(Colors.Transparent); 
+                            graphics.SetDrawingScreen(x);
+                            graphics.Locate(0, 0); 
+                            onGraphicsChanged(); 
+                            break;
+                        case "PRINT":
                         {
-                            // Om ett argument skickades med, välj det lagret först
-                            graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
-                        }
-                        graphics.Clear(Colors.Transparent); 
-                        graphics.SetDrawingScreen(x);
-                        graphics.Locate(0, 0); 
-                        onGraphicsChanged(); 
-                        break;
-                    case "PRINT":
-                    {
-                        var printArg = arg.Trim();
+                            var printArg = arg.Trim();
                         
-                        // Kolla om det är PRINT #channel (fil-output)
-                        if (printArg.StartsWith("#"))
-                        {
-                            // PRINT #channel, data
-                            int commaIdx2 = printArg.IndexOf(',');
-                            if (commaIdx2 < 0)
-                                throw new Exception("PRINT #: Syntax är PRINT #channel, data");
-                            
-                            string channelExpr = printArg[1..commaIdx2].Trim(); // Ta bort # och läs kanalnummer
-                            int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
-                            
-                            if (!_openFiles.ContainsKey(channel))
-                                throw new Exception($"PRINT #: Kanal {channel} är inte öppen");
-                            
-                            var fileChannel = _openFiles[channel];
-                            
-                            if (fileChannel.Mode == FileMode.Input)
-                                throw new Exception($"PRINT #: Kanal {channel} är öppnad för läsning, inte skrivning");
-                            
-                            if (fileChannel.Writer == null)
-                                throw new Exception($"PRINT #: Kanal {channel} har ingen writer");
-                            
-                            // Läs data att skriva
-                            string dataExpr = printArg[(commaIdx2 + 1)..].Trim();
-                            
-                            // Kolla om det slutar med semikolon (ingen nyrad)
-                            bool addNewLine = true;
-                            if (dataExpr.EndsWith(";"))
+                            // Kolla om det är PRINT #channel (fil-output)
+                            if (printArg.StartsWith("#"))
                             {
-                                addNewLine = false;
-                                dataExpr = dataExpr[..^1].Trim();
-                            }
+                                // PRINT #channel, data
+                                int commaIdx2 = printArg.IndexOf(',');
+                                if (commaIdx2 < 0)
+                                    throw new Exception("PRINT #: Syntax är PRINT #channel, data");
                             
-                            if (!string.IsNullOrWhiteSpace(dataExpr))
-                            {
-                                var valToPrint = EvalValue(dataExpr, vars, ln, getInkey, isKeyDown, graphics);
-                                string output = ValueToString(valToPrint);
+                                string channelExpr = printArg[1..commaIdx2].Trim(); // Ta bort # och läs kanalnummer
+                                int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
+                            
+                                if (!_openFiles.ContainsKey(channel))
+                                    throw new Exception($"PRINT #: Kanal {channel} är inte öppen");
+                            
+                                var fileChannel = _openFiles[channel];
+                            
+                                if (fileChannel.Mode == FileMode.Input)
+                                    throw new Exception($"PRINT #: Kanal {channel} är öppnad för läsning, inte skrivning");
+                            
+                                if (fileChannel.Writer == null)
+                                    throw new Exception($"PRINT #: Kanal {channel} har ingen writer");
+                            
+                                // Läs data att skriva
+                                string dataExpr = printArg[(commaIdx2 + 1)..].Trim();
+                            
+                                // Kolla om det slutar med semikolon (ingen nyrad)
+                                bool addNewLine = true;
+                                if (dataExpr.EndsWith(";"))
+                                {
+                                    addNewLine = false;
+                                    dataExpr = dataExpr[..^1].Trim();
+                                }
+                            
+                                if (!string.IsNullOrWhiteSpace(dataExpr))
+                                {
+                                    var valToPrint = EvalValue(dataExpr, vars, ln, getInkey, isKeyDown, graphics);
+                                    string output = ValueToString(valToPrint);
                                 
-                                if (addNewLine)
-                                    fileChannel.Writer.WriteLine(output);
-                                else
-                                    fileChannel.Writer.Write(output);
+                                    if (addNewLine)
+                                        fileChannel.Writer.WriteLine(output);
+                                    else
+                                        fileChannel.Writer.Write(output);
                                 
-                                fileChannel.Writer.Flush(); // Säkerställ att data skrivs direkt
+                                    fileChannel.Writer.Flush(); // Säkerställ att data skrivs direkt
+                                }
+                                else if (addNewLine)
+                                {
+                                    // Tom PRINT #channel för nyrad
+                                    fileChannel.Writer.WriteLine();
+                                    fileChannel.Writer.Flush();
+                                }
                             }
-                            else if (addNewLine)
+                            // Vanlig PRINT till skärm
+                            else if (printArg.StartsWith("AT ", StringComparison.OrdinalIgnoreCase))
                             {
-                                // Tom PRINT #channel för nyrad
-                                fileChannel.Writer.WriteLine();
-                                fileChannel.Writer.Flush();
+                                var at = ParsePrintAtArguments(printArg);
+
+                                int row = EvalInt(at.RowExpr, vars, ln, getInkey, isKeyDown, graphics);
+                                int col = EvalInt(at.ColExpr, vars, ln, getInkey, isKeyDown, graphics);
+
+                                await appendLineAsync($"@@LOCATE {row} {col}");
+
+                                if (!string.IsNullOrWhiteSpace(at.RestExpr))
+                                {
+                                    var valToPrint = EvalValue(at.RestExpr, vars, ln, getInkey, isKeyDown, graphics);
+                                    await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
+                                }
                             }
-                        }
-                        // Vanlig PRINT till skärm
-                        else if (printArg.StartsWith("AT ", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var at = ParsePrintAtArguments(printArg);
-
-                            int row = EvalInt(at.RowExpr, vars, ln, getInkey, isKeyDown, graphics);
-                            int col = EvalInt(at.ColExpr, vars, ln, getInkey, isKeyDown, graphics);
-
-                            await appendLineAsync($"@@LOCATE {row} {col}");
-
-                            if (!string.IsNullOrWhiteSpace(at.RestExpr))
+                            else
                             {
-                                var valToPrint = EvalValue(at.RestExpr, vars, ln, getInkey, isKeyDown, graphics);
+                                var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
                                 await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
                             }
-                        }
-                        else
-                        {
-                            var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
-                            await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
-                        }
-                    } 
-                    break;
+                        } 
+                            break;
                     
-                    case "PRINTG":
+                        case "PRINTG":
                         {
                             var printArg = arg.Trim();
                             
@@ -996,108 +936,108 @@ cleanup:
                             // Trigga uppdatering av fönstret
                             onGraphicsChanged();
                         }
-                        break; 
-                    case "INPUT":
-                    {
-                        string inputArg = arg.Trim();
+                            break; 
+                        case "INPUT":
+                        {
+                            string inputArg = arg.Trim();
                         
-                        // Kolla om det är INPUT #channel (fil-input)
-                        if (inputArg.StartsWith("#"))
-                        {
-                            // INPUT #channel, variable
-                            int commaIdx = inputArg.IndexOf(',');
-                            if (commaIdx < 0)
-                                throw new Exception("INPUT #: Syntax är INPUT #channel, variabel");
-                            
-                            string channelExpr = inputArg[1..commaIdx].Trim();
-                            int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
-                            
-                            if (!_openFiles.ContainsKey(channel))
-                                throw new Exception($"INPUT #: Kanal {channel} är inte öppen");
-                            
-                            var fileChannel = _openFiles[channel];
-                            
-                            if (fileChannel.Mode != FileMode.Input)
-                                throw new Exception($"INPUT #: Kanal {channel} är inte öppnad för läsning");
-                            
-                            if (fileChannel.Reader == null)
-                                throw new Exception($"INPUT #: Kanal {channel} har ingen reader");
-                            
-                            string varName = inputArg[(commaIdx + 1)..].Trim();
-                            
-                            // Läs en rad från filen
-                            string? line2 = fileChannel.Reader.ReadLine();
-                            
-                            if (line2 == null)
+                            // Kolla om det är INPUT #channel (fil-input)
+                            if (inputArg.StartsWith("#"))
                             {
-                                // End of file - sätt tom sträng eller 0
-                                if (varName.EndsWith("$"))
-                                    setVar(varName, "");
-                                else
-                                    setVar(varName, 0);
-                            }
-                            else
-                            {
-                                // Försök konvertera till nummer om det är numerisk variabel
-                                if (varName.EndsWith("$"))
+                                // INPUT #channel, variable
+                                int commaIdx = inputArg.IndexOf(',');
+                                if (commaIdx < 0)
+                                    throw new Exception("INPUT #: Syntax är INPUT #channel, variabel");
+                            
+                                string channelExpr = inputArg[1..commaIdx].Trim();
+                                int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
+                            
+                                if (!_openFiles.ContainsKey(channel))
+                                    throw new Exception($"INPUT #: Kanal {channel} är inte öppen");
+                            
+                                var fileChannel = _openFiles[channel];
+                            
+                                if (fileChannel.Mode != FileMode.Input)
+                                    throw new Exception($"INPUT #: Kanal {channel} är inte öppnad för läsning");
+                            
+                                if (fileChannel.Reader == null)
+                                    throw new Exception($"INPUT #: Kanal {channel} har ingen reader");
+                            
+                                string varName = inputArg[(commaIdx + 1)..].Trim();
+                            
+                                // Läs en rad från filen
+                                string? line2 = fileChannel.Reader.ReadLine();
+                            
+                                if (line2 == null)
                                 {
-                                    setVar(varName, line2);
-                                }
-                                else
-                                {
-                                    // Numerisk variabel
-                                    if (double.TryParse(line2.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double numValue))
-                                        setVar(varName, numValue);
+                                    // End of file - sätt tom sträng eller 0
+                                    if (varName.EndsWith("$"))
+                                        setVar(varName, "");
                                     else
-                                        setVar(varName, 0); // Default till 0 om konvertering misslyckas
+                                        setVar(varName, 0);
                                 }
-                            }
-                        }
-                        // Vanlig INPUT från användare
-                        else
-                        {
-                            string promptInput = "";
-                            string varNameInput = "A$";
-
-                            // Hitta kommat som INTE är inuti citattecken
-                            int commaIdx = -1;
-                            bool inQuotes = false;
-                            for (int i = 0; i < inputArg.Length; i++) 
-                            {
-                                if (inputArg[i] == '\"') inQuotes = !inQuotes;
-                                if (!inQuotes && inputArg[i] == ',') 
+                                else
                                 {
-                                    commaIdx = i;
-                                    break;
+                                    // Försök konvertera till nummer om det är numerisk variabel
+                                    if (varName.EndsWith("$"))
+                                    {
+                                        setVar(varName, line2);
+                                    }
+                                    else
+                                    {
+                                        // Numerisk variabel
+                                        if (double.TryParse(line2.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double numValue))
+                                            setVar(varName, numValue);
+                                        else
+                                            setVar(varName, 0); // Default till 0 om konvertering misslyckas
+                                    }
                                 }
                             }
-
-                            if (commaIdx >= 0)
-                            {
-                                promptInput = Unquote(inputArg[..commaIdx].Trim());
-                                varNameInput = inputArg[(commaIdx + 1)..].Trim();
-                            }
+                            // Vanlig INPUT från användare
                             else
                             {
-                                varNameInput = inputArg;
+                                string promptInput = "";
+                                string varNameInput = "A$";
+
+                                // Hitta kommat som INTE är inuti citattecken
+                                int commaIdx = -1;
+                                bool inQuotes = false;
+                                for (int i = 0; i < inputArg.Length; i++) 
+                                {
+                                    if (inputArg[i] == '\"') inQuotes = !inQuotes;
+                                    if (!inQuotes && inputArg[i] == ',') 
+                                    {
+                                        commaIdx = i;
+                                        break;
+                                    }
+                                }
+
+                                if (commaIdx >= 0)
+                                {
+                                    promptInput = Unquote(inputArg[..commaIdx].Trim());
+                                    varNameInput = inputArg[(commaIdx + 1)..].Trim();
+                                }
+                                else
+                                {
+                                    varNameInput = inputArg;
+                                }
+
+                                // Skriv ut prompten
+                                if (!string.IsNullOrEmpty(promptInput))
+                                {
+                                    await appendLineAsync("@@PRINT " + promptInput);
+                                }
+
+                                // Vänta på användarens inmatning
+                                string userInput = await getConsoleInputAsync();
+
+                                // Spara resultatet
+                                setVar(varNameInput, userInput.Trim());
                             }
-
-                            // Skriv ut prompten
-                            if (!string.IsNullOrEmpty(promptInput))
-                            {
-                                await appendLineAsync("@@PRINT " + promptInput);
-                            }
-
-                            // Vänta på användarens inmatning
-                            string userInput = await getConsoleInputAsync();
-
-                            // Spara resultatet
-                            setVar(varNameInput, userInput.Trim());
                         }
-                    }
-                    break;
+                            break;
                     
-                    case "INPUTG":
+                        case "INPUTG":
                         {
                             string iArg = arg.Trim();
                             string pPrompt = "? ";
@@ -1220,20 +1160,20 @@ cleanup:
                             while (!string.IsNullOrEmpty(getInkey())) { await Task.Delay(10); }
                             setVar(vName, inputBuffer.ToString());
                         }
-                        break;
+                            break;
 
-                    case "PAPER":
-                    {
-                        Color c2;
-                        try { c2 = ParseColorFlexible(Unquote(arg)); }
-                        catch { c2 = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)); }
+                        case "PAPER":
+                        {
+                            Color c2;
+                            try { c2 = ParseColorFlexible(Unquote(arg)); }
+                            catch { c2 = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)); }
                         
-                        // Skicka till UI-tråden via console-pipeline (AppendConsoleLineAsync)
-                        await appendLineAsync("@@PAPER " + c2.ToString());
-                        break;
-                    }
+                            // Skicka till UI-tråden via console-pipeline (AppendConsoleLineAsync)
+                            await appendLineAsync("@@PAPER " + c2.ToString());
+                            break;
+                        }
                          
-                    case "PAPERG":
+                        case "PAPERG":
                         {
                             Color c;
                             // 1. Försök tolka som direkt färg/siffra först (t.ex. Red, #FF0000, 1)
@@ -1244,17 +1184,17 @@ cleanup:
                             graphics.PaperColor = c;
                             break;
                         }
-                    case "INK":
-                    {
-                        Color c;
-                        try { c = ParseColorFlexible(Unquote(arg)); }
-                        catch { c = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)); }
+                        case "INK":
+                        {
+                            Color c;
+                            try { c = ParseColorFlexible(Unquote(arg)); }
+                            catch { c = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics)); }
 
                         
-                        await appendLineAsync("@@INK " + c.ToString());
-                        break;
-                    }
-                    case "INKG":
+                            await appendLineAsync("@@INK " + c.ToString());
+                            break;
+                        }
+                        case "INKG":
                         {
                             Color c;
                             try { c = ParseColorFlexible(Unquote(arg)); }
@@ -1263,266 +1203,280 @@ cleanup:
                             graphics.Ink = c; 
                             break;
                         }
-                    case "LOCATE": 
-                        var lp2 = SplitCsvOrSpaces(arg); 
-                        await appendLineAsync($"@@LOCATE {EvalInt(lp2[0], vars, ln, getInkey, isKeyDown, graphics)} {EvalInt(lp2[1], vars, ln, getInkey, isKeyDown, graphics)}"); 
-                        break;
+                        case "LOCATE": 
+                            var lp2 = SplitCsvOrSpaces(arg); 
+                            await appendLineAsync($"@@LOCATE {EvalInt(lp2[0], vars, ln, getInkey, isKeyDown, graphics)} {EvalInt(lp2[1], vars, ln, getInkey, isKeyDown, graphics)}"); 
+                            break;
 
-                    case "LOCATEG": 
+                        case "LOCATEG": 
                             var lp = SplitCsvOrSpaces(arg); 
                             graphics.Locate(
                                 EvalInt(lp[0], vars, ln, getInkey, isKeyDown, graphics), 
                                 EvalInt(lp[1], vars, ln, getInkey, isKeyDown, graphics)
                             );
-                        break;
+                            break;
 
                   
-                    case "DATA":
-                        // DATA exekveras inte (endast deklaration)
-                        break;
-                    case "RESTORE":
-                    {
-                        var labelName = (arg ?? "").Trim();
-                        if (string.IsNullOrWhiteSpace(labelName))
+                        case "DATA":
+                            // DATA exekveras inte (endast deklaration)
+                            break;
+                        case "RESTORE":
                         {
-                            // Om ingen label anges: välj första data-area om den finns
-                            if (dataAreas.Count == 0)
-                                throw new Exception($"RESTORE without label but no DATA exists at line {ln}");
-
-                            currentReadLabel = dataAreas.Keys.First();
-                            currentReadIndex = 0;
-                        }
-                        else
-                        {
-                            if (!dataAreas.ContainsKey(labelName))
-                                throw new Exception($"Unknown DATA label '{labelName}' at line {ln}");
-
-                            currentReadLabel = labelName;
-                            currentReadIndex = 0;
-                        }
-                        break;
-                    }
-                    case "READ":
-                    {
-                        // READ A$, B, ARR(I)
-                        var targets = SplitTopLevelCsv(arg);
-                        if (targets.Count == 0)
-                            throw new Exception($"Syntax Error in READ at line {ln}: missing targets");
-
-                        foreach (var t in targets)
-                        {
-                            var val = NextDataValue(ln);
-
-                            // Om target är en strängvariabel (slutar med $), konvertera val till string
-                            var tt = (t ?? "").Trim();
-                            if (tt.EndsWith("$", StringComparison.Ordinal))
+                            var labelName = (arg ?? "").Trim();
+                            if (string.IsNullOrWhiteSpace(labelName))
                             {
-                                AssignValueToTarget(tt, ValueToString(val), ln);
+                                // Om ingen label anges: välj första data-area om den finns
+                                if (dataAreas.Count == 0)
+                                    throw new Exception($"RESTORE without label but no DATA exists at line {ln}");
+
+                                currentReadLabel = dataAreas.Keys.First();
+                                currentReadIndex = 0;
                             }
                             else
                             {
-                                // Numeriskt target: om data råkar vara string försöker vi tolka som tal
-                                if (val is string s && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
-                                    AssignValueToTarget(tt, d, ln);
-                                else
-                                    AssignValueToTarget(tt, val, ln);
+                                if (!dataAreas.ContainsKey(labelName))
+                                    throw new Exception($"Unknown DATA label '{labelName}' at line {ln}");
+
+                                currentReadLabel = labelName;
+                                currentReadIndex = 0;
                             }
+                            break;
                         }
-                        break;
-                    }
-                    case "SELECT":
-                    {
-                        if (!selectMap.TryGetValue(pc, out var sel))
-                            throw new Exception($"SELECT without ENDSELECT at line {ln}");
-
-                        var selectedValue = EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics);
-
-                        int? targetMarkerPc = null;
-
-                        foreach (var (caseExpr, casePc) in sel.Cases)
+                        case "READ":
                         {
-                            var caseValue = EvalValue(caseExpr, vars, ln, getInkey, isKeyDown, graphics);
-                            if (SelectValueEquals(selectedValue, caseValue))
+                            // READ A$, B, ARR(I)
+                            var targets = SplitTopLevelCsv(arg);
+                            if (targets.Count == 0)
+                                throw new Exception($"Syntax Error in READ at line {ln}: missing targets");
+
+                            foreach (var t in targets)
                             {
-                                targetMarkerPc = casePc;
-                                break;
+                                var val = NextDataValue(ln);
+
+                                // Om target är en strängvariabel (slutar med $), konvertera val till string
+                                var tt = (t ?? "").Trim();
+                                if (tt.EndsWith("$", StringComparison.Ordinal))
+                                {
+                                    AssignValueToTarget(tt, ValueToString(val), ln);
+                                }
+                                else
+                                {
+                                    // Numeriskt target: om data råkar vara string försöker vi tolka som tal
+                                    if (val is string s && double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
+                                        AssignValueToTarget(tt, d, ln);
+                                    else
+                                        AssignValueToTarget(tt, val, ln);
+                                }
                             }
+                            break;
+                        }
+                        case "SELECT":
+                        {
+                            if (!selectMap.TryGetValue(pc, out var sel))
+                                throw new Exception($"SELECT without ENDSELECT at line {ln}");
+
+                            var selectedValue = EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics);
+
+                            int? targetMarkerPc = null;
+
+                            foreach (var (caseExpr, casePc) in sel.Cases)
+                            {
+                                var caseValue = EvalValue(caseExpr, vars, ln, getInkey, isKeyDown, graphics);
+                                if (SelectValueEquals(selectedValue, caseValue))
+                                {
+                                    targetMarkerPc = casePc;
+                                    break;
+                                }
+                            }
+
+                            if (targetMarkerPc.HasValue)
+                            {
+                                // Hoppa in i matchande CASE-block (raden efter CASE)
+                                selectRuntimeStack.Push(new SelectRuntimeFrame { EndSelectPc = sel.EndSelectPc });
+                                pc = targetMarkerPc.Value + 1;
+                                jumpHappened = true;
+                            }
+                            else if (sel.DefaultPc.HasValue)
+                            {
+                                // Hoppa in i DEFAULT-block (raden efter DEFAULT)
+                                selectRuntimeStack.Push(new SelectRuntimeFrame { EndSelectPc = sel.EndSelectPc });
+                                pc = sel.DefaultPc.Value + 1;
+                                jumpHappened = true;
+                            }
+                            else
+                            {
+                                // Ingen match och ingen DEFAULT -> hoppa förbi hela SELECT
+                                pc = sel.EndSelectPc + 1;
+                                jumpHappened = true;
+                            }
+                            break;
                         }
 
-                        if (targetMarkerPc.HasValue)
+                        case "CASE":
+                        case "DEFAULT":
                         {
-                            // Hoppa in i matchande CASE-block (raden efter CASE)
-                            selectRuntimeStack.Push(new SelectRuntimeFrame { EndSelectPc = sel.EndSelectPc });
-                            pc = targetMarkerPc.Value + 1;
-                            jumpHappened = true;
+                            // Om vi når en CASE/DEFAULT under exekvering betyder det att vi är klara med valt block.
+                            if (selectOwnerMarker.TryGetValue(pc, out var selPc) && selectMap.TryGetValue(selPc, out var sel))
+                            {
+                                PopSelectUntilEndPc(sel.EndSelectPc);
+                                pc = sel.EndSelectPc + 1;
+                                jumpHappened = true;
+                            }
+                            break;
                         }
-                        else if (sel.DefaultPc.HasValue)
-                        {
-                            // Hoppa in i DEFAULT-block (raden efter DEFAULT)
-                            selectRuntimeStack.Push(new SelectRuntimeFrame { EndSelectPc = sel.EndSelectPc });
-                            pc = sel.DefaultPc.Value + 1;
-                            jumpHappened = true;
-                        }
-                        else
-                        {
-                            // Ingen match och ingen DEFAULT -> hoppa förbi hela SELECT
-                            pc = sel.EndSelectPc + 1;
-                            jumpHappened = true;
-                        }
-                        break;
-                    }
 
-                    case "CASE":
-                    case "DEFAULT":
-                    {
-                        // Om vi når en CASE/DEFAULT under exekvering betyder det att vi är klara med valt block.
-                        if (selectOwnerMarker.TryGetValue(pc, out var selPc) && selectMap.TryGetValue(selPc, out var sel))
+                        case "ENDSELECT":
                         {
-                            PopSelectUntilEndPc(sel.EndSelectPc);
-                            pc = sel.EndSelectPc + 1;
-                            jumpHappened = true;
-                        }
-                        break;
-                    }
-
-                    case "ENDSELECT":
-                    {
-                        // Markör: om vi kommer hit naturligt så poppar vi ett SELECT (om vi är i ett)
-                        if (selectRuntimeStack.Count > 0 && selectRuntimeStack.Peek().EndSelectPc == pc)
-                            selectRuntimeStack.Pop();
-                        break;
-                    }
-
-                    case "END":
-                    {
-                        // Viktigt: stöd "END SELECT" utan att avsluta programmet
-                        if (arg.Equals("SELECT", StringComparison.OrdinalIgnoreCase))
-                        {
+                            // Markör: om vi kommer hit naturligt så poppar vi ett SELECT (om vi är i ett)
                             if (selectRuntimeStack.Count > 0 && selectRuntimeStack.Peek().EndSelectPc == pc)
                                 selectRuntimeStack.Pop();
                             break;
                         }
 
-                        return;
-                    }
-                    case "REM": goto next_line;
-                    case "GOTO":
-                        if (labels.TryGetValue(arg, out var targetPc)) { pc = targetPc; jumpHappened = true; }
-                        else throw new Exception($"Label {arg} not found at line {ln}");
-                        break;
-                    case "GOSUB":
-                        gosubStack.Push(pc + 1);
-                        if (labels.TryGetValue(arg, out var subPc)) { pc = subPc; jumpHappened = true; }
-                        else throw new Exception($"Label {arg} not found at line {ln}");
-                        break;
-                    case "RETURN2":
-                        if (gosubStack.Count > 0) { pc = gosubStack.Pop(); jumpHappened = true; }
-                        else throw new Exception($"RETURN without GOSUB at line {ln}");
-                        break;
-                    case "LET": 
-                        var (n, vt) = SplitAssignment(arg); 
-                        setVar(n, EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics)); 
-                        break;
-                    case "DIM":
-                        // DIM A(10) eller DIM A$(10) eller DIM A(10)=[0,4,2,5,6,7,4,3,2,1]
-                        var eqIdx = arg.IndexOf('=');
-                        string dimDecl = eqIdx >= 0 ? arg[..eqIdx].Trim() : arg;
-                        string? initValues = eqIdx >= 0 ? arg[(eqIdx + 1)..].Trim() : null;
-    
-                        var dimParts = dimDecl.Split('(', ')');
-                        if (dimParts.Length >= 2)
+                        case "END":
                         {
-                            var arrName = dimParts[0].Trim();
-                            var size = EvalInt(dimParts[1], vars, ln, getInkey, isKeyDown, graphics);
+                            // Viktigt: stöd "END SELECT" utan att avsluta programmet
+                            if (arg.Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (selectRuntimeStack.Count > 0 && selectRuntimeStack.Peek().EndSelectPc == pc)
+                                    selectRuntimeStack.Pop();
+                                break;
+                            }
 
+                            return;
+                        }
+                        case "REM": goto next_line;
+                        case "GOTO":
+                            if (labels.TryGetValue(arg, out var targetPc)) { pc = targetPc; jumpHappened = true; }
+                            else throw new Exception($"Label {arg} not found at line {ln}");
+                            break;
+                        case "GOSUB":
+                            gosubStack.Push(pc + 1);
+                            if (labels.TryGetValue(arg, out var subPc)) { pc = subPc; jumpHappened = true; }
+                            else throw new Exception($"Label {arg} not found at line {ln}");
+                            break;
+                        case "RETURN2":
+                            if (gosubStack.Count > 0) { pc = gosubStack.Pop(); jumpHappened = true; }
+                            else throw new Exception($"RETURN without GOSUB at line {ln}");
+                            break;
+                        case "LET": 
+                            var (n, vt) = SplitAssignment(arg); 
+                            setVar(n, EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics)); 
+                            break;
+                        case "DIM":
+                        {
+                            // Syntax:
+                            // DIM A(10)                  - 1D array, 11 element (0-10)
+                            // DIM B(5,10)                - 2D array, 6x11 = 66 element
+                            // DIM C(3,4,5)               - 3D array, 4x5x6 = 120 element
+                            // DIM A(10)=[1,2,3,4,5]      - 1D med initial värden
+                            // DIM B(2,2)=[[1,2],[3,4]]   - 2D med initial värden
+
+                            var eqIdx = arg.IndexOf('=');
+                            string dimDecl = eqIdx >= 0 ? arg[..eqIdx].Trim() : arg;
+                            string? initValues = eqIdx >= 0 ? arg[(eqIdx + 1)..].Trim() : null;
+
+                            // Parse array namn och dimensioner: A(10,20,5)
+                            int openParen = dimDecl.IndexOf('(');
+                            int closeParen = dimDecl.LastIndexOf(')');
+    
+                            if (openParen == -1 || closeParen == -1)
+                                throw new Exception($"DIM Syntax Error at line {ln}: Missing parentheses");
+
+                            var arrName = dimDecl[..openParen].Trim();
+                            var dimensionsStr = dimDecl[(openParen + 1)..closeParen].Trim();
+    
+                            // Split på komma och utvärdera varje dimension
+                            var dimParts = SplitTopLevelCsv(dimensionsStr);
+                            var dimensions = new int[dimParts.Count];
+    
+                            for (int i = 0; i < dimParts.Count; i++)
+                            {
+                                dimensions[i] = EvalInt(dimParts[i].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+        
+                                if (dimensions[i] < 0)
+                                    throw new Exception($"DIM Error at line {ln}: Dimension {i} cannot be negative");
+                            }
+
+                            // Skapa array baserat på typ ($ = sträng)
                             IAmosArray array;
                             if (arrName.EndsWith("$", StringComparison.Ordinal))
-                                array = new AmosStringArray(size);
+                                array = new AmosStringArray(dimensions);
                             else
-                                array = new AmosNumericArray(size);
-        
+                                array = new AmosNumericArray(dimensions);
+
                             vars[arrName] = array;
-        
-                            // Om vi har initialvärden: [0,4,2,5,6,7,4,3,2,1] eller ["hej", "då"]
+
+                            // Initialisering med värden om de finns
                             if (initValues != null)
                             {
-                                // Ta bort [ och ]
-                                initValues = initValues.Trim();
-                                if (initValues.StartsWith("[")) initValues = initValues[1..];
-                                if (initValues.EndsWith("]")) initValues = initValues[..^1];
-            
-                                // Använd SplitTopLevelCsv för att hantera komman inuti citattecken korrekt
-                                var values = SplitTopLevelCsv(initValues);
-                                for (int i = 0; i < values.Count && i < array.Length; i++)
-                                {
-                                    var val = EvalValue(values[i].Trim(), vars, ln, getInkey, isKeyDown, graphics);
-                                    array.Set(i, val);
-                                }
+                                InitializeArrayFromString(array, initValues, dimensions, vars, ln, getInkey, isKeyDown, graphics);
                             }
+    
+                            break;
                         }
-                        break;
-                    case "WAIT": 
-                        if (arg.ToUpperInvariant() == "VBL")
-                        {
-                            // Stega upp timern för alla lager innan swap
-                            lock(graphics.LockObject) {
-                                foreach(var layer in graphics.InactiveFrame) {
-                                    layer.Timer += 0.016f; // Öka tiden (motsvarar ~60 FPS)
-                                }
-                            }
-                            
-                            graphics.EndFrame(); 
-                            graphics.SwapBuffers();
-                            onGraphicsChanged(); 
-                            await WaitNextFrameAsync(token);
-                            graphics.BeginFrame(); 
-                        } else {
-                            int ms = Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
-                            await Task.Delay(ms, token);
-                        }
-                        break;
-                    case "DOUBLE":
-                        if (arg.ToUpperInvariant() == "BUFFER") {
-                            graphics.DoubleBuffer();
-                        }
-                        break;
-                    case "IF":
-                    {
-                        int tIdx = IndexOfWord(arg, "THEN");
-                        string condition;
-                        string? inlineCmd = null;
-
-                        if (tIdx >= 0)
-                        {
-                            condition = arg[..tIdx].Trim();
-                            var thenContent = arg[(tIdx + 4)..].Trim();
-                            if (!string.IsNullOrEmpty(thenContent)) inlineCmd = thenContent;
-                        }
-                        else condition = arg;
-
-                        bool cond = EvalCondition(condition, vars, ln, getInkey, isKeyDown, graphics);
-
-                        if (inlineCmd != null)
-                        {
-                            if (cond)
+                        case "WAIT": 
+                            if (arg.ToUpperInvariant() == "VBL")
                             {
-                                var cmds = SplitMultipleCommands(inlineCmd);
-                                foreach (var c in cmds)
+                                // Stega upp timern för alla lager innan swap
+                                lock(graphics.LockObject) {
+                                    foreach(var layer in graphics.InactiveFrame) {
+                                        layer.Timer += 0.016f; // Öka tiden (motsvarar ~60 FPS)
+                                    }
+                                }
+                            
+                                graphics.EndFrame(); 
+                                graphics.SwapBuffers();
+                                onGraphicsChanged(); 
+                                await WaitNextFrameAsync(token);
+                                graphics.BeginFrame(); 
+                            } else {
+                                int ms = Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
+                                await Task.Delay(ms, token);
+                            }
+                            break;
+                        case "DOUBLE":
+                            if (arg.ToUpperInvariant() == "BUFFER") {
+                                graphics.DoubleBuffer();
+                            }
+                            break;
+                        case "IF":
+                        {
+                            int tIdx = IndexOfWord(arg, "THEN");
+                            string condition;
+                            string? inlineCmd = null;
+
+                            if (tIdx >= 0)
+                            {
+                                condition = arg[..tIdx].Trim();
+                                var thenContent = arg[(tIdx + 4)..].Trim();
+                                if (!string.IsNullOrEmpty(thenContent)) inlineCmd = thenContent;
+                            }
+                            else condition = arg;
+
+                            bool cond = EvalCondition(condition, vars, ln, getInkey, isKeyDown, graphics);
+
+                            if (inlineCmd != null)
+                            {
+                                if (cond)
                                 {
-                                    var (cmd2, arg2) = SplitCommand(c);
-                                    // Vi kollar om kommandot returnerar en ny PC (t.ex. vid EXIT)
-                                    var (isJump, jumpPc) = await ExecuteInlineStatementAsync(cmd2, arg2, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, audioEngine, token, ln, repeatStack, whileStack, lines);
-                                    if (isJump)
+                                    var cmds = SplitMultipleCommands(inlineCmd);
+                                    foreach (var c in cmds)
                                     {
-                                        pc = jumpPc;
-                                        jumpHappened = true;
-                                        break;
+                                        var (cmd2, arg2) = SplitCommand(c);
+                                        // Vi kollar om kommandot returnerar en ny PC (t.ex. vid EXIT)
+                                        var (isJump, jumpPc) = await ExecuteInlineStatementAsync(cmd2, arg2, vars, appendLineAsync, clearAsync, graphics, onGraphicsChanged, getInkey, isKeyDown, audioEngine, token, ln, repeatStack, whileStack, lines);
+                                        if (isJump)
+                                        {
+                                            pc = jumpPc;
+                                            jumpHappened = true;
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        else
-                        {
+                            else
+                            {
                                 if (!cond)
                                 {
                                     if (!ifJumps.TryGetValue(pc, out var target))
@@ -1533,223 +1487,223 @@ cleanup:
                             }
                             break;
                         }
-                    case "ELSE":
-                    {
-                        if (!elseJumps.TryGetValue(pc, out var target))
-                            throw new Exception($"ENDIF not found for ELSE at line {ln}");
-                        pc = target;
-                        jumpHappened = true;
-                        break;
-                    }
-                    case "ENDIF":
-                    {
-                        // Bara markör, gå vidare
-                        break;
-                    }
-                    case "FOR":
-                        var eq = arg.IndexOf('='); 
-                        if (eq < 0) throw new Exception($"Syntax Error in FOR: Missing '=' at line {ln}");
-                        var fV = arg[..eq].Trim(); 
-                        var rhs = arg[(eq + 1)..].Trim(); 
-                        var toIdx = IndexOfWord(rhs, "TO");
-                        if (toIdx < 0) throw new Exception($"Syntax Error in FOR: Missing 'TO' at line {ln}");
-                        var start = EvalInt(rhs[..toIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics); 
-                        var rest = rhs[(toIdx + 2)..].Trim(); 
-                        var stIdx = IndexOfWord(rest, "STEP");
-                        var end = EvalInt(stIdx < 0 ? rest : rest[..stIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics);
-                        var step = stIdx < 0 ? 1 : EvalInt(rest[(stIdx + 4)..].Trim(), vars, ln, getInkey, isKeyDown, graphics);
-                        setVar(fV, start); 
-                        forStack.Push(new ForFrame { VarName = fV, EndValue = end, StepValue = step, LineAfterForPc = pc + 1, ForLineNumber = ln });
-                        break;
-                    case "NEXT":
-                        if (forStack.Count == 0) break;
-                        var f = forStack.Peek(); 
-                        var cur = GetDoubleVar(f.VarName, vars, ln) + f.StepValue; 
-                        setVar(f.VarName, cur);
-                            
-                        // Lägg till en liten marginal (0.000001) för att undvika att flyttalsfel kör loopen en gång för mycket
-                        bool loopDone = f.StepValue > 0 ? cur > (f.EndValue + 0.000001) : cur < (f.EndValue - 0.000001);
-                            
-                        if (!loopDone) { 
-                            pc = f.LineAfterForPc; 
-                            jumpHappened = true; 
-                        } else { 
-                            forStack.Pop(); 
-                        }
-                        break;
-                    case "WHILE":
-                    {
-                        bool conditionw = EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics);
-
-                        if (!conditionw)
+                        case "ELSE":
                         {
-                            // Hoppa direkt till raden efter WEND
-                            if (!whileMap.TryGetValue(pc, out var wendPc))
-                                throw new Exception($"WHILE without WEND at line {ln}");
-
-                            pc = wendPc + 1;
+                            if (!elseJumps.TryGetValue(pc, out var target))
+                                throw new Exception($"ENDIF not found for ELSE at line {ln}");
+                            pc = target;
                             jumpHappened = true;
+                            break;
                         }
-                        else
+                        case "ENDIF":
                         {
-                            // Villkoret sant → fortsätt, men kom ihåg loopen
-                            if (!whileMap.TryGetValue(pc, out var wpc))
-                                throw new Exception($"WHILE without WEND at line {ln}");
+                            // Bara markör, gå vidare
+                            break;
+                        }
+                        case "FOR":
+                            var eq = arg.IndexOf('='); 
+                            if (eq < 0) throw new Exception($"Syntax Error in FOR: Missing '=' at line {ln}");
+                            var fV = arg[..eq].Trim(); 
+                            var rhs = arg[(eq + 1)..].Trim(); 
+                            var toIdx = IndexOfWord(rhs, "TO");
+                            if (toIdx < 0) throw new Exception($"Syntax Error in FOR: Missing 'TO' at line {ln}");
+                            var start = EvalInt(rhs[..toIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics); 
+                            var rest = rhs[(toIdx + 2)..].Trim(); 
+                            var stIdx = IndexOfWord(rest, "STEP");
+                            var end = EvalInt(stIdx < 0 ? rest : rest[..stIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                            var step = stIdx < 0 ? 1 : EvalInt(rest[(stIdx + 4)..].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                            setVar(fV, start); 
+                            forStack.Push(new ForFrame { VarName = fV, EndValue = end, StepValue = step, LineAfterForPc = pc + 1, ForLineNumber = ln });
+                            break;
+                        case "NEXT":
+                            if (forStack.Count == 0) break;
+                            var f = forStack.Peek(); 
+                            var cur = GetDoubleVar(f.VarName, vars, ln) + f.StepValue; 
+                            setVar(f.VarName, cur);
+                            
+                            // Lägg till en liten marginal (0.000001) för att undvika att flyttalsfel kör loopen en gång för mycket
+                            bool loopDone = f.StepValue > 0 ? cur > (f.EndValue + 0.000001) : cur < (f.EndValue - 0.000001);
+                            
+                            if (!loopDone) { 
+                                pc = f.LineAfterForPc; 
+                                jumpHappened = true; 
+                            } else { 
+                                forStack.Pop(); 
+                            }
+                            break;
+                        case "WHILE":
+                        {
+                            bool conditionw = EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics);
 
-                            whileStack.Push(new WhileFrame
+                            if (!conditionw)
                             {
-                                WhilePc = pc,
-                                WendPc = whileMap[pc],
-                                Line = ln,
-                                Condition = arg
+                                // Hoppa direkt till raden efter WEND
+                                if (!whileMap.TryGetValue(pc, out var wendPc))
+                                    throw new Exception($"WHILE without WEND at line {ln}");
+
+                                pc = wendPc + 1;
+                                jumpHappened = true;
+                            }
+                            else
+                            {
+                                // Villkoret sant → fortsätt, men kom ihåg loopen
+                                if (!whileMap.TryGetValue(pc, out var wpc))
+                                    throw new Exception($"WHILE without WEND at line {ln}");
+
+                                whileStack.Push(new WhileFrame
+                                {
+                                    WhilePc = pc,
+                                    WendPc = whileMap[pc],
+                                    Line = ln,
+                                    Condition = arg
+                                });
+                            }
+                            break;
+                        }
+                        case "WEND":
+                        {
+                            if (whileStack.Count == 0)
+                                throw new Exception($"WEND without WHILE at line {ln}");
+
+                            var frame = whileStack.Peek();
+
+                            // Utvärdera villkoret igen
+                            var whileLine = StripLeadingLineNumber(
+                                StripComments(lines[frame.WhilePc])
+                            );
+
+                            var conditionText = whileLine.Substring(5).Trim(); // efter "WHILE"
+
+                            if (EvalCondition(conditionText, vars, ln, getInkey, isKeyDown, graphics))
+                            {
+                                pc = frame.WhilePc;
+                                jumpHappened = true;
+                            }
+                            else
+                            {
+                                // Klart → lämna loopen
+                                whileStack.Pop();
+                            }
+                            break;
+                        }
+                        case "REPEAT":
+                        {
+                            // Lägg till repeat frame utan UNTILPc
+                            repeatStack.Push(new RepeatFrame
+                            {
+                                RepeatPc = pc,
+                                RepeatLine = ln,
+                                UntilPc = 0 // sätts senare när vi hittar UNTIL
                             });
+                            break;
                         }
-                        break;
-                    }
-                    case "WEND":
-                    {
-                        if (whileStack.Count == 0)
-                            throw new Exception($"WEND without WHILE at line {ln}");
 
-                        var frame = whileStack.Peek();
-
-                        // Utvärdera villkoret igen
-                        var whileLine = StripLeadingLineNumber(
-                            StripComments(lines[frame.WhilePc])
-                        );
-
-                        var conditionText = whileLine.Substring(5).Trim(); // efter "WHILE"
-
-                        if (EvalCondition(conditionText, vars, ln, getInkey, isKeyDown, graphics))
-                        {
-                            pc = frame.WhilePc;
-                            jumpHappened = true;
-                        }
-                        else
-                        {
-                            // Klart → lämna loopen
-                            whileStack.Pop();
-                        }
-                        break;
-                    }
-                    case "REPEAT":
-                    {
-                        // Lägg till repeat frame utan UNTILPc
-                        repeatStack.Push(new RepeatFrame
-                        {
-                            RepeatPc = pc,
-                            RepeatLine = ln,
-                            UntilPc = 0 // sätts senare när vi hittar UNTIL
-                        });
-                        break;
-                    }
-
-                    case "UNTIL":
-                    {
-                        if (repeatStack.Count == 0)
-                            throw new Exception($"UNTIL without REPEAT at line {ln}");
-
-                        var rf = repeatStack.Peek();
-
-                        // Spara UNTILPc om det inte redan finns
-                        if (rf.UntilPc == 0)
-                            rf.UntilPc = pc;
-
-                        if (EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics))
-                        {
-                            // Villkor sant → avsluta loop
-                            repeatStack.Pop();
-                        }
-                        else
-                        {
-                            // Villkor falskt → hoppa tillbaka till REPEAT
-                            pc = rf.RepeatPc;
-                            jumpHappened = true;
-                        }
-                        break;
-                    }
-
-                    case "EXIT":
-                    {
-                        var what = arg.ToUpperInvariant();
-
-                        if (what == "REPEAT")
+                        case "UNTIL":
                         {
                             if (repeatStack.Count == 0)
-                                throw new Exception($"EXIT REPEAT without REPEAT at line {ln}");
+                                throw new Exception($"UNTIL without REPEAT at line {ln}");
 
-                            var rf = repeatStack.Pop();
+                            var rf = repeatStack.Peek();
 
-                            // Om UNTILPc inte är satt, skanna programmet framåt
+                            // Spara UNTILPc om det inte redan finns
                             if (rf.UntilPc == 0)
+                                rf.UntilPc = pc;
+
+                            if (EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics))
                             {
-                                int searchPc = rf.RepeatPc + 1;
-                                while (searchPc < lines.Length)
-                                {
-                                    var lSearch = StripComments(StripLeadingLineNumber(lines[searchPc])).Trim().ToUpperInvariant();
-                                    if (lSearch.StartsWith("UNTIL "))
-                                    {
-                                        rf.UntilPc = searchPc;
-                                        break;
-                                    }
-                                    searchPc++;
-                                }
+                                // Villkor sant → avsluta loop
+                                repeatStack.Pop();
+                            }
+                            else
+                            {
+                                // Villkor falskt → hoppa tillbaka till REPEAT
+                                pc = rf.RepeatPc;
+                                jumpHappened = true;
+                            }
+                            break;
+                        }
+
+                        case "EXIT":
+                        {
+                            var what = arg.ToUpperInvariant();
+
+                            if (what == "REPEAT")
+                            {
+                                if (repeatStack.Count == 0)
+                                    throw new Exception($"EXIT REPEAT without REPEAT at line {ln}");
+
+                                var rf = repeatStack.Pop();
+
+                                // Om UNTILPc inte är satt, skanna programmet framåt
                                 if (rf.UntilPc == 0)
-                                    throw new Exception($"EXIT REPEAT before matching UNTIL at line {ln}");
-                            }
+                                {
+                                    int searchPc = rf.RepeatPc + 1;
+                                    while (searchPc < lines.Length)
+                                    {
+                                        var lSearch = StripComments(StripLeadingLineNumber(lines[searchPc])).Trim().ToUpperInvariant();
+                                        if (lSearch.StartsWith("UNTIL "))
+                                        {
+                                            rf.UntilPc = searchPc;
+                                            break;
+                                        }
+                                        searchPc++;
+                                    }
+                                    if (rf.UntilPc == 0)
+                                        throw new Exception($"EXIT REPEAT before matching UNTIL at line {ln}");
+                                }
 
-                            pc = rf.UntilPc + 1;
-                            jumpHappened = true;
+                                pc = rf.UntilPc + 1;
+                                jumpHappened = true;
+                            }
+                            else if (what == "WHILE")
+                            {
+                                // Befintlig WHILE-logik
+                                if (whileStack.Count == 0)
+                                    throw new Exception($"EXIT WHILE without WHILE at line {ln}");
+                                var wf = whileStack.Pop();
+                                if (wf.WendPc == 0)
+                                    throw new Exception($"EXIT WHILE before matching WEND at line {ln}");
+                                pc = wf.WendPc + 1;
+                                jumpHappened = true;
+                            }
+                            break;
                         }
-                        else if (what == "WHILE")
-                        {
-                            // Befintlig WHILE-logik
-                            if (whileStack.Count == 0)
-                                throw new Exception($"EXIT WHILE without WHILE at line {ln}");
-                            var wf = whileStack.Pop();
-                            if (wf.WendPc == 0)
-                                throw new Exception($"EXIT WHILE before matching WEND at line {ln}");
-                            pc = wf.WendPc + 1;
-                            jumpHappened = true;
-                        }
-                        break;
-                    }
 
-                    case "SCREEN":
-                        var screenArgs = SplitCsvOrSpaces(arg);
-                        if (screenArgs.Count > 0)
-                        {
-                            var subCmd = screenArgs[0].ToUpperInvariant();
+                        case "SCREEN":
+                            var screenArgs = SplitCsvOrSpaces(arg);
+                            if (screenArgs.Count > 0)
+                            {
+                                var subCmd = screenArgs[0].ToUpperInvariant();
 
-                            if (subCmd == "SELECT" && screenArgs.Count >= 2)
-                            {
-                                graphics.SetDrawingScreen(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
+                                if (subCmd == "SELECT" && screenArgs.Count >= 2)
+                                {
+                                    graphics.SetDrawingScreen(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
+                                }
+                                else if (subCmd == "ON" && screenArgs.Count >= 2)
+                                {
+                                    graphics.SetScreenVisible(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics), true);
+                                    onGraphicsChanged();
+                                }
+                                else if (subCmd == "OFF" && screenArgs.Count >= 2)
+                                {
+                                    graphics.SetScreenVisible(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics), false);
+                                    onGraphicsChanged();
+                                }
+                                else if (screenArgs.Count >= 2)
+                                {
+                                    // Standard: SCREEN width, height
+                                    graphics.Screen(EvalInt(screenArgs[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
+                                }
                             }
-                            else if (subCmd == "ON" && screenArgs.Count >= 2)
-                            {
-                                graphics.SetScreenVisible(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics), true);
-                                onGraphicsChanged();
+                            break;
+                        case "SCROLL":
+                            var sc = SplitCsvOrSpaces(arg);
+                            if (sc.Count >= 3) graphics.Scroll(EvalInt(sc[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(sc[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(sc[2], vars, ln, getInkey, isKeyDown, graphics));
+                            else {
+                                var parts = arg.Split(',');
+                                if (parts.Length >= 2) graphics.Scroll(0, EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics));
                             }
-                            else if (subCmd == "OFF" && screenArgs.Count >= 2)
-                            {
-                                graphics.SetScreenVisible(EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics), false);
-                                onGraphicsChanged();
-                            }
-                            else if (screenArgs.Count >= 2)
-                            {
-                                // Standard: SCREEN width, height
-                                graphics.Screen(EvalInt(screenArgs[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics));
-                            }
-                        }
-                        break;
-                    case "SCROLL":
-                        var sc = SplitCsvOrSpaces(arg);
-                        if (sc.Count >= 3) graphics.Scroll(EvalInt(sc[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(sc[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(sc[2], vars, ln, getInkey, isKeyDown, graphics));
-                        else {
-                            var parts = arg.Split(',');
-                            if (parts.Length >= 2) graphics.Scroll(0, EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics));
-                        }
-                         break;
+                            break;
 
                         case "LOAD":
                         {
@@ -1815,49 +1769,49 @@ cleanup:
                             break;
                         }
 
-                    case "INC":
-                        setVar(arg, GetDoubleVar(arg, vars, ln) + 1.0);
-                        break;
-                    case "DEC":
-                        setVar(arg, GetDoubleVar(arg, vars, ln) - 1.0);
-                        break;
-                    case "PLOT": 
-                        var pP = SplitCsvOrSpaces(arg); 
-                        graphics.Plot(EvalInt(pP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(pP[1], vars, ln, getInkey, isKeyDown, graphics)); 
-                        onGraphicsChanged(); break;
-                    case "LINE": 
-                        var lL = SplitCsvOrSpaces(arg); 
-                        graphics.Line(EvalInt(lL[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[3], vars, ln, getInkey, isKeyDown, graphics)); 
-                        onGraphicsChanged(); break;
-                    case "BOX": 
-                        var bB = SplitCsvOrSpaces(arg); 
-                        graphics.Box(EvalInt(bB[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[3], vars, ln, getInkey, isKeyDown, graphics)); 
-                        onGraphicsChanged(); break;
-                    case "BAR": 
-                        var rR = SplitCsvOrSpaces(arg); 
-                        graphics.Bar(EvalInt(rR[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[3], vars, ln, getInkey, isKeyDown, graphics)); 
-                        onGraphicsChanged(); break;
-                    case "CIRCLE": 
-                        var rC = SplitCsvOrSpaces(arg); 
-                        graphics.Circle(EvalInt(rC[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rC[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rC[2], vars, ln, getInkey, isKeyDown, graphics)); 
-                        onGraphicsChanged(); break;   
-                    case "CIRCLEF": 
-                        var rF = SplitCsvOrSpaces(arg); 
-                        graphics.CircleF(EvalInt(rF[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rF[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rF[2], vars, ln, getInkey, isKeyDown, graphics),EvalInt(rF[3], vars, ln, getInkey, isKeyDown, graphics)); 
-                        onGraphicsChanged(); break;   
-                    case "ELLIPSE": 
-                        var rE = SplitCsvOrSpaces(arg); 
-                        graphics.Ellipse(EvalInt(rE[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rE[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rE[2], vars, ln, getInkey, isKeyDown, graphics),EvalInt(rE[3], vars, ln, getInkey, isKeyDown, graphics)); 
-                        onGraphicsChanged(); break;  
-                    case "FILL": 
-                        var rI = SplitCsvOrSpaces(arg); 
-                        graphics.Fill(EvalInt(rI[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rI[1], vars, ln, getInkey, isKeyDown, graphics)); 
-                        onGraphicsChanged(); break;  
-                    case "TEXT":
-                        var tP = SplitCsvOrSpaces(arg);
-                        if (tP.Count >= 3) graphics.DrawText(EvalInt(tP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tP[1], vars, ln, getInkey, isKeyDown, graphics), ValueToString(EvalValue(string.Join(" ", tP.Skip(2)), vars, ln, getInkey, isKeyDown, graphics)));
-                        onGraphicsChanged(); break;
-                    case "SPRITE":
+                        case "INC":
+                            setVar(arg, GetDoubleVar(arg, vars, ln) + 1.0);
+                            break;
+                        case "DEC":
+                            setVar(arg, GetDoubleVar(arg, vars, ln) - 1.0);
+                            break;
+                        case "PLOT": 
+                            var pP = SplitCsvOrSpaces(arg); 
+                            graphics.Plot(EvalInt(pP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(pP[1], vars, ln, getInkey, isKeyDown, graphics)); 
+                            onGraphicsChanged(); break;
+                        case "LINE": 
+                            var lL = SplitCsvOrSpaces(arg); 
+                            graphics.Line(EvalInt(lL[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(lL[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                            onGraphicsChanged(); break;
+                        case "BOX": 
+                            var bB = SplitCsvOrSpaces(arg); 
+                            graphics.Box(EvalInt(bB[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bB[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                            onGraphicsChanged(); break;
+                        case "BAR": 
+                            var rR = SplitCsvOrSpaces(arg); 
+                            graphics.Bar(EvalInt(rR[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rR[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                            onGraphicsChanged(); break;
+                        case "CIRCLE": 
+                            var rC = SplitCsvOrSpaces(arg); 
+                            graphics.Circle(EvalInt(rC[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rC[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rC[2], vars, ln, getInkey, isKeyDown, graphics)); 
+                            onGraphicsChanged(); break;   
+                        case "CIRCLEF": 
+                            var rF = SplitCsvOrSpaces(arg); 
+                            graphics.CircleF(EvalInt(rF[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rF[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rF[2], vars, ln, getInkey, isKeyDown, graphics),EvalInt(rF[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                            onGraphicsChanged(); break;   
+                        case "ELLIPSE": 
+                            var rE = SplitCsvOrSpaces(arg); 
+                            graphics.Ellipse(EvalInt(rE[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rE[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rE[2], vars, ln, getInkey, isKeyDown, graphics),EvalInt(rE[3], vars, ln, getInkey, isKeyDown, graphics)); 
+                            onGraphicsChanged(); break;  
+                        case "FILL": 
+                            var rI = SplitCsvOrSpaces(arg); 
+                            graphics.Fill(EvalInt(rI[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(rI[1], vars, ln, getInkey, isKeyDown, graphics)); 
+                            onGraphicsChanged(); break;  
+                        case "TEXT":
+                            var tP = SplitCsvOrSpaces(arg);
+                            if (tP.Count >= 3) graphics.DrawText(EvalInt(tP[0], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tP[1], vars, ln, getInkey, isKeyDown, graphics), ValueToString(EvalValue(string.Join(" ", tP.Skip(2)), vars, ln, getInkey, isKeyDown, graphics)));
+                            onGraphicsChanged(); break;
+                        case "SPRITE":
                             var ss = SplitCsvOrSpaces(arg);
                             if (ss.Count == 0) break;
                             if (!int.TryParse(ss[0], out var sid)) {
@@ -1896,54 +1850,54 @@ cleanup:
                                 else if (sub=="OFF") graphics.SpriteOff(EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics));
                             } else graphics.CreateSprite(sid, EvalInt(ss[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(ss[2],vars,ln,getInkey,isKeyDown, graphics)); 
                             break;
-                    case "SAM":
-                        var samArgs = SplitCsvOrSpaces(arg);
-                        if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "PLAY") {
-                            PlayEffect(Unquote(samArgs[1]), audioEngine,false); 
-                        }
-                        if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "LOOP") {
-                            PlayEffect(Unquote(samArgs[1]), audioEngine,true); 
-                        }
-                        if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "STOP") {
-                            StopEffect(Unquote(samArgs[1]), audioEngine); 
-                        }
-                        break;
-                    case "MUSIC":
-                        var musArgs = SplitCsvOrSpaces(arg);
-                        if (musArgs.Count >= 2 && musArgs[0].ToUpperInvariant() == "PLAY") {
-                            PlayMusic(Unquote(musArgs[1]), audioEngine); 
-                        } else if (musArgs.Count >= 1 && musArgs[0].ToUpperInvariant() == "STOP") {
-                            StopMusic(audioEngine);
-                        }
-                        break;
-                    case "PLAY":
-                        var playArgs = SplitCsvOrSpaces(arg);
-                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "JUMP")
-                        {
-                            ChiptuneSynth.PlayJump();
-                        }
-                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "LASER")
-                        {
-                            ChiptuneSynth.PlayLaser();
-                        }
-                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "EXPLOSION")
-                        {
-                            ChiptuneSynth.PlayExplosion();
-                        }
-                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "COIN")
-                        {
-                            ChiptuneSynth.PlayCoin();
-                        }
-                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "BLIP")
-                        {
-                            ChiptuneSynth.PlayBlip();
-                        }
-                        if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "HIT")
-                        {
-                            ChiptuneSynth.PlayHit();
-                        }
-                        break;
-                    case "RASTER":
+                        case "SAM":
+                            var samArgs = SplitCsvOrSpaces(arg);
+                            if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "PLAY") {
+                                PlayEffect(Unquote(samArgs[1]), audioEngine,false); 
+                            }
+                            if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "LOOP") {
+                                PlayEffect(Unquote(samArgs[1]), audioEngine,true); 
+                            }
+                            if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "STOP") {
+                                StopEffect(Unquote(samArgs[1]), audioEngine); 
+                            }
+                            break;
+                        case "MUSIC":
+                            var musArgs = SplitCsvOrSpaces(arg);
+                            if (musArgs.Count >= 2 && musArgs[0].ToUpperInvariant() == "PLAY") {
+                                PlayMusic(Unquote(musArgs[1]), audioEngine); 
+                            } else if (musArgs.Count >= 1 && musArgs[0].ToUpperInvariant() == "STOP") {
+                                StopMusic(audioEngine);
+                            }
+                            break;
+                        case "PLAY":
+                            var playArgs = SplitCsvOrSpaces(arg);
+                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "JUMP")
+                            {
+                                ChiptuneSynth.PlayJump();
+                            }
+                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "LASER")
+                            {
+                                ChiptuneSynth.PlayLaser();
+                            }
+                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "EXPLOSION")
+                            {
+                                ChiptuneSynth.PlayExplosion();
+                            }
+                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "COIN")
+                            {
+                                ChiptuneSynth.PlayCoin();
+                            }
+                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "BLIP")
+                            {
+                                ChiptuneSynth.PlayBlip();
+                            }
+                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "HIT")
+                            {
+                                ChiptuneSynth.PlayHit();
+                            }
+                            break;
+                        case "RASTER":
                             int currentLayer = graphics.GetActiveScreenNumber();
 
                             if (arg.ToUpperInvariant().StartsWith("STR("))
@@ -1978,31 +1932,31 @@ cleanup:
                                 }
                             }
                             break;
-                    case "PARTICLE": 
-                        var rainArgs = SplitCsvOrSpaces(arg);
-                        if (rainArgs.Count >= 2) {
-                            int type = EvalInt(rainArgs[0], vars, ln, getInkey, isKeyDown, graphics);
-                            float density = (float)EvalDouble(rainArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                            int curL = graphics.GetActiveScreenNumber();
-                            // Slot 0 = Typ, Slot 1 = Mängd
-                            graphics.SetShadervalues(curL, 1, (float)type, density);
-                        }
-                        break;
-                    case "TILE":
-                        var tArgs = SplitCsvOrSpaces(arg);
-                        if (tArgs.Count > 0) {
-                            var tileSub = tArgs[0].ToUpperInvariant(); // Ändrat namn från sub till tileSub
-                            if (tileSub == "LOAD" && tArgs.Count >= 4) 
-                                graphics.LoadTileBank(Unquote(tArgs[1]), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
-                            else if (tileSub == "MAP" && tArgs.Count >= 3) 
-                                graphics.SetMapSize(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
-                            else if (tileSub == "SET" && tArgs.Count >= 4) 
-                                graphics.SetMapTile(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
-                            else if (tileSub == "DRAW" && tArgs.Count >= 3) 
-                                graphics.DrawMap(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
-                        }
-                        break;
-                    case "FONT":
+                        case "PARTICLE": 
+                            var rainArgs = SplitCsvOrSpaces(arg);
+                            if (rainArgs.Count >= 2) {
+                                int type = EvalInt(rainArgs[0], vars, ln, getInkey, isKeyDown, graphics);
+                                float density = (float)EvalDouble(rainArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                int curL = graphics.GetActiveScreenNumber();
+                                // Slot 0 = Typ, Slot 1 = Mängd
+                                graphics.SetShadervalues(curL, 1, (float)type, density);
+                            }
+                            break;
+                        case "TILE":
+                            var tArgs = SplitCsvOrSpaces(arg);
+                            if (tArgs.Count > 0) {
+                                var tileSub = tArgs[0].ToUpperInvariant(); // Ändrat namn från sub till tileSub
+                                if (tileSub == "LOAD" && tArgs.Count >= 4) 
+                                    graphics.LoadTileBank(Unquote(tArgs[1]), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (tileSub == "MAP" && tArgs.Count >= 3) 
+                                    graphics.SetMapSize(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (tileSub == "SET" && tArgs.Count >= 4) 
+                                    graphics.SetMapTile(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (tileSub == "DRAW" && tArgs.Count >= 3) 
+                                    graphics.DrawMap(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+                            }
+                            break;
+                        case "FONT":
                             var fArgs = SplitCsvOrSpaces(arg);
                             if (fArgs.Count > 0) {
                                 var fSub = fArgs[0].ToUpperInvariant();
@@ -2037,229 +1991,239 @@ cleanup:
                             }
                             onGraphicsChanged();
                             break;
-                    case "MAP":
-                        var mArgs = SplitCsvOrSpaces(arg);
-                        if (mArgs.Count >= 2 && mArgs[0].ToUpperInvariant() == "LOAD") {
-                            var path = Unquote(mArgs[1]);
-                            if (System.IO.File.Exists(path)) {
-                                try {
-                                    using var stream = System.IO.File.OpenRead(path);
-                                    var dto = await System.Text.Json.JsonSerializer.DeserializeAsync<MapDto>(stream);
-                                    if (dto != null) {
-                                        graphics.SetMapSize(dto.Width, dto.Height);
-                                        int idx = 0;
-                                        for (int y = 0; y < dto.Height; y++) {
-                                            for (int z = 0; z < dto.Width; z++) {
-                                                graphics.SetMapTile(z, y, dto.Data[idx++]);
+                        case "MAP":
+                            var mArgs = SplitCsvOrSpaces(arg);
+                            if (mArgs.Count >= 2 && mArgs[0].ToUpperInvariant() == "LOAD") {
+                                var path = Unquote(mArgs[1]);
+                                if (System.IO.File.Exists(path)) {
+                                    try {
+                                        using var stream = System.IO.File.OpenRead(path);
+                                        var dto = await System.Text.Json.JsonSerializer.DeserializeAsync<MapDto>(stream);
+                                        if (dto != null) {
+                                            graphics.SetMapSize(dto.Width, dto.Height);
+                                            int idx = 0;
+                                            for (int y = 0; y < dto.Height; y++) {
+                                                for (int z = 0; z < dto.Width; z++) {
+                                                    graphics.SetMapTile(z, y, dto.Data[idx++]);
+                                                }
                                             }
+                                            // Rita ut banan på det stora lagret direkt efter laddning
+                                            graphics.DrawMap(0, 0);
                                         }
-                                        // Rita ut banan på det stora lagret direkt efter laddning
-                                        graphics.DrawMap(0, 0);
+                                    } catch (Exception ex) {
+                                        await appendLineAsync("MAP LOAD ERROR: " + ex.Message);
                                     }
-                                } catch (Exception ex) {
-                                    await appendLineAsync("MAP LOAD ERROR: " + ex.Message);
                                 }
                             }
-                        }
-                        break;
-                    case "OPEN":
-                    {
-                    // Syntax: OPEN IN/OUT/APPEND channel, "filename"
-                    string openArg = arg.Trim();
-                    
-                    // Läs mode (IN/OUT/APPEND)
-                    string[] parts = openArg.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length < 2)
-                        throw new Exception("OPEN: Syntax är OPEN IN/OUT/APPEND channel, \"filename\"");
-                    
-                    string modeStr = parts[0].ToUpperInvariant();
-                    FileMode mode;
-                    
-                    if (modeStr == "IN" || modeStr == "INPUT")
-                        mode = FileMode.Input;
-                    else if (modeStr == "OUT" || modeStr == "OUTPUT")
-                        mode = FileMode.Output;
-                    else if (modeStr == "APPEND")
-                        mode = FileMode.Append;
-                    else
-                        throw new Exception($"OPEN: Okänd mode '{modeStr}'. Använd IN, OUT eller APPEND");
-                    
-                    // Hitta kommat mellan channel och filename
-                    string restArg = parts[1];
-                    int commaIdx2 = restArg.IndexOf(',');
-                    if (commaIdx2 < 0)
-                        throw new Exception("OPEN: Syntax är OPEN mode channel, \"filename\"");
-                    
-                    // Läs kanalnummer
-                    string channelExpr = restArg[..commaIdx2].Trim();
-                    int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
-                    
-                    if (channel < 1 || channel > MaxChannels)
-                        throw new Exception($"OPEN: Kanal {channel} utanför giltigt intervall (1-{MaxChannels})");
-                    
-                    if (_openFiles.ContainsKey(channel))
-                        throw new Exception($"OPEN: Kanal {channel} är redan öppen");
-                    
-                    // Läs filnamn
-                    string fileExpr = restArg[(commaIdx2 + 1)..].Trim();
-                    object fileObj = EvalValue(fileExpr, vars, ln, getInkey, isKeyDown, graphics);
-                    string filePath = ValueToString(fileObj);
-                    
-                    // Konvertera relativ sökväg till absolut
-                    if (!Path.IsPathRooted(filePath))
-                    {
-                        filePath = Path.Combine(Environment.CurrentDirectory, filePath);
-                    }
-                    
-                    // Öppna filen
-                    try
-                    {
-                        var fileChannel = new FileChannel(channel, filePath, mode);
-                        
-                        switch (mode)
+                            break;
+                        case "OPEN":
                         {
-                            case FileMode.Input:
-                                if (!File.Exists(filePath))
-                                    throw new FileNotFoundException($"Filen '{filePath}' hittades inte");
-                                fileChannel.Reader = new StreamReader(filePath, Encoding.UTF8);
-                                break;
-                                
-                            case FileMode.Output:
-                                // Skapa katalog om den inte finns
-                                var dir = Path.GetDirectoryName(filePath);
-                                if (!string.IsNullOrEmpty(dir))
-                                    Directory.CreateDirectory(dir);
-                                fileChannel.Writer = new StreamWriter(filePath, false, Encoding.UTF8);
-                                break;
-                                
-                            case FileMode.Append:
-                                var dirAppend = Path.GetDirectoryName(filePath);
-                                if (!string.IsNullOrEmpty(dirAppend))
-                                    Directory.CreateDirectory(dirAppend);
-                                fileChannel.Writer = new StreamWriter(filePath, true, Encoding.UTF8);
-                                break;
-                        }
-                        
-                        _openFiles[channel] = fileChannel;
-                        
-                        //await appendLineAsync($"@@PRINT File opened on channel {channel}");
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new Exception($"OPEN: Kunde inte öppna fil '{filePath}': {ex.Message}");
-                    }
-                }
-                break;
-
-                case "CLOSE":
-                {
-                    // Syntax: CLOSE channel
-                    int channel = EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics);
+                            // Syntax: OPEN IN/OUT/APPEND channel, "filename"
+                            string openArg = arg.Trim();
                     
-                    if (!_openFiles.ContainsKey(channel))
-                    {
-                        // Ignorera om kanalen inte är öppen (som klassisk BASIC)
-                        break;
-                    }
+                            // Läs mode (IN/OUT/APPEND)
+                            string[] parts = openArg.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                            if (parts.Length < 2)
+                                throw new Exception("OPEN: Syntax är OPEN IN/OUT/APPEND channel, \"filename\"");
                     
-                    var fileChannel = _openFiles[channel];
+                            string modeStr = parts[0].ToUpperInvariant();
+                            FileMode mode;
                     
-                    try
-                    {
-                        fileChannel.Reader?.Close();
-                        fileChannel.Reader?.Dispose();
-                        fileChannel.Writer?.Flush();
-                        fileChannel.Writer?.Close();
-                        fileChannel.Writer?.Dispose();
-                        fileChannel.IsOpen = false;
-                        
-                        _openFiles.Remove(channel);
-                        
-                        //await appendLineAsync($"@@PRINT File closed on channel {channel}");
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new Exception($"CLOSE: Fel vid stängning av kanal {channel}: {ex.Message}");
-                    }
-                }
-                break;
-                    default:
-                        if (!string.IsNullOrWhiteSpace(cmd))
-                        {
-                            if (fullCmd.Contains('='))
+                            if (modeStr == "IN" || modeStr == "INPUT")
+                                mode = FileMode.Input;
+                            else if (modeStr == "OUT" || modeStr == "OUTPUT")
+                                mode = FileMode.Output;
+                            else if (modeStr == "APPEND")
+                                mode = FileMode.Append;
+                            else
+                                throw new Exception($"OPEN: Okänd mode '{modeStr}'. Använd IN, OUT eller APPEND");
+                    
+                            // Hitta kommat mellan channel och filename
+                            string restArg = parts[1];
+                            int commaIdx2 = restArg.IndexOf(',');
+                            if (commaIdx2 < 0)
+                                throw new Exception("OPEN: Syntax är OPEN mode channel, \"filename\"");
+                    
+                            // Läs kanalnummer
+                            string channelExpr = restArg[..commaIdx2].Trim();
+                            int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
+                    
+                            if (channel < 1 || channel > MaxChannels)
+                                throw new Exception($"OPEN: Kanal {channel} utanför giltigt intervall (1-{MaxChannels})");
+                    
+                            if (_openFiles.ContainsKey(channel))
+                                throw new Exception($"OPEN: Kanal {channel} är redan öppen");
+                    
+                            // Läs filnamn
+                            string fileExpr = restArg[(commaIdx2 + 1)..].Trim();
+                            object fileObj = EvalValue(fileExpr, vars, ln, getInkey, isKeyDown, graphics);
+                            string filePath = ValueToString(fileObj);
+                    
+                            // Konvertera relativ sökväg till absolut
+                            if (!Path.IsPathRooted(filePath))
                             {
-                                var (leftSide, varValue) = SplitAssignment(fullCmd);
-
-                                var rightValue = EvalValue(varValue, vars, ln, getInkey, isKeyDown, graphics);
-
-                                if (leftSide.Contains('('))
+                                filePath = Path.Combine(Environment.CurrentDirectory, filePath);
+                            }
+                    
+                            // Öppna filen
+                            try
+                            {
+                                var fileChannel = new FileChannel(channel, filePath, mode);
+                        
+                                switch (mode)
                                 {
-                                    int openParen = leftSide.IndexOf('(');
-                                    int closeParen = leftSide.LastIndexOf(')');
-                                    if (openParen != -1 && closeParen != -1)
+                                    case FileMode.Input:
+                                        if (!File.Exists(filePath))
+                                            throw new FileNotFoundException($"Filen '{filePath}' hittades inte");
+                                        fileChannel.Reader = new StreamReader(filePath, Encoding.UTF8);
+                                        break;
+                                
+                                    case FileMode.Output:
+                                        // Skapa katalog om den inte finns
+                                        var dir = Path.GetDirectoryName(filePath);
+                                        if (!string.IsNullOrEmpty(dir))
+                                            Directory.CreateDirectory(dir);
+                                        fileChannel.Writer = new StreamWriter(filePath, false, Encoding.UTF8);
+                                        break;
+                                
+                                    case FileMode.Append:
+                                        var dirAppend = Path.GetDirectoryName(filePath);
+                                        if (!string.IsNullOrEmpty(dirAppend))
+                                            Directory.CreateDirectory(dirAppend);
+                                        fileChannel.Writer = new StreamWriter(filePath, true, Encoding.UTF8);
+                                        break;
+                                }
+                        
+                                _openFiles[channel] = fileChannel;
+                        
+                                //await appendLineAsync($"@@PRINT File opened on channel {channel}");
+                            }
+                            catch (Exception ex)
+                            {
+                                throw new Exception($"OPEN: Kunde inte öppna fil '{filePath}': {ex.Message}");
+                            }
+                        }
+                            break;
+
+                        case "CLOSE":
+                        {
+                            // Syntax: CLOSE channel
+                            int channel = EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics);
+                    
+                            if (!_openFiles.ContainsKey(channel))
+                            {
+                                // Ignorera om kanalen inte är öppen (som klassisk BASIC)
+                                break;
+                            }
+                    
+                            var fileChannel = _openFiles[channel];
+                    
+                            try
+                            {
+                                fileChannel.Reader?.Close();
+                                fileChannel.Reader?.Dispose();
+                                fileChannel.Writer?.Flush();
+                                fileChannel.Writer?.Close();
+                                fileChannel.Writer?.Dispose();
+                                fileChannel.IsOpen = false;
+                        
+                                _openFiles.Remove(channel);
+                        
+                                //await appendLineAsync($"@@PRINT File closed on channel {channel}");
+                            }
+                            catch (Exception ex)
+                            {
+                                throw new Exception($"CLOSE: Fel vid stängning av kanal {channel}: {ex.Message}");
+                            }
+                        }
+                            break;
+                        default:
+                            if (!string.IsNullOrWhiteSpace(cmd))
+                            {
+                                if (fullCmd.Contains('='))
+                                {
+                                    var (leftSide, varValue) = SplitAssignment(fullCmd);
+
+                                    var rightValue = EvalValue(varValue, vars, ln, getInkey, isKeyDown, graphics);
+
+                                    if (leftSide.Contains('('))
                                     {
-                                        var arrayName = leftSide[..openParen].Trim();
-                                        var idxStr = leftSide[(openParen + 1)..closeParen];
-
-                                        if (vars.TryGetValue(arrayName, out var aVal) && aVal is IAmosArray array)
+                                        int openParen = leftSide.IndexOf('(');
+                                        int closeParen = leftSide.LastIndexOf(')');
+    
+                                        if (openParen != -1 && closeParen != -1)
                                         {
-                                            var rawIdx = EvalValue(idxStr, vars, ln, getInkey, isKeyDown, graphics);
-                                            int aIdx = (int)Math.Round(Convert.ToDouble(rawIdx, CultureInfo.InvariantCulture));
+                                            var arrayName = leftSide[..openParen].Trim();
+                                            var indicesStr = leftSide[(openParen + 1)..closeParen];
 
-                                            if (aIdx >= 0 && aIdx < array.Length)
+                                            if (vars.TryGetValue(arrayName, out var aVal) && aVal is IAmosArray array)
                                             {
-                                                array.Set(aIdx, rightValue);
+                                                // Parse alla index (kan vara flera för multidim)
+                                                var indexParts = SplitTopLevelCsv(indicesStr);
+                                                var indices = new int[indexParts.Count];
+            
+                                                for (int i = 0; i < indexParts.Count; i++)
+                                                {
+                                                    var rawIdx = EvalValue(indexParts[i].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                                                    indices[i] = (int)Math.Round(Convert.ToDouble(rawIdx, CultureInfo.InvariantCulture));
+                                                }
+
+                                                // Sätt värde på rätt plats i multidim-arrayen
+                                                array.Set(rightValue, indices);
+                                            }
+                                            else
+                                            {
+                                                throw new Exception($"Unknown array '{arrayName}' at line {ln}");
                                             }
                                         }
+                                    }
+                                    else
+                                    {
+                                        setVar(leftSide, rightValue);
                                     }
                                 }
                                 else
                                 {
-                                    setVar(leftSide, rightValue);
+                                    throw new Exception($"Syntax Error: '{cmd}' at line {ln}");
                                 }
                             }
-                            else
-                            {
-                                throw new Exception($"Syntax Error: '{cmd}' at line {ln}");
-                            }
-                        }
-                        break;
+                            break;
+                    }
+                    if (jumpHappened) break;
                 }
-                if (jumpHappened) break;
-            }
-            catch (Exception ex)
-            {
-                // Spara felinformation i BASIC-variabler så man kan kolla vad som hände
-                setVar("ERR$", ex.Message);
-                setVar("ERL", ln);
+                catch (Exception ex)
+                {
+                    // Spara felinformation i BASIC-variabler så man kan kolla vad som hände
+                    setVar("ERR$", ex.Message);
+                    setVar("ERL", ln);
 
-                if (errorMode == 1) 
-                {
-                    // RESUME NEXT: Ignorera felet och kör vidare till nästa kommando/rad.
-                    // Vi gör ingenting här, loopen fortsätter till nästa kommando i 'commands'
-                    // eller nästa rad om commands är slut.
-                }
-                else if (errorMode == 2)
-                {
-                    // GOTO Label
-                    pc = errorGotoPc;
-                    jumpHappened = true;
-                    break; // Bryt command-loopen för att utföra hoppet
-                }
-                else
-                {
-                    // BREAK (Standard): Rapportera och avsluta
-                    await appendLineAsync($"Runtime Error at line {ln}: {ex.Message}");
-                    // Kasta vidare eller returnera för att stoppa helt
-                    return; 
+                    if (errorMode == 1) 
+                    {
+                        // RESUME NEXT: Ignorera felet och kör vidare till nästa kommando/rad.
+                        // Vi gör ingenting här, loopen fortsätter till nästa kommando i 'commands'
+                        // eller nästa rad om commands är slut.
+                    }
+                    else if (errorMode == 2)
+                    {
+                        // GOTO Label
+                        pc = errorGotoPc;
+                        jumpHappened = true;
+                        break; // Bryt command-loopen för att utföra hoppet
+                    }
+                    else
+                    {
+                        // BREAK (Standard): Rapportera och avsluta
+                        await appendLineAsync($"Runtime Error at line {ln}: {ex.Message}");
+                        // Kasta vidare eller returnera för att stoppa helt
+                        return; 
+                    }
                 }
             }
+            if (!jumpHappened) pc++;
+            continue;
+            next_line: pc++;
         }
-        if (!jumpHappened) pc++;
-        continue;
-        next_line: pc++;
     }
-}
 
     private static List<string> SplitMultipleCommands(string l) {
         var trimmed = l.TrimStart();
@@ -2386,64 +2350,64 @@ cleanup:
         }
     }
     
-        private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
+    private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
+    {
+        c = c.Trim();
+
+        // NOT (hög prioritet)
+        if (c.StartsWith("NOT ", StringComparison.OrdinalIgnoreCase))
         {
-            c = c.Trim();
-
-            // NOT (hög prioritet)
-            if (c.StartsWith("NOT ", StringComparison.OrdinalIgnoreCase))
-            {
-                return !EvalCondition(c.Substring(4).Trim(), v, ln, gk, ikd, g);
-            }
-            
-            // 1. Hantera OR (Lägst prioritet, kollas först)
-            var orIdx = IndexOfWord(c, " OR ");
-            if (orIdx >= 0) {
-                return EvalCondition(c[..orIdx].Trim(), v, ln, gk, ikd, g) || 
-                       EvalCondition(c[(orIdx + 4)..].Trim(), v, ln, gk, ikd, g);
-            }
-
-            // 2. Hantera AND
-            var andIdx = IndexOfWord(c, " AND ");
-            if (andIdx >= 0) {
-                return EvalCondition(c[..andIdx].Trim(), v, ln, gk, ikd, g) && 
-                       EvalCondition(c[(andIdx + 5)..].Trim(), v, ln, gk, ikd, g);
-            }
-
-            // 3. Befintlig logik för jämförelser (=, <, >, etc.)
-            if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>')) {
-                // Konvertera till double: allt utom exakt 0.0 räknas som sant
-                return Math.Abs(Convert.ToDouble(EvalValue(c, v, ln, gk, ikd, g))) > 0.000001;
-            }
-
-            var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
-            foreach (var op in ops) {
-                var i = c.IndexOf(op); if (i < 0) continue;
-                var lV = EvalValue(c[..i].Trim(), v, ln, gk, ikd, g); 
-                var rV = EvalValue(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
-                
-                if (lV is string || rV is string) { 
-                    var ls = ValueToString(lV); 
-                    var rs = ValueToString(rV); 
-                    return op == "=" ? ls == rs : ls != rs; 
-                }
-
-                // Använd Double här för att stödja flyttalsjämförelser!
-                var li = Convert.ToDouble(lV); 
-                var ri = Convert.ToDouble(rV);
-
-                return op switch { 
-                    "=" => Math.Abs(li - ri) < 0.000001, // Säker jämförelse för flyttal
-                    "<>" => Math.Abs(li - ri) > 0.000001, 
-                    "<" => li < ri, 
-                    ">" => li > ri, 
-                    "<=" => li <= ri, 
-                    ">=" => li >= ri, 
-                    _ => false 
-                };
-            }
-            return false;
+            return !EvalCondition(c.Substring(4).Trim(), v, ln, gk, ikd, g);
         }
+            
+        // 1. Hantera OR (Lägst prioritet, kollas först)
+        var orIdx = IndexOfWord(c, " OR ");
+        if (orIdx >= 0) {
+            return EvalCondition(c[..orIdx].Trim(), v, ln, gk, ikd, g) || 
+                   EvalCondition(c[(orIdx + 4)..].Trim(), v, ln, gk, ikd, g);
+        }
+
+        // 2. Hantera AND
+        var andIdx = IndexOfWord(c, " AND ");
+        if (andIdx >= 0) {
+            return EvalCondition(c[..andIdx].Trim(), v, ln, gk, ikd, g) && 
+                   EvalCondition(c[(andIdx + 5)..].Trim(), v, ln, gk, ikd, g);
+        }
+
+        // 3. Befintlig logik för jämförelser (=, <, >, etc.)
+        if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>')) {
+            // Konvertera till double: allt utom exakt 0.0 räknas som sant
+            return Math.Abs(Convert.ToDouble(EvalValue(c, v, ln, gk, ikd, g))) > 0.000001;
+        }
+
+        var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
+        foreach (var op in ops) {
+            var i = c.IndexOf(op); if (i < 0) continue;
+            var lV = EvalValue(c[..i].Trim(), v, ln, gk, ikd, g); 
+            var rV = EvalValue(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
+                
+            if (lV is string || rV is string) { 
+                var ls = ValueToString(lV); 
+                var rs = ValueToString(rV); 
+                return op == "=" ? ls == rs : ls != rs; 
+            }
+
+            // Använd Double här för att stödja flyttalsjämförelser!
+            var li = Convert.ToDouble(lV); 
+            var ri = Convert.ToDouble(rV);
+
+            return op switch { 
+                "=" => Math.Abs(li - ri) < 0.000001, // Säker jämförelse för flyttal
+                "<>" => Math.Abs(li - ri) > 0.000001, 
+                "<" => li < ri, 
+                ">" => li > ri, 
+                "<=" => li <= ri, 
+                ">=" => li >= ri, 
+                _ => false 
+            };
+        }
+        return false;
+    }
 
     private static string StripComments(string l) {
         bool q = false;
@@ -2473,573 +2437,590 @@ cleanup:
     }
     
 
-        private static object ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
-            var res = ParseTerm(ref t, v, ln, gk, ikd, g);
-            while (true) { 
-                if (t.TryConsume('+')) {
-                    var right = ParseTerm(ref t, v, ln, gk, ikd, g);
-                    if (res is string || right is string) res = ValueToString(res) + ValueToString(right);
-                    else res = Convert.ToDouble(res, CultureInfo.InvariantCulture) + Convert.ToDouble(right, CultureInfo.InvariantCulture);
-                } 
-                else if (t.TryConsume('-')) {
-                    var right = ParseTerm(ref t, v, ln, gk, ikd, g);
-                    res = Convert.ToDouble(res, CultureInfo.InvariantCulture) - Convert.ToDouble(right, CultureInfo.InvariantCulture);
-                }
-                else if (t.TryConsume('&')) {
-                    var right = ParseTerm(ref t, v, ln, gk, ikd, g);
-                    res = ValueToString(res) + ValueToString(right);
-                }
-                else break; 
+    private static object ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        var res = ParseTerm(ref t, v, ln, gk, ikd, g);
+        while (true) { 
+            if (t.TryConsume('+')) {
+                var right = ParseTerm(ref t, v, ln, gk, ikd, g);
+                if (res is string || right is string) res = ValueToString(res) + ValueToString(right);
+                else res = Convert.ToDouble(res, CultureInfo.InvariantCulture) + Convert.ToDouble(right, CultureInfo.InvariantCulture);
+            } 
+            else if (t.TryConsume('-')) {
+                var right = ParseTerm(ref t, v, ln, gk, ikd, g);
+                res = Convert.ToDouble(res, CultureInfo.InvariantCulture) - Convert.ToDouble(right, CultureInfo.InvariantCulture);
             }
-            return res;
+            else if (t.TryConsume('&')) {
+                var right = ParseTerm(ref t, v, ln, gk, ikd, g);
+                res = ValueToString(res) + ValueToString(right);
+            }
+            else break; 
         }
+        return res;
+    }
 
-        private static object ParseTerm(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
-            var res = ParseFactor(ref t, v, ln, gk, ikd, g);
-            while (true) { 
-                if (t.TryConsume('*')) {
-                    var right = ParseFactor(ref t, v, ln, gk, ikd, g);
-                    res = Convert.ToDouble(res, CultureInfo.InvariantCulture) * Convert.ToDouble(right, CultureInfo.InvariantCulture);
-                }
-                else if (t.TryConsume('/')) {
-                    var d = ParseFactor(ref t, v, ln, gk, ikd, g);
-                    double div = Convert.ToDouble(d, CultureInfo.InvariantCulture);
+    private static object ParseTerm(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        var res = ParseFactor(ref t, v, ln, gk, ikd, g);
+        while (true) { 
+            if (t.TryConsume('*')) {
+                var right = ParseFactor(ref t, v, ln, gk, ikd, g);
+                res = Convert.ToDouble(res, CultureInfo.InvariantCulture) * Convert.ToDouble(right, CultureInfo.InvariantCulture);
+            }
+            else if (t.TryConsume('/')) {
+                var d = ParseFactor(ref t, v, ln, gk, ikd, g);
+                double div = Convert.ToDouble(d, CultureInfo.InvariantCulture);
                         
-                    // ÄNDRAT: Kasta fel om nämnaren är noll (eller extremt nära noll)
-                    if (Math.Abs(div) < 0.000000001)
-                        throw new DivideByZeroException("Division by zero");
+                // ÄNDRAT: Kasta fel om nämnaren är noll (eller extremt nära noll)
+                if (Math.Abs(div) < 0.000000001)
+                    throw new DivideByZeroException("Division by zero");
 
-                    res = Convert.ToDouble(res, CultureInfo.InvariantCulture) / div;
-                } else break; 
-            }
-            return res;
+                res = Convert.ToDouble(res, CultureInfo.InvariantCulture) / div;
+            } else break; 
         }
+        return res;
+    }
 
     
-        private static object ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+    private static object ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        t.SkipWs();
+        if (t.TryReadString(out var s)) return s;
+        if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
+        if (t.TryReadDouble(out var n)) return n; 
+        if (t.TryReadIdentifier(out var id)) {
             t.SkipWs();
-            if (t.TryReadString(out var s)) return s;
-            if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
-            if (t.TryReadDouble(out var n)) return n; 
-            if (t.TryReadIdentifier(out var id)) {
-                t.SkipWs();
-                if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
-                if (t.TryConsume('(')) {
-                    if (v.ContainsKey("__functions__"))
+            if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
+            if (t.TryConsume('(')) {
+                if (v.ContainsKey("__functions__"))
+                {
+                    var funcs = (Dictionary<string, FunctionDefinition>)v["__functions__"];
+                    if (funcs.ContainsKey(id))
                     {
-                        var funcs = (Dictionary<string, FunctionDefinition>)v["__functions__"];
-                        if (funcs.ContainsKey(id))
+                        var argExprs = new List<object>();
+                        bool first = true;
+                        while (!t.TryConsume(')'))
                         {
-                            var argExprs = new List<object>();
-                            bool first = true;
-                            while (!t.TryConsume(')'))
-                            {
-                                if (!first) t.TryConsume(',');
-                                argExprs.Add(ParseExpr(ref t, v, ln, gk, ikd, g));
-                                first = false;
-                            }
-
-                            var callFunc = (Func<string, List<object>, int, object>)v["__callFunction__"];
-                            return callFunc(id, argExprs, ln);
-                        }
-                    }
-                    if (id.Equals("STR$", StringComparison.OrdinalIgnoreCase)) {
-                        object val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return ValueToString(val);
-                    }
-                    if (id.Equals("CHR$", StringComparison.OrdinalIgnoreCase)) {
-                        int ascii = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
-                        t.TryConsume(')'); return ((char)Math.Clamp(ascii, 0, 255)).ToString();
-                    }
-                    if (id.Equals("ASC", StringComparison.OrdinalIgnoreCase)) {
-                        object val = ParseExpr(ref t, v, ln, gk, ikd, g);
-                        t.TryConsume(')'); string str = ValueToString(val);
-                        return str.Length > 0 ? (double)str[0] : 0.0;
-                    }
-                    if (id.Equals("VAL", StringComparison.OrdinalIgnoreCase)) {
-                        object val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')');
-                        double.TryParse(ValueToString(val), CultureInfo.InvariantCulture, out var dv); return dv;
-                    }
-                    if (id.Equals("ABS", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Abs(a);
-                    }
-                    if (id.Equals("SGN", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Sign(a);
-                    }
-                    if (id.Equals("SQR", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Sqrt(a);
-                    }
-                    if (id.Equals("LOG", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Log(a);
-                    }
-                    if (id.Equals("LOG2", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Log2(a);
-                    }
-                    if (id.Equals("LOG10", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Log10(a);
-                    }
-                    if (id.Equals("EXP", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Exp(a);
-                    }
-                    if (id.Equals("TAN", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Tan(a);
-                    }
-                    if (id.Equals("ATN", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Atan(a);
-                    }
-                    if (id.Equals("MIN", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(',');
-                        double b = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Min(a,b);
-                    }
-                    if (id.Equals("MAX", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(',');
-                        double b = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Max(a,b);
-                    }
-                    if (id.Equals("SIN", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Sin(a * Math.PI / 180.0);
-                    }
-                    if (id.Equals("COS", StringComparison.OrdinalIgnoreCase)) {
-                        double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Cos(a * Math.PI / 180.0);
-                    }
-                    if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
-                        double m = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return _rng.NextDouble() * m;
-                    }
-                    if (id.Equals("INT", StringComparison.OrdinalIgnoreCase)) {
-                        double val = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return Math.Floor(val + 0.000001);
-                    }
-                    if (id.Equals("HEX", StringComparison.OrdinalIgnoreCase))
-                    {
-                        int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g)); 
-                        t.TryConsume(')'); return val.ToString("X");
-                    }
-                    if (id.Equals("INC", StringComparison.OrdinalIgnoreCase)) {
-                        double val = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return val + 1; 
-                    }   
-                    if (id.Equals("DEC", StringComparison.OrdinalIgnoreCase)) {
-                        double val = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                        t.TryConsume(')'); return val - 1; 
-                    }
-                    if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
-                        int id1 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(',');
-                        int id2 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(')');
-                        return g.SpriteHit(id1, id2) ? 1.0 : 0.0;
-                    }
-                    if (id.Equals("TILE", StringComparison.OrdinalIgnoreCase)) {
-                        int layer = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(',');
-                        int px = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
-                        int py = 0;
-                        if (t.TryConsume(',')) py = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
-                        t.TryConsume(')');
-                        return (double)g.GetMapTile(px / 32, py / 32);
-                    }
-                    if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
-                        var k = ValueToString(ParseExpr(ref t, v, ln, gk, ikd, g)); t.TryConsume(')'); return ikd(k) ? 1.0 : 0.0;
-                    }
-
-                    // --- String functions (AMOS-like) ---
-                    if (id.Equals("LEN", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object val = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-                            string sVal = ValueToString(val);
-                            return (double)sVal.Length;
+                            if (!first) t.TryConsume(',');
+                            argExprs.Add(ParseExpr(ref t, v, ln, gk, ikd, g));
+                            first = false;
                         }
 
-                    if (id.Equals("TRIM$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object val = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-                            return ValueToString(val).Trim();
-                        }
-
-                    if (id.Equals("LOWER$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object val = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-                            return ValueToString(val).ToLowerInvariant();
-                        }
-                    
-                    if (id.Equals("UPPER$", StringComparison.OrdinalIgnoreCase))
-                    {
-                        object val = ParseExpr(ref t, v, ln, gk, ikd, g);
-                        t.TryConsume(')');
-                        return ValueToString(val).ToUpperInvariant();
+                        var callFunc = (Func<string, List<object>, int, object>)v["__callFunction__"];
+                        return callFunc(id, argExprs, ln);
                     }
-
-                    if (id.Equals("LEFT$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-                            object nObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-
-                            string sVal = ValueToString(sObj);
-                            int n1 = (int)Math.Round(Convert.ToDouble(nObj, CultureInfo.InvariantCulture));
-                            if (n1 <= 0) return "";
-                            if (n1 >= sVal.Length) return sVal;
-                            return sVal.Substring(0, n1);
-                        }
-
-                    if (id.Equals("RIGHT$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-                            object nObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-
-                            string sVal = ValueToString(sObj);
-                            int n2 = (int)Math.Round(Convert.ToDouble(nObj, CultureInfo.InvariantCulture));
-                            if (n2 <= 0) return "";
-                            if (n2 >= sVal.Length) return sVal;
-                            return sVal.Substring(sVal.Length - n2, n2);
-                        }
-
-                    if (id.Equals("MID$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-                            object startObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-
-                            int len = -1;
-                            if (t.TryConsume(','))
-                            {
-                                object lenObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                                len = (int)Math.Round(Convert.ToDouble(lenObj, CultureInfo.InvariantCulture));
-                            }
-                            t.TryConsume(')');
-
-                            string sVal = ValueToString(sObj);
-                            int start1 = (int)Math.Round(Convert.ToDouble(startObj, CultureInfo.InvariantCulture)); // 1-based
-                            int start0 = Math.Max(0, start1 - 1);
-
-                            if (start0 >= sVal.Length) return "";
-                            if (len < 0) return sVal.Substring(start0);
-                            if (len <= 0) return "";
-                            int maxLen = Math.Min(len, sVal.Length - start0);
-                            return sVal.Substring(start0, maxLen);
-                        }
-
-                    if (id.Equals("REPLACE$", StringComparison.OrdinalIgnoreCase))
-						{ 
-                            // REPLACE$(source$, find$, replace$)
-
-    						object srcObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-    						t.TryConsume(',');
-
-						    object findObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-    						t.TryConsume(',');
-
-    						object replObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-    						t.TryConsume(')');
-
-    						string src = ValueToString(srcObj);
-    						string find = ValueToString(findObj);
-    						string repl = ValueToString(replObj);
-
-    						// Skydd mot tom söksträng
-    						if (string.IsNullOrEmpty(find))
-        						return src;
-
-						    return src.Replace(find, repl);
-						}
-
-                        if (id.Equals("INSTR", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-                            object findObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-
-                            int start1 = 1; // optional 1-based start position
-                            if (t.TryConsume(','))
-                            {
-                                object startObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                                start1 = (int)Math.Round(Convert.ToDouble(startObj, CultureInfo.InvariantCulture));
-                            }
-                            t.TryConsume(')');
-
-                            string sVal = ValueToString(sObj);
-                            string needle = ValueToString(findObj);
-
-                            if (string.IsNullOrEmpty(needle)) return 0.0;
-
-                            int start0 = Math.Max(0, start1 - 1);
-                            if (start0 > sVal.Length) return 0.0;
-
-                            int idx = sVal.IndexOf(needle, start0, StringComparison.Ordinal);
-                            return idx >= 0 ? (double)(idx + 1) : 0.0; // 1-based, 0 if not found
-                        }
-
-                        if (id.Equals("WORD$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-                            object nObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-
-                            string sVal = ValueToString(sObj);
-                            int n3 = (int)Math.Round(Convert.ToDouble(nObj, CultureInfo.InvariantCulture)); // 1-based
-                            if (n3 <= 0) return "";
-
-                            var parts = sVal
-                                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-                            if (n3 > parts.Length) return "";
-                            return parts[n3 - 1];
-                        }
-                    
-                        if (id.Equals("JOIN$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Första argumentet är array-variabeln
-                            object arrayObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-                            object separatorObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-
-                            string separator = ValueToString(separatorObj);
-    
-                            // Hantera både AmosStringArray och AmosNumericArray
-                            if (arrayObj is AmosStringArray strArray)
-                            {
-                                // Filtrera bort null-värden och sista elementet om det är tomt
-                                var validParts = strArray.Data.Where(s => s != null).ToArray();
-                                return string.Join(separator, validParts);
-                            }
-                            else if (arrayObj is AmosNumericArray numArray)
-                            {
-                                // Konvertera numerisk array till strängar
-                                var parts = numArray.Data.Select(d => d.ToString(CultureInfo.InvariantCulture)).ToArray();
-                                return string.Join(separator, parts);
-                            }
-                            else if (arrayObj is IAmosArray genericArray)
-                            {
-                                // Fallback för andra IAmosArray-implementationer
-                                var parts = new string[genericArray.Length];
-                                for (int i = 0; i < genericArray.Length; i++)
-                                    parts[i] = ValueToString(genericArray.Get(i));
-                                return string.Join(separator, parts);
-                            }
-    
-                            return ""; // Ingen array hittades
-                        }                     
-                        
-                        if (id.Equals("SPLIT$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object strObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-                            object delimiterObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-
-                            string input = ValueToString(strObj);
-                            string delimiter = ValueToString(delimiterObj);
-    
-                            if (string.IsNullOrEmpty(delimiter))
-                            {
-                                // Tom delimiter = dela i enskilda tecken
-                                var chars = input.Select(c => c.ToString()).ToArray();
-                                var result = new AmosStringArray(chars.Length - 1);
-                                for (int i = 0; i < chars.Length; i++)
-                                    result.Data[i] = chars[i];
-                                return result;
-                            }
-    
-                            string[] parts = input.Split(new[] { delimiter }, StringSplitOptions.None);
-                            var strArray = new AmosStringArray(parts.Length - 1);
-                            for (int i = 0; i < parts.Length; i++)
-                                strArray.Data[i] = parts[i];
-    
-                            return strArray;
-                        }
-                        
-                        if (id.Equals("FIND", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Första argumentet: sträng att söka i
-                            object textObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-    
-                            // Andra argumentet: söksträng
-                            object searchObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-    
-                            // Tredje argumentet (valfritt): startposition
-                            int startPos = 0;
-                            if (t.TryConsume(','))
-                            {
-                                object startObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                                startPos = (int)Math.Round(Convert.ToDouble(startObj, CultureInfo.InvariantCulture));
-                            }
-    
-                            t.TryConsume(')');
-
-                            string text = ValueToString(textObj);
-                            string search = ValueToString(searchObj);
-    
-                            if (startPos < 0 || startPos >= text.Length) return -1;
-    
-                            return text.IndexOf(search, startPos);
-                        }
-
-                        if (id.Equals("FINDLAST", StringComparison.OrdinalIgnoreCase))
-                        {
-                            object textObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-                            object searchObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-
-                            string text = ValueToString(textObj);
-                            string search = ValueToString(searchObj);
-    
-                            return text.LastIndexOf(search);
-                        }
-                        
-                        if (id.Equals("REPEAT$", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Första argumentet: sträng att upprepa
-                            object strObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(',');
-    
-                            // Andra argumentet: antal gånger
-                            object countObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-
-                            string str = ValueToString(strObj);
-                            int count = (int)Math.Round(Convert.ToDouble(countObj, CultureInfo.InvariantCulture));
-    
-                            if (count <= 0) return "";
-    
-                            // Optimera för enstaka tecken
-                            if (str.Length == 1)
-                            {
-                                return new string(str[0], count);
-                            }
-    
-                            return string.Concat(Enumerable.Repeat(str, count));
-                        }
-                        
-                        if (id.Equals("EOF", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Syntax: EOF(channel)
-                            object channelObj = ParseExpr(ref t, v, ln, gk, ikd, g);
-                            t.TryConsume(')');
-    
-                            int channel = (int)Math.Round(Convert.ToDouble(channelObj, CultureInfo.InvariantCulture));
-    
-                            // Kolla om kanalen finns
-                            if (!_openFiles.ContainsKey(channel))
-                            {
-                                // Om kanalen inte är öppen, returnera 1 (true/EOF)
-                                // Alternativt: throw new Exception($"EOF: Kanal {channel} är inte öppen");
-                                return 1;
-                            }
-    
-                            var fileChannel = _openFiles[channel];
-    
-                            // Kolla att det är en läskanal
-                            if (fileChannel.Mode != FileMode.Input)
-                            {
-                                throw new Exception($"EOF: Kanal {channel} är inte öppnad för läsning");
-                            }
-    
-                            if (fileChannel.Reader == null)
-                            {
-                                return 1; // Ingen reader = EOF
-                            }
-    
-                            // Returnera 1 om EOF, annars 0
-                            return fileChannel.Reader.EndOfStream ? 1 : 0;
-                        }
-                        
-                        if (id.Equals("DIM", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // DIM(A) eller DIM(A()) returnerar arrayens storlek
-                            // Vi läser namnet direkt utan att parsa som uttryck
-                            t.SkipWs();
-                            if (!t.TryReadIdentifier(out var arrName))
-                                throw new Exception($"DIM() expects array name at line {ln}");
-                            
-                            // Skippa eventuella tomma parenteser: A()
-                            t.SkipWs();
-                            if (t.TryConsume('('))
-                            {
-                                t.SkipWs();
-                                t.TryConsume(')');
-                            }
-                            
-                            // Stäng DIM-funktionens parentes
-                            t.SkipWs();
-                            t.TryConsume(')');
-                            
-                            if (v.TryGetValue(arrName, out var arrObj2) && arrObj2 is IAmosArray arr2)
-                            {
-                                // Returnera storleken (längd - 1 eftersom AMOS indexerar 0-baserat men DIM A(10) ger 11 element)
-                                return (double)(arr2.Length - 1);
-                            }
-                            
-                            throw new Exception($"Array '{arrName}' not found at line {ln}");
-                        }
-                        
-                    // Om vi kommer hit och det inte var en funktion, kolla om det är en array
-                    if (v.TryGetValue(id, out var arrObj) && arrObj is IAmosArray arr)
-                    {
-                        double rawIdx = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
-                        t.TryConsume(')');
-                        int aIdx = (int)Math.Floor(rawIdx + 0.000001);
-                            
-                        // ÄNDRAT: Kasta fel om index är ogiltigt istället för att ignorera
-                        if (aIdx < 0 || aIdx >= arr.Length)
-                            throw new IndexOutOfRangeException($"Array index out of bounds: {id}({aIdx}). Max is {arr.Length - 1}");
-
-                        return arr.Get(aIdx);
-                    }
-
-                    throw new Exception($"Unknown function: {id} at line {ln}");
-
-                    // ... existing code ...
                 }
-                if (v.TryGetValue(id, out var valVar)) return valVar;
-                return 0.0;
+                if (id.Equals("STR$", StringComparison.OrdinalIgnoreCase)) {
+                    object val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return ValueToString(val);
+                }
+                if (id.Equals("CHR$", StringComparison.OrdinalIgnoreCase)) {
+                    int ascii = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(')'); return ((char)Math.Clamp(ascii, 0, 255)).ToString();
+                }
+                if (id.Equals("ASC", StringComparison.OrdinalIgnoreCase)) {
+                    object val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')'); string str = ValueToString(val);
+                    return str.Length > 0 ? (double)str[0] : 0.0;
+                }
+                if (id.Equals("VAL", StringComparison.OrdinalIgnoreCase)) {
+                    object val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')');
+                    double.TryParse(ValueToString(val), CultureInfo.InvariantCulture, out var dv); return dv;
+                }
+                if (id.Equals("ABS", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Abs(a);
+                }
+                if (id.Equals("SGN", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Sign(a);
+                }
+                if (id.Equals("SQR", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Sqrt(a);
+                }
+                if (id.Equals("LOG", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Log(a);
+                }
+                if (id.Equals("LOG2", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Log2(a);
+                }
+                if (id.Equals("LOG10", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Log10(a);
+                }
+                if (id.Equals("EXP", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Exp(a);
+                }
+                if (id.Equals("TAN", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Tan(a);
+                }
+                if (id.Equals("ATN", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Atan(a);
+                }
+                if (id.Equals("MIN", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(',');
+                    double b = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Min(a,b);
+                }
+                if (id.Equals("MAX", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(',');
+                    double b = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Max(a,b);
+                }
+                if (id.Equals("SIN", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Sin(a * Math.PI / 180.0);
+                }
+                if (id.Equals("COS", StringComparison.OrdinalIgnoreCase)) {
+                    double a = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Cos(a * Math.PI / 180.0);
+                }
+                if (id.Equals("RND", StringComparison.OrdinalIgnoreCase)) {
+                    double m = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return _rng.NextDouble() * m;
+                }
+                if (id.Equals("INT", StringComparison.OrdinalIgnoreCase)) {
+                    double val = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return Math.Floor(val + 0.000001);
+                }
+                if (id.Equals("HEX", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g)); 
+                    t.TryConsume(')'); return val.ToString("X");
+                }
+                if (id.Equals("INC", StringComparison.OrdinalIgnoreCase)) {
+                    double val = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return val + 1; 
+                }   
+                if (id.Equals("DEC", StringComparison.OrdinalIgnoreCase)) {
+                    double val = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')'); return val - 1; 
+                }
+                if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
+                    int id1 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(',');
+                    int id2 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(')');
+                    return g.SpriteHit(id1, id2) ? 1.0 : 0.0;
+                }
+                if (id.Equals("TILE", StringComparison.OrdinalIgnoreCase)) {
+                    int layer = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(',');
+                    int px = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    int py = 0;
+                    if (t.TryConsume(',')) py = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(')');
+                    return (double)g.GetMapTile(px / 32, py / 32);
+                }
+                if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
+                    var k = ValueToString(ParseExpr(ref t, v, ln, gk, ikd, g)); t.TryConsume(')'); return ikd(k) ? 1.0 : 0.0;
+                }
+
+                // --- String functions (AMOS-like) ---
+                if (id.Equals("LEN", StringComparison.OrdinalIgnoreCase))
+                {
+                    object val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+                    string sVal = ValueToString(val);
+                    return (double)sVal.Length;
+                }
+
+                if (id.Equals("TRIM$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+                    return ValueToString(val).Trim();
+                }
+
+                if (id.Equals("LOWER$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+                    return ValueToString(val).ToLowerInvariant();
+                }
+                    
+                if (id.Equals("UPPER$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object val = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+                    return ValueToString(val).ToUpperInvariant();
+                }
+
+                if (id.Equals("LEFT$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object nObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+
+                    string sVal = ValueToString(sObj);
+                    int n1 = (int)Math.Round(Convert.ToDouble(nObj, CultureInfo.InvariantCulture));
+                    if (n1 <= 0) return "";
+                    if (n1 >= sVal.Length) return sVal;
+                    return sVal.Substring(0, n1);
+                }
+
+                if (id.Equals("RIGHT$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object nObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+
+                    string sVal = ValueToString(sObj);
+                    int n2 = (int)Math.Round(Convert.ToDouble(nObj, CultureInfo.InvariantCulture));
+                    if (n2 <= 0) return "";
+                    if (n2 >= sVal.Length) return sVal;
+                    return sVal.Substring(sVal.Length - n2, n2);
+                }
+
+                if (id.Equals("MID$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object startObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+
+                    int len = -1;
+                    if (t.TryConsume(','))
+                    {
+                        object lenObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                        len = (int)Math.Round(Convert.ToDouble(lenObj, CultureInfo.InvariantCulture));
+                    }
+                    t.TryConsume(')');
+
+                    string sVal = ValueToString(sObj);
+                    int start1 = (int)Math.Round(Convert.ToDouble(startObj, CultureInfo.InvariantCulture)); // 1-based
+                    int start0 = Math.Max(0, start1 - 1);
+
+                    if (start0 >= sVal.Length) return "";
+                    if (len < 0) return sVal.Substring(start0);
+                    if (len <= 0) return "";
+                    int maxLen = Math.Min(len, sVal.Length - start0);
+                    return sVal.Substring(start0, maxLen);
+                }
+
+                if (id.Equals("REPLACE$", StringComparison.OrdinalIgnoreCase))
+                { 
+                    // REPLACE$(source$, find$, replace$)
+
+                    object srcObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+
+                    object findObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+
+                    object replObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+
+                    string src = ValueToString(srcObj);
+                    string find = ValueToString(findObj);
+                    string repl = ValueToString(replObj);
+
+                    // Skydd mot tom söksträng
+                    if (string.IsNullOrEmpty(find))
+                        return src;
+
+                    return src.Replace(find, repl);
+                }
+
+                if (id.Equals("INSTR", StringComparison.OrdinalIgnoreCase))
+                {
+                    object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object findObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+
+                    int start1 = 1; // optional 1-based start position
+                    if (t.TryConsume(','))
+                    {
+                        object startObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                        start1 = (int)Math.Round(Convert.ToDouble(startObj, CultureInfo.InvariantCulture));
+                    }
+                    t.TryConsume(')');
+
+                    string sVal = ValueToString(sObj);
+                    string needle = ValueToString(findObj);
+
+                    if (string.IsNullOrEmpty(needle)) return 0.0;
+
+                    int start0 = Math.Max(0, start1 - 1);
+                    if (start0 > sVal.Length) return 0.0;
+
+                    int idx = sVal.IndexOf(needle, start0, StringComparison.Ordinal);
+                    return idx >= 0 ? (double)(idx + 1) : 0.0; // 1-based, 0 if not found
+                }
+
+                if (id.Equals("WORD$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object sObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object nObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+
+                    string sVal = ValueToString(sObj);
+                    int n3 = (int)Math.Round(Convert.ToDouble(nObj, CultureInfo.InvariantCulture)); // 1-based
+                    if (n3 <= 0) return "";
+
+                    var parts = sVal
+                        .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                    if (n3 > parts.Length) return "";
+                    return parts[n3 - 1];
+                }
+                    
+                if (id.Equals("JOIN$", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Första argumentet är array-variabeln
+                    object arrayObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object separatorObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+
+                    string separator = ValueToString(separatorObj);
+    
+                    // Hantera både AmosStringArray och AmosNumericArray
+                    if (arrayObj is AmosStringArray strArray)
+                    {
+                        // Filtrera bort null-värden och sista elementet om det är tomt
+                        var validParts = strArray.Data.Where(s => s != null).ToArray();
+                        return string.Join(separator, validParts);
+                    }
+                    else if (arrayObj is AmosNumericArray numArray)
+                    {
+                        // Konvertera numerisk array till strängar
+                        var parts = numArray.Data.Select(d => d.ToString(CultureInfo.InvariantCulture)).ToArray();
+                        return string.Join(separator, parts);
+                    }
+                    else if (arrayObj is IAmosArray genericArray)
+                    {
+                        // Fallback för andra IAmosArray-implementationer
+                        var parts = new string[genericArray.Length];
+                        for (int i = 0; i < genericArray.Length; i++)
+                            parts[i] = ValueToString(genericArray.Get(i));
+                        return string.Join(separator, parts);
+                    }
+    
+                    return ""; // Ingen array hittades
+                }                     
+                        
+                if (id.Equals("SPLIT$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object strObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object delimiterObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+
+                    string input = ValueToString(strObj);
+                    string delimiter = ValueToString(delimiterObj);
+    
+                    if (string.IsNullOrEmpty(delimiter))
+                    {
+                        // Tom delimiter = dela i enskilda tecken
+                        var chars = input.Select(c => c.ToString()).ToArray();
+                        var result = new AmosStringArray(chars.Length - 1);
+                        for (int i = 0; i < chars.Length; i++)
+                            result.Data[i] = chars[i];
+                        return result;
+                    }
+    
+                    string[] parts = input.Split(new[] { delimiter }, StringSplitOptions.None);
+                    var strArray = new AmosStringArray(parts.Length - 1);
+                    for (int i = 0; i < parts.Length; i++)
+                        strArray.Data[i] = parts[i];
+    
+                    return strArray;
+                }
+                        
+                if (id.Equals("FIND", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Första argumentet: sträng att söka i
+                    object textObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+    
+                    // Andra argumentet: söksträng
+                    object searchObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+    
+                    // Tredje argumentet (valfritt): startposition
+                    int startPos = 0;
+                    if (t.TryConsume(','))
+                    {
+                        object startObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                        startPos = (int)Math.Round(Convert.ToDouble(startObj, CultureInfo.InvariantCulture));
+                    }
+    
+                    t.TryConsume(')');
+
+                    string text = ValueToString(textObj);
+                    string search = ValueToString(searchObj);
+    
+                    if (startPos < 0 || startPos >= text.Length) return -1;
+    
+                    return text.IndexOf(search, startPos);
+                }
+
+                if (id.Equals("FINDLAST", StringComparison.OrdinalIgnoreCase))
+                {
+                    object textObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object searchObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+
+                    string text = ValueToString(textObj);
+                    string search = ValueToString(searchObj);
+    
+                    return text.LastIndexOf(search);
+                }
+                        
+                if (id.Equals("REPEAT$", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Första argumentet: sträng att upprepa
+                    object strObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+    
+                    // Andra argumentet: antal gånger
+                    object countObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+
+                    string str = ValueToString(strObj);
+                    int count = (int)Math.Round(Convert.ToDouble(countObj, CultureInfo.InvariantCulture));
+    
+                    if (count <= 0) return "";
+    
+                    // Optimera för enstaka tecken
+                    if (str.Length == 1)
+                    {
+                        return new string(str[0], count);
+                    }
+    
+                    return string.Concat(Enumerable.Repeat(str, count));
+                }
+                        
+                if (id.Equals("EOF", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Syntax: EOF(channel)
+                    object channelObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+    
+                    int channel = (int)Math.Round(Convert.ToDouble(channelObj, CultureInfo.InvariantCulture));
+    
+                    // Kolla om kanalen finns
+                    if (!_openFiles.ContainsKey(channel))
+                    {
+                        // Om kanalen inte är öppen, returnera 1 (true/EOF)
+                        // Alternativt: throw new Exception($"EOF: Kanal {channel} är inte öppen");
+                        return 1;
+                    }
+    
+                    var fileChannel = _openFiles[channel];
+    
+                    // Kolla att det är en läskanal
+                    if (fileChannel.Mode != FileMode.Input)
+                    {
+                        throw new Exception($"EOF: Kanal {channel} är inte öppnad för läsning");
+                    }
+    
+                    if (fileChannel.Reader == null)
+                    {
+                        return 1; // Ingen reader = EOF
+                    }
+    
+                    // Returnera 1 om EOF, annars 0
+                    return fileChannel.Reader.EndOfStream ? 1 : 0;
+                }
+                        
+                if (id.Equals("DIM", StringComparison.OrdinalIgnoreCase))
+                {
+                    // DIM(A) eller DIM(A()) returnerar arrayens storlek
+                    // Vi läser namnet direkt utan att parsa som uttryck
+                    t.SkipWs();
+                    if (!t.TryReadIdentifier(out var arrName))
+                        throw new Exception($"DIM() expects array name at line {ln}");
+                            
+                    // Skippa eventuella tomma parenteser: A()
+                    t.SkipWs();
+                    if (t.TryConsume('('))
+                    {
+                        t.SkipWs();
+                        t.TryConsume(')');
+                    }
+                            
+                    // Stäng DIM-funktionens parentes
+                    t.SkipWs();
+                    t.TryConsume(')');
+                            
+                    if (v.TryGetValue(arrName, out var arrObj2) && arrObj2 is IAmosArray arr2)
+                    {
+                        // Returnera storleken (längd - 1 eftersom AMOS indexerar 0-baserat men DIM A(10) ger 11 element)
+                        return (double)(arr2.Length);
+                    }
+                            
+                    throw new Exception($"Array '{arrName}' not found at line {ln}");
+                }
+
+                
+                // Om vi kommer hit och det inte var en funktion, kolla om det är en array
+                if (v.TryGetValue(id, out var arrObj) && arrObj is IAmosArray array)
+                {
+                    var indices = new List<int>();
+
+                    // Första uttrycket (vi är redan efter '(' när vi kommer hit)
+                    while (true)
+                    {
+                        // Parse ett index-uttryck (kan vara siffra, variabel, expr, funktion etc)
+                        object exprVal = ParseExpr(ref t, v, ln, gk, ikd, g);
+
+                        // Konvertera till int-index
+                        var d = Convert.ToDouble(exprVal, CultureInfo.InvariantCulture);
+                        indices.Add((int)Math.Round(d));
+
+                        // Om komma → fortsätt läsa fler dimensioner
+                        if (t.TryConsume(','))
+                            continue;
+
+                        // Om ) → klart
+                        if (t.TryConsume(')'))
+                            break;
+
+                        // Annars syntaxfel
+                        throw new Exception("Syntax error in array index expression");
+                    }
+
+                    return array.Get(indices.ToArray());
+                }
+                
+                throw new Exception($"Unknown function: {id} at line {ln}");
+
+                // ... existing code ...
             }
+            if (v.TryGetValue(id, out var valVar)) return valVar;
             return 0.0;
         }
-
-static string InputCommand(string[] args)
-{
-    string prompt = "";
-    string variableName = "";
-
-    // Anta att args = ["\"Vad heter du?\"", "A$"]
-    if (args.Length >= 2)
-    {
-        prompt = args[0].Trim('"');  // ta bort citationstecken
-        variableName = args[1];
+        return 0.0;
     }
+
+    static string InputCommand(string[] args)
+    {
+        string prompt = "";
+        string variableName = "";
+
+        // Anta att args = ["\"Vad heter du?\"", "A$"]
+        if (args.Length >= 2)
+        {
+            prompt = args[0].Trim('"');  // ta bort citationstecken
+            variableName = args[1];
+        }
     
-    // Visa prompt i konsolen
-    Console.Write(prompt + " ");
+        // Visa prompt i konsolen
+        Console.Write(prompt + " ");
 
-    // Läs hela raden
-    string input = Console.ReadLine() ?? "";
+        // Läs hela raden
+        string input = Console.ReadLine() ?? "";
 
-    // Sätt variabeln i din AMOS-variabeltabell
-    //SetStringVariable(variableName, input); 
+        // Sätt variabeln i din AMOS-variabeltabell
+        //SetStringVariable(variableName, input); 
 
-    return ""; // INPUT returnerar inget
-}
+        return ""; // INPUT returnerar inget
+    }
 
     private static string ValueToString(object? v)
     {
@@ -3218,83 +3199,186 @@ static string InputCommand(string[] args)
 
     private readonly record struct PrintAtArgs(string RowExpr, string ColExpr, string RestExpr);
 
-        /// <summary>
-        /// Parses: "AT <rowExpr>[,|space]<colExpr>[,]<restExpr?>"
-        /// Robust against commas/spaces inside quotes and parentheses.
-        /// Examples:
-        ///  PRINT AT 10,5,"HI"
-        ///  PRINT AT X+1, Y*2, "HELLO"
-        ///  PRINT AT 1 1, STR$(A)
-        /// </summary>
-        private static PrintAtArgs ParsePrintAtArguments(string printArg)
+    /// <summary>
+    /// Parses: "AT <rowExpr>[,|space]<colExpr>[,]<restExpr?>"
+    /// Robust against commas/spaces inside quotes and parentheses.
+    /// Examples:
+    ///  PRINT AT 10,5,"HI"
+    ///  PRINT AT X+1, Y*2, "HELLO"
+    ///  PRINT AT 1 1, STR$(A)
+    /// </summary>
+    private static PrintAtArgs ParsePrintAtArguments(string printArg)
+    {
+        // remove leading "AT"
+        var s = printArg.Trim();
+        if (s.Length >= 2 && s.StartsWith("AT", StringComparison.OrdinalIgnoreCase))
+            s = s[2..].TrimStart();
+
+        int i = 0;
+
+        string ReadExpr()
         {
-            // remove leading "AT"
-            var s = printArg.Trim();
-            if (s.Length >= 2 && s.StartsWith("AT", StringComparison.OrdinalIgnoreCase))
-                s = s[2..].TrimStart();
+            // Read until separator at top-level: comma or whitespace.
+            bool inQuotes = false;
+            int parenDepth = 0;
 
-            int i = 0;
-
-            string ReadExpr()
+            int start = i;
+            while (i < s.Length)
             {
-                // Read until separator at top-level: comma or whitespace.
-                bool inQuotes = false;
-                int parenDepth = 0;
+                char ch = s[i];
 
-                int start = i;
-                while (i < s.Length)
+                if (ch == '"')
                 {
-                    char ch = s[i];
-
-                    if (ch == '"')
-                    {
-                        inQuotes = !inQuotes;
-                        i++;
-                        continue;
-                    }
-
-                    if (!inQuotes)
-                    {
-                        if (ch == '(') { parenDepth++; i++; continue; }
-                        if (ch == ')') { if (parenDepth > 0) parenDepth--; i++; continue; }
-
-                        if (parenDepth == 0)
-                        {
-                            if (ch == ',' || char.IsWhiteSpace(ch))
-                                break;
-                        }
-                    }
-
+                    inQuotes = !inQuotes;
                     i++;
+                    continue;
                 }
 
-                return s[start..i].Trim();
+                if (!inQuotes)
+                {
+                    if (ch == '(') { parenDepth++; i++; continue; }
+                    if (ch == ')') { if (parenDepth > 0) parenDepth--; i++; continue; }
+
+                    if (parenDepth == 0)
+                    {
+                        if (ch == ',' || char.IsWhiteSpace(ch))
+                            break;
+                    }
+                }
+
+                i++;
             }
 
-            void SkipSeparators()
-            {
-                // Skip whitespace and at most one comma (plus surrounding whitespace)
-                while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
-                if (i < s.Length && s[i] == ',') i++;
-                while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
-            }
-
-            var rowExpr = ReadExpr();
-            SkipSeparators();
-            var colExpr = ReadExpr();
-            SkipSeparators();
-
-            var rest = (i < s.Length) ? s[i..].Trim() : "";
-            if (rest.StartsWith(",", StringComparison.Ordinal))
-                rest = rest[1..].TrimStart();
-
-            if (string.IsNullOrWhiteSpace(rowExpr) || string.IsNullOrWhiteSpace(colExpr))
-                throw new Exception("Syntax Error in PRINT AT: expected row and col");
-
-            return new PrintAtArgs(rowExpr, colExpr, rest);
+            return s[start..i].Trim();
         }
 
+        void SkipSeparators()
+        {
+            // Skip whitespace and at most one comma (plus surrounding whitespace)
+            while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
+            if (i < s.Length && s[i] == ',') i++;
+            while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
+        }
 
+        var rowExpr = ReadExpr();
+        SkipSeparators();
+        var colExpr = ReadExpr();
+        SkipSeparators();
+
+        var rest = (i < s.Length) ? s[i..].Trim() : "";
+        if (rest.StartsWith(",", StringComparison.Ordinal))
+            rest = rest[1..].TrimStart();
+
+        if (string.IsNullOrWhiteSpace(rowExpr) || string.IsNullOrWhiteSpace(colExpr))
+            throw new Exception("Syntax Error in PRINT AT: expected row and col");
+
+        return new PrintAtArgs(rowExpr, colExpr, rest);
+    }
+
+    /// <summary>
+    /// Initialisera en multidimensionell array från en sträng med nested brackets
+    /// Exempel: [[1,2,3],[4,5,6]] för 2D array
+    /// </summary>
+    private static void InitializeArrayFromString(
+        IAmosArray array, 
+        string initValues, 
+        int[] dimensions,
+        Dictionary<string, object> vars,
+        int ln,
+        Func<string> getInkey,
+        Func<string, bool> isKeyDown,
+        AmosGraphics graphics)
+    {
+        initValues = initValues.Trim();
+    
+        // 1D array: [1,2,3,4,5]
+        if (dimensions.Length == 1)
+        {
+            if (initValues.StartsWith("[")) initValues = initValues[1..];
+            if (initValues.EndsWith("]")) initValues = initValues[..^1];
+        
+            var values = SplitTopLevelCsv(initValues);
+            for (int i = 0; i < values.Count && i <= dimensions[0]; i++)
+            {
+                var val = EvalValue(values[i].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                array.Set(val, i);
+            }
+        }
+        // 2D array: [[1,2,3],[4,5,6],[7,8,9]]
+        else if (dimensions.Length == 2)
+        {
+            var rows = ParseNestedArray(initValues);
+            for (int y = 0; y < rows.Count && y <= dimensions[0]; y++)
+            {
+                var cols = SplitTopLevelCsv(rows[y]);
+                for (int x = 0; x < cols.Count && x <= dimensions[1]; x++)
+                {
+                    var val = EvalValue(cols[x].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                    array.Set(val, y, x);
+                }
+            }
+        }
+        // 3D array: [[[1,2],[3,4]],[[5,6],[7,8]]]
+        else if (dimensions.Length == 3)
+        {
+            var planes = ParseNestedArray(initValues);
+            for (int z = 0; z < planes.Count && z <= dimensions[0]; z++)
+            {
+                var rows = ParseNestedArray(planes[z]);
+                for (int y = 0; y < rows.Count && y <= dimensions[1]; y++)
+                {
+                    var cols = SplitTopLevelCsv(rows[y]);
+                    for (int x = 0; x < cols.Count && x <= dimensions[2]; x++)
+                    {
+                        var val = EvalValue(cols[x].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                        array.Set(val, z, y, x);
+                    }
+                }
+            }
+        }
+        else
+        {
+            throw new Exception($"Array initialization for {dimensions.Length}D arrays not yet supported");
+        }
+    }
+
+    /// <summary>
+    /// Parsa nested brackets: [[1,2],[3,4]] -> ["1,2", "3,4"]
+    /// </summary>
+    private static List<string> ParseNestedArray(string str)
+    {
+        str = str.Trim();
+        if (str.StartsWith("[")) str = str[1..];
+        if (str.EndsWith("]")) str = str[..^1];
+    
+        var result = new List<string>();
+        int depth = 0;
+        int start = 0;
+    
+        for (int i = 0; i < str.Length; i++)
+        {
+            if (str[i] == '[') depth++;
+            else if (str[i] == ']') depth--;
+            else if (str[i] == ',' && depth == 0)
+            {
+                result.Add(str[start..i].Trim());
+                start = i + 1;
+            }
+        }
+    
+        if (start < str.Length)
+            result.Add(str[start..].Trim());
+    
+        // Ta bort yttre brackets från varje element
+        for (int i = 0; i < result.Count; i++)
+        {
+            var elem = result[i].Trim();
+            if (elem.StartsWith("[") && elem.EndsWith("]"))
+                result[i] = elem[1..^1];
+        }
+    
+        return result;
+    }
     
     private static DateTime _lastFrameTime = DateTime.MinValue;
 

@@ -82,105 +82,105 @@ public class ShaderDrawOperation : ICustomDrawOperation
 
         if (_layer.CachedEffect != null)
         {
-                try
-                {
-                    using var fb = _layer.Bitmap.Lock();
-                    var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
-                        SKColorType.Bgra8888, SKAlphaType.Premul);
-                    using var skBitmap = new SKBitmap();
-                    skBitmap.InstallPixels(info, fb.Address, fb.RowBytes);
-                    using var image = SKImage.FromBitmap(skBitmap);
+            try
+            {
+                using var fb = _layer.Bitmap.Lock();
+                var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
+                    SKColorType.Bgra8888, SKAlphaType.Premul);
+                using var skBitmap = new SKBitmap();
+                skBitmap.InstallPixels(info, fb.Address, fb.RowBytes);
+                using var image = SKImage.FromBitmap(skBitmap);
 
-                    var children = new SKRuntimeEffectChildren(_layer.CachedEffect);
-                    if (_layer.CachedEffect.Children.Contains("inputTexture"))
-                        children.Add("inputTexture", image.ToShader());
+                var children = new SKRuntimeEffectChildren(_layer.CachedEffect);
+                if (_layer.CachedEffect.Children.Contains("inputTexture"))
+                    children.Add("inputTexture", image.ToShader());
 
-                    var uniforms = new SKRuntimeEffectUniforms(_layer.CachedEffect);
+                var uniforms = new SKRuntimeEffectUniforms(_layer.CachedEffect);
             
-                    if (_layer.CachedEffect.Uniforms.Contains("iResolution"))
-                        uniforms.Add("iResolution", new float[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
+                if (_layer.CachedEffect.Uniforms.Contains("iResolution"))
+                    uniforms.Add("iResolution", new float[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
 
-                    // Lägg till denna för att shadern ska veta skärmens storlek separat från bildens storlek
-                    if (_layer.CachedEffect.Uniforms.Contains("iScreenResolution"))
-                        uniforms.Add("iScreenResolution", new float[] { (float)_destRect.Width, (float)_destRect.Height });
+                // Lägg till denna för att shadern ska veta skärmens storlek separat från bildens storlek
+                if (_layer.CachedEffect.Uniforms.Contains("iScreenResolution"))
+                    uniforms.Add("iScreenResolution", new float[] { (float)_destRect.Width, (float)_destRect.Height });
 
-                    if (_layer.CachedEffect.Uniforms.Contains("iTime"))
-                        uniforms.Add("iTime", _layer.Timer);
+                if (_layer.CachedEffect.Uniforms.Contains("iTime"))
+                    uniforms.Add("iTime", _layer.Timer);
 
-                    if (_layer.CachedEffect.Uniforms.Contains("uParams")) 
+                if (_layer.CachedEffect.Uniforms.Contains("uParams")) 
+                {
+                    int slotCount = _layer.ShaderValues.Length;
+                    float[] uParamData = new float[slotCount * 4]; // varje Vector4 = 4 floats
+
+                    for (int i = 0; i < slotCount; i++)
                     {
-                        int slotCount = _layer.ShaderValues.Length;
-                        float[] uParamData = new float[slotCount * 4]; // varje Vector4 = 4 floats
-
-                        for (int i = 0; i < slotCount; i++)
-                        {
-                            Vector4 v = _layer.ShaderValues[i];
-                            int baseIndex = i * 4;
-                            uParamData[baseIndex + 0] = v.X;
-                            uParamData[baseIndex + 1] = v.Y;
-                            uParamData[baseIndex + 2] = v.Z;
-                            uParamData[baseIndex + 3] = v.W;
-                        }
-
-                        uniforms.Add("uParams", uParamData);
+                        Vector4 v = _layer.ShaderValues[i];
+                        int baseIndex = i * 4;
+                        uParamData[baseIndex + 0] = v.X;
+                        uParamData[baseIndex + 1] = v.Y;
+                        uParamData[baseIndex + 2] = v.Z;
+                        uParamData[baseIndex + 3] = v.W;
                     }
+
+                    uniforms.Add("uParams", uParamData);
+                }
                     
-                    // Säkerställ att uPositions och uHeights är exakt 22 element
-                    if (_layer.CachedEffect.Uniforms.Contains("uPositions")) 
-                    {
-                        float[] p22 = new float[22];
-                        if (_layer.ShaderParams != null) 
-                            Array.Copy(_layer.ShaderParams, p22, Math.Min(_layer.ShaderParams.Length, 22));
-                        uniforms.Add("uPositions", p22);
-                    }
-            
-                    if (_layer.CachedEffect.Uniforms.Contains("uHeights")) 
-                    {
-                        float[] h22 = new float[22];
-                        if (_layer.ShaderHeights != null) 
-                            Array.Copy(_layer.ShaderHeights, h22, Math.Min(_layer.ShaderHeights.Length, 22));
-                        uniforms.Add("uHeights", h22);
-                    }
-
-                    if (_layer.CachedEffect.Uniforms.Contains("uColors")) 
-                    {
-                        float[] cFrom = new float[22 * 4];
-                        float[] cTo = new float[22 * 4];
-                        
-                        // Säkerställ att vi inte kraschar om färg-arrayerna är null eller korta
-                        int colorCount = (_layer.ShaderColors != null) ? Math.Min(22, _layer.ShaderColors.Length) : 0;
-                        
-                        for (int i = 0; i < 22; i++) 
-                        {
-                            if (i < colorCount) {
-                                cFrom[i * 4 + 0] = _layer.ShaderColors[i].Red / 255f;
-                                cFrom[i * 4 + 1] = _layer.ShaderColors[i].Green / 255f;
-                                cFrom[i * 4 + 2] = _layer.ShaderColors[i].Blue / 255f;
-                                cFrom[i * 4 + 3] = _layer.ShaderColors[i].Alpha / 255f;
-
-                                cTo[i * 4 + 0] = _layer.ShaderColorsTo[i].Red / 255f;
-                                cTo[i * 4 + 1] = _layer.ShaderColorsTo[i].Green / 255f;
-                                cTo[i * 4 + 2] = _layer.ShaderColorsTo[i].Blue / 255f;
-                                cTo[i * 4 + 3] = _layer.ShaderColorsTo[i].Alpha / 255f;
-                            } else {
-                                // Standardvärden (Svart transparent)
-                                cFrom[i * 4 + 3] = 0.0f;
-                                cTo[i * 4 + 3] = 0.0f;
-                            }
-                        }
-                        uniforms.Add("uColors", cFrom);
-                        uniforms.Add("uColorsTo", cTo);
-                    }
-
-                    using var shader = _layer.CachedEffect.ToShader(true, uniforms, children);
-                    using var paint = new SKPaint { Shader = shader };
-                    canvas.DrawRect(new SKRect((float)_destRect.X, (float)_destRect.Y, (float)_destRect.Right, (float)_destRect.Bottom), paint);
-                }
-                catch (Exception ex)
+                // Säkerställ att uPositions och uHeights är exakt 22 element
+                if (_layer.CachedEffect.Uniforms.Contains("uPositions")) 
                 {
-                    System.Diagnostics.Debug.WriteLine("Shader Render Crash: " + ex.Message);
+                    float[] p22 = new float[22];
+                    if (_layer.ShaderParams != null) 
+                        Array.Copy(_layer.ShaderParams, p22, Math.Min(_layer.ShaderParams.Length, 22));
+                    uniforms.Add("uPositions", p22);
                 }
+            
+                if (_layer.CachedEffect.Uniforms.Contains("uHeights")) 
+                {
+                    float[] h22 = new float[22];
+                    if (_layer.ShaderHeights != null) 
+                        Array.Copy(_layer.ShaderHeights, h22, Math.Min(_layer.ShaderHeights.Length, 22));
+                    uniforms.Add("uHeights", h22);
+                }
+
+                if (_layer.CachedEffect.Uniforms.Contains("uColors")) 
+                {
+                    float[] cFrom = new float[22 * 4];
+                    float[] cTo = new float[22 * 4];
+                        
+                    // Säkerställ att vi inte kraschar om färg-arrayerna är null eller korta
+                    int colorCount = (_layer.ShaderColors != null) ? Math.Min(22, _layer.ShaderColors.Length) : 0;
+                        
+                    for (int i = 0; i < 22; i++) 
+                    {
+                        if (i < colorCount) {
+                            cFrom[i * 4 + 0] = _layer.ShaderColors[i].Red / 255f;
+                            cFrom[i * 4 + 1] = _layer.ShaderColors[i].Green / 255f;
+                            cFrom[i * 4 + 2] = _layer.ShaderColors[i].Blue / 255f;
+                            cFrom[i * 4 + 3] = _layer.ShaderColors[i].Alpha / 255f;
+
+                            cTo[i * 4 + 0] = _layer.ShaderColorsTo[i].Red / 255f;
+                            cTo[i * 4 + 1] = _layer.ShaderColorsTo[i].Green / 255f;
+                            cTo[i * 4 + 2] = _layer.ShaderColorsTo[i].Blue / 255f;
+                            cTo[i * 4 + 3] = _layer.ShaderColorsTo[i].Alpha / 255f;
+                        } else {
+                            // Standardvärden (Svart transparent)
+                            cFrom[i * 4 + 3] = 0.0f;
+                            cTo[i * 4 + 3] = 0.0f;
+                        }
+                    }
+                    uniforms.Add("uColors", cFrom);
+                    uniforms.Add("uColorsTo", cTo);
+                }
+
+                using var shader = _layer.CachedEffect.ToShader(true, uniforms, children);
+                using var paint = new SKPaint { Shader = shader };
+                canvas.DrawRect(new SKRect((float)_destRect.X, (float)_destRect.Y, (float)_destRect.Right, (float)_destRect.Bottom), paint);
             }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Shader Render Crash: " + ex.Message);
+            }
+        }
     }
 }
 
@@ -441,244 +441,244 @@ public sealed class AmosGraphics
         InactiveFrame.Clear();
     }
     
-            // Sätt font-storlek (anropa i början)
-        public void ConfigureText(int w, int h, string text)
-        {
-            CharWidth = w;
-            CharHeight = h;
-            TextCols = Width / w;
-            TextRows = Height / h;
-            font = text;
-        }
+    // Sätt font-storlek (anropa i början)
+    public void ConfigureText(int w, int h, string text)
+    {
+        CharWidth = w;
+        CharHeight = h;
+        TextCols = Width / w;
+        TextRows = Height / h;
+        font = text;
+    }
 
-        public void Locate(int x, int y)
-        {
-            CursorX = Math.Clamp(x, 0, TextCols - 1);
-            CursorY = Math.Clamp(y, 0, TextRows - 1);
-        }
+    public void Locate(int x, int y)
+    {
+        CursorX = Math.Clamp(x, 0, TextCols - 1);
+        CursorY = Math.Clamp(y, 0, TextRows - 1);
+    }
 
-        public void ConsolePrint(string text, bool newLine = true)
-        {
-            // Dela upp i rader för att hantera \n korrekt
-            var lines = text.Replace("\r\n", "\n").Split('\n');
+    public void ConsolePrint(string text, bool newLine = true)
+    {
+        // Dela upp i rader för att hantera \n korrekt
+        var lines = text.Replace("\r\n", "\n").Split('\n');
 
-            for (int i = 0; i < lines.Length; i++)
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i];
+            if (line.Length > 0)
             {
-                string line = lines[i];
-                if (line.Length > 0)
-                {
-                    // Rita texten grafiskt på nuvarande position
-                    DrawStringInternal(line);
-                }
+                // Rita texten grafiskt på nuvarande position
+                DrawStringInternal(line);
+            }
 
-                // Om det är sista delen och newLine är false, gör ingen radbrytning (semikolon i BASIC)
-                if (i < lines.Length - 1 || newLine)
-                {
-                    ConsoleNewLine();
-                }
+            // Om det är sista delen och newLine är false, gör ingen radbrytning (semikolon i BASIC)
+            if (i < lines.Length - 1 || newLine)
+            {
+                ConsoleNewLine();
             }
         }
+    }
 
-        private void ConsoleNewLine()
+    private void ConsoleNewLine()
+    {
+        CursorX = 0;
+        CursorY++;
+        if (CursorY >= TextRows)
         {
-            CursorX = 0;
-            CursorY++;
-            if (CursorY >= TextRows)
-            {
-                CursorY = TextRows - 1;
-                ScrollUp(CharHeight);
-            }
+            CursorY = TextRows - 1;
+            ScrollUp(CharHeight);
+        }
+    }
+
+    private void DrawStringInternal(string s)
+    {
+        // Beräkna startposition
+        int px = CursorX * CharWidth;
+        int py = CursorY * CharHeight;
+
+        Color currentInk = Ink;
+        Color currentPaper = PaperColor;
+        int currentH = CharHeight;
+        int currentW = CharWidth;
+
+        // 1. Rita PAPER (Bakgrundsbox) för hela strängen direkt (snabbare)
+        if (currentPaper != Colors.Transparent)
+        {
+            Bar(px, py, px + s.Length * currentW - 1, py + currentH - 1, currentPaper);
         }
 
-            private void DrawStringInternal(string s)
+        // 2. Rita TEXT (Ink) tecken för tecken för att garantera rutnätet
+        Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            EnsureScreen();
+            //var typeface = new Typeface("33333333, FontStyle.Normal, FontWeight.Bold); 
+            var typeface = new Typeface(font, FontStyle.Normal, FontWeight.Bold); 
+
+            // Skapa en bitmap som rymmer hela texten
+            var ps = new PixelSize(s.Length * currentW, currentH);
+            if (ps.Width == 0 || ps.Height == 0) return;
+
+            using var rtb = new RenderTargetBitmap(ps);
+            using (var ctx = rtb.CreateDrawingContext())
             {
-                // Beräkna startposition
-                int px = CursorX * CharWidth;
-                int py = CursorY * CharHeight;
-
-                Color currentInk = Ink;
-                Color currentPaper = PaperColor;
-                int currentH = CharHeight;
-                int currentW = CharWidth;
-
-                // 1. Rita PAPER (Bakgrundsbox) för hela strängen direkt (snabbare)
-                if (currentPaper != Colors.Transparent)
-                {
-                    Bar(px, py, px + s.Length * currentW - 1, py + currentH - 1, currentPaper);
-                }
-
-                // 2. Rita TEXT (Ink) tecken för tecken för att garantera rutnätet
-                Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    EnsureScreen();
-                    //var typeface = new Typeface("33333333, FontStyle.Normal, FontWeight.Bold); 
-                    var typeface = new Typeface(font, FontStyle.Normal, FontWeight.Bold); 
-
-                    // Skapa en bitmap som rymmer hela texten
-                    var ps = new PixelSize(s.Length * currentW, currentH);
-                    if (ps.Width == 0 || ps.Height == 0) return;
-
-                    using var rtb = new RenderTargetBitmap(ps);
-                    using (var ctx = rtb.CreateDrawingContext())
-                    {
-                        // Se till att RTB är tömd
-                        ctx.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ps.Width, ps.Height));
+                // Se till att RTB är tömd
+                ctx.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ps.Width, ps.Height));
                         
-                        // Rita varje tecken i sin exakta "box"
-                        for(int i=0; i<s.Length; i++)
-                        {
-                            string charStr = s[i].ToString();
-                            var ft = new FormattedText(
-                                charStr,
-                                CultureInfo.CurrentCulture,
-                                FlowDirection.LeftToRight,
-                                typeface,
-                                currentH, 
-                                new SolidColorBrush(currentInk) 
-                            );
+                // Rita varje tecken i sin exakta "box"
+                for(int i=0; i<s.Length; i++)
+                {
+                    string charStr = s[i].ToString();
+                    var ft = new FormattedText(
+                        charStr,
+                        CultureInfo.CurrentCulture,
+                        FlowDirection.LeftToRight,
+                        typeface,
+                        currentH, 
+                        new SolidColorBrush(currentInk) 
+                    );
 
-                            // Tvinga positionen: i * CharWidth
-                            // Vi använder PushClip för att hindra breda tecken från att blöda in i nästa ruta
-                            using (ctx.PushClip(new Rect(i * currentW, 0, currentW, currentH)))
-                            {
-                                ctx.DrawText(ft, new Point(i * currentW, 0));
-                            }
-                        }
+                    // Tvinga positionen: i * CharWidth
+                    // Vi använder PushClip för att hindra breda tecken från att blöda in i nästa ruta
+                    using (ctx.PushClip(new Rect(i * currentW, 0, currentW, currentH)))
+                    {
+                        ctx.DrawText(ft, new Point(i * currentW, 0));
                     }
+                }
+            }
 
-                    // Kopiera pixlar till ActiveScreen (med RGBA->BGRA fixen)
-                    var b = new byte[ps.Width * ps.Height * 4];
+            // Kopiera pixlar till ActiveScreen (med RGBA->BGRA fixen)
+            var b = new byte[ps.Width * ps.Height * 4];
+            unsafe
+            {
+                fixed (byte* p = b) rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
+            }
+
+            lock (LockObject)
+            {
+                using (var dst = GetActiveScreen().Lock())
                     unsafe
                     {
-                        fixed (byte* p = b) rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
-                    }
-
-                    lock (LockObject)
-                    {
-                        using (var dst = GetActiveScreen().Lock())
-                        unsafe
+                        var dp = (byte*)dst.Address;
+                        for (int r = 0; r < Math.Min(ps.Height, currentH); r++)
                         {
-                            var dp = (byte*)dst.Address;
-                            for (int r = 0; r < Math.Min(ps.Height, currentH); r++)
+                            int ty = py + r;
+                            if (ty < 0 || ty >= Height) continue;
+                            var dr = dp + ty * dst.RowBytes;
+                                
+                            for (int c = 0; c < ps.Width; c++)
                             {
-                                int ty = py + r;
-                                if (ty < 0 || ty >= Height) continue;
-                                var dr = dp + ty * dst.RowBytes;
+                                int tx = px + c;
+                                if (tx < 0 || tx >= Width) continue;
                                 
-                                for (int c = 0; c < ps.Width; c++)
+                                int si = (r * ps.Width + c) * 4;
+                                int di = tx * 4;
+                                
+                                byte alpha = b[si + 3];
+                                if (alpha > 0)
                                 {
-                                    int tx = px + c;
-                                    if (tx < 0 || tx >= Width) continue;
-                                
-                                    int si = (r * ps.Width + c) * 4;
-                                    int di = tx * 4;
-                                
-                                    byte alpha = b[si + 3];
-                                    if (alpha > 0)
-                                    {
-                                        dr[di + 0] = b[si + 2]; // B
-                                        dr[di + 1] = b[si + 1]; // G
-                                        dr[di + 2] = b[si + 0]; // R
-                                        dr[di + 3] = 255;       // A
-                                    }
+                                    dr[di + 0] = b[si + 2]; // B
+                                    dr[di + 1] = b[si + 1]; // G
+                                    dr[di + 2] = b[si + 0]; // R
+                                    dr[di + 3] = 255;       // A
                                 }
                             }
                         }
                     }
-                }, Avalonia.Threading.DispatcherPriority.Render).Wait(); // Vänta på att ritningen är klar
+            }
+        }, Avalonia.Threading.DispatcherPriority.Render).Wait(); // Vänta på att ritningen är klar
             
-                // Flytta cursorn framåt
-                CursorX += s.Length;
-            }
+        // Flytta cursorn framåt
+        CursorX += s.Length;
+    }
 
-        // En hjälpare för att rita PAPER-boxen (samma som din Bar men tar in färg direkt)
-        public void Bar(int x1, int y1, int x2, int y2, Color c)
+    // En hjälpare för att rita PAPER-boxen (samma som din Bar men tar in färg direkt)
+    public void Bar(int x1, int y1, int x2, int y2, Color c)
+    {
+        lock (LockObject)
         {
-            lock (LockObject)
+            EnsureScreen();
+            Normalize(ref x1, ref y1, ref x2, ref y2);
+            x1 = Math.Clamp(x1, 0, Width - 1);
+            x2 = Math.Clamp(x2, 0, Width - 1);
+            y1 = Math.Clamp(y1, 0, Height - 1);
+            y2 = Math.Clamp(y2, 0, Height - 1);
+            using var fb = GetActiveScreen().Lock();
+            unsafe
             {
-                EnsureScreen();
-                Normalize(ref x1, ref y1, ref x2, ref y2);
-                x1 = Math.Clamp(x1, 0, Width - 1);
-                x2 = Math.Clamp(x2, 0, Width - 1);
-                y1 = Math.Clamp(y1, 0, Height - 1);
-                y2 = Math.Clamp(y2, 0, Height - 1);
-                using var fb = GetActiveScreen().Lock();
-                unsafe
-                {
-                    var p = (byte*)fb.Address;
-                    // Pre-calculate colors
-                    byte a = c.A;
-                    byte r = (byte)(c.R * a / 255);
-                    byte g = (byte)(c.G * a / 255);
-                    byte b = (byte)(c.B * a / 255);
+                var p = (byte*)fb.Address;
+                // Pre-calculate colors
+                byte a = c.A;
+                byte r = (byte)(c.R * a / 255);
+                byte g = (byte)(c.G * a / 255);
+                byte b = (byte)(c.B * a / 255);
 
-                    for (var y = y1; y <= y2; y++)
+                for (var y = y1; y <= y2; y++)
+                {
+                    var row = p + y * fb.RowBytes;
+                    for (var x = x1; x <= x2; x++)
                     {
-                        var row = p + y * fb.RowBytes;
-                        for (var x = x1; x <= x2; x++)
-                        {
-                            var i = x * 4;
-                            row[i + 0] = b;
-                            row[i + 1] = g;
-                            row[i + 2] = r;
-                            row[i + 3] = a;
-                        }
+                        var i = x * 4;
+                        row[i + 0] = b;
+                        row[i + 1] = g;
+                        row[i + 2] = r;
+                        row[i + 3] = a;
                     }
                 }
             }
         }
+    }
 
-        public void ScrollUp(int pixels)
+    public void ScrollUp(int pixels)
+    {
+        lock (LockObject)
         {
-            lock (LockObject)
+            var bmp = GetActiveScreen();
+            using var fb = bmp.Lock();
+            unsafe
             {
-                var bmp = GetActiveScreen();
-                using var fb = bmp.Lock();
-                unsafe
+                byte* ptr = (byte*)fb.Address;
+                int rowBytes = fb.RowBytes;
+                int totalHeight = bmp.PixelSize.Height;
+                    
+                // 1. Flytta minnet uppåt
+                // Destination: start (rad 0)
+                // Källa: rad 'pixels'
+                // Antal bytes: (totalHeight - pixels) * rowBytes
+                int bytesToMove = (totalHeight - pixels) * rowBytes;
+                    
+                if (bytesToMove > 0)
                 {
-                    byte* ptr = (byte*)fb.Address;
-                    int rowBytes = fb.RowBytes;
-                    int totalHeight = bmp.PixelSize.Height;
-                    
-                    // 1. Flytta minnet uppåt
-                    // Destination: start (rad 0)
-                    // Källa: rad 'pixels'
-                    // Antal bytes: (totalHeight - pixels) * rowBytes
-                    int bytesToMove = (totalHeight - pixels) * rowBytes;
-                    
-                    if (bytesToMove > 0)
-                    {
-                        Buffer.MemoryCopy(
-                            ptr + pixels * rowBytes, // Source
-                            ptr,                     // Dest
-                            bytesToMove,             // DestSize
-                            bytesToMove              // SourceSize
-                        );
-                    }
+                    Buffer.MemoryCopy(
+                        ptr + pixels * rowBytes, // Source
+                        ptr,                     // Dest
+                        bytesToMove,             // DestSize
+                        bytesToMove              // SourceSize
+                    );
+                }
 
-                    // 2. Rensa botten-remsan med PAPER-färgen (eller svart/transparent)
-                    Color clearCol = PaperColor; // Eller Colors.Transparent om du vill
+                // 2. Rensa botten-remsan med PAPER-färgen (eller svart/transparent)
+                Color clearCol = PaperColor; // Eller Colors.Transparent om du vill
                     
-                    byte a = clearCol.A;
-                    byte r = (byte)(clearCol.R * a / 255);
-                    byte g = (byte)(clearCol.G * a / 255);
-                    byte b = (byte)(clearCol.B * a / 255);
+                byte a = clearCol.A;
+                byte r = (byte)(clearCol.R * a / 255);
+                byte g = (byte)(clearCol.G * a / 255);
+                byte b = (byte)(clearCol.B * a / 255);
 
-                    for (int y = totalHeight - pixels; y < totalHeight; y++)
+                for (int y = totalHeight - pixels; y < totalHeight; y++)
+                {
+                    byte* row = ptr + y * rowBytes;
+                    for (int x = 0; x < bmp.PixelSize.Width; x++)
                     {
-                        byte* row = ptr + y * rowBytes;
-                        for (int x = 0; x < bmp.PixelSize.Width; x++)
-                        {
-                            int i = x * 4;
-                            row[i + 0] = b;
-                            row[i + 1] = g;
-                            row[i + 2] = r;
-                            row[i + 3] = a;
-                        }
+                        int i = x * 4;
+                        row[i + 0] = b;
+                        row[i + 1] = g;
+                        row[i + 2] = r;
+                        row[i + 3] = a;
                     }
                 }
             }
         }
+    }
     
     internal sealed class Rainbow
     {
@@ -1116,7 +1116,7 @@ public sealed class AmosGraphics
     {
         // Om vi skickar med ett targetLayer, sätt shadern där direkt
         if (targetLayer != null) {
-           // targetLayer.SkSlCode = RasterShaderCode;
+            // targetLayer.SkSlCode = RasterShaderCode;
         }
         
         var bmp = new WriteableBitmap(
@@ -1294,7 +1294,7 @@ public sealed class AmosGraphics
     //    if (sid >= 0 && sid < InactiveFrame.Count) 
     //        return InactiveFrame[sid].Offset;
     //    return new Point(0, 0);
-   // }
+    // }
 
     // ---------------- Drawing ----------------
     public void Plot(int x, int y) => Plot(x, y, Ink);
@@ -1389,276 +1389,276 @@ public sealed class AmosGraphics
         }
     }
     
-        public void Circle(int x1, int y1, int r)
+    public void Circle(int x1, int y1, int r)
+    {
+        lock (LockObject)
         {
-            lock (LockObject)
+            EnsureScreen();
+            var bmp = GetActiveScreen();
+            using var fb = bmp.Lock();
+                
+            int w = bmp.PixelSize.Width;
+            int h = bmp.PixelSize.Height;
+                
+            // Konvertera Ink till uint (BGRA)
+            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+
+            unsafe
             {
-                EnsureScreen();
-                var bmp = GetActiveScreen();
-                using var fb = bmp.Lock();
-                
-                int w = bmp.PixelSize.Width;
-                int h = bmp.PixelSize.Height;
-                
-                // Konvertera Ink till uint (BGRA)
-                uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+                uint* ptr = (uint*)fb.Address;
+                int stride = fb.RowBytes / 4;
 
-                unsafe
+                // Lokal funktion för säker pixel-sättning
+                void SetPixel(int px, int py)
                 {
-                    uint* ptr = (uint*)fb.Address;
-                    int stride = fb.RowBytes / 4;
+                    if (px >= 0 && px < w && py >= 0 && py < h)
+                        ptr[py * stride + px] = cVal;
+                }
 
-                    // Lokal funktion för säker pixel-sättning
-                    void SetPixel(int px, int py)
+                int x = 0, y = r;
+                int d = 3 - 2 * r;
+
+                while (y >= x)
+                {
+                    SetPixel(x1 + x, y1 + y);
+                    SetPixel(x1 - x, y1 + y);
+                    SetPixel(x1 + x, y1 - y);
+                    SetPixel(x1 - x, y1 - y);
+                    SetPixel(x1 + y, y1 + x);
+                    SetPixel(x1 - y, y1 + x);
+                    SetPixel(x1 + y, y1 - x);
+                    SetPixel(x1 - y, y1 - x);
+
+                    x++;
+                    if (d > 0)
                     {
-                        if (px >= 0 && px < w && py >= 0 && py < h)
-                            ptr[py * stride + px] = cVal;
+                        y--;
+                        d = d + 4 * (x - y) + 10;
                     }
-
-                    int x = 0, y = r;
-                    int d = 3 - 2 * r;
-
-                    while (y >= x)
+                    else
                     {
-                        SetPixel(x1 + x, y1 + y);
-                        SetPixel(x1 - x, y1 + y);
-                        SetPixel(x1 + x, y1 - y);
-                        SetPixel(x1 - x, y1 - y);
-                        SetPixel(x1 + y, y1 + x);
-                        SetPixel(x1 - y, y1 + x);
-                        SetPixel(x1 + y, y1 - x);
-                        SetPixel(x1 - y, y1 - x);
-
-                        x++;
-                        if (d > 0)
-                        {
-                            y--;
-                            d = d + 4 * (x - y) + 10;
-                        }
-                        else
-                        {
-                            d = d + 4 * x + 6;
-                        }
+                        d = d + 4 * x + 6;
                     }
                 }
             }
         }
+    }
     
-        public void Ellipse(int x1, int y1, int r1, int r2)
+    public void Ellipse(int x1, int y1, int r1, int r2)
+    {
+        lock (LockObject)
         {
-            lock (LockObject)
+            EnsureScreen();
+            var bmp = GetActiveScreen();
+            using var fb = bmp.Lock();
+
+            int w = bmp.PixelSize.Width;
+            int h = bmp.PixelSize.Height;
+            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+
+            unsafe
             {
-                EnsureScreen();
-                var bmp = GetActiveScreen();
-                using var fb = bmp.Lock();
+                uint* ptr = (uint*)fb.Address;
+                int stride = fb.RowBytes / 4;
 
-                int w = bmp.PixelSize.Width;
-                int h = bmp.PixelSize.Height;
-                uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
-
-                unsafe
+                void SetPixel(int px, int py)
                 {
-                    uint* ptr = (uint*)fb.Address;
-                    int stride = fb.RowBytes / 4;
+                    if (px >= 0 && px < w && py >= 0 && py < h)
+                        ptr[py * stride + px] = cVal;
+                }
 
-                    void SetPixel(int px, int py)
+                int x = 0, y = r2;
+                long rx = r1, ry = r2; // Använd long för att undvika overflow vid kvadrat
+                long rxSq = rx * rx;
+                long rySq = ry * ry;
+                long twoRxSq = 2 * rxSq;
+                long twoRySq = 2 * rySq;
+                long p;
+                long px = 0;
+                long py = twoRxSq * y;
+
+                // Region 1
+                p = (long)Math.Round(rySq - (rxSq * ry) + (0.25 * rxSq));
+                while (px < py)
+                {
+                    SetPixel(x1 + x, y1 + y);
+                    SetPixel(x1 - x, y1 + y);
+                    SetPixel(x1 + x, y1 - y);
+                    SetPixel(x1 - x, y1 - y);
+                    x++;
+                    px += twoRySq;
+                    if (p < 0)
                     {
-                        if (px >= 0 && px < w && py >= 0 && py < h)
-                            ptr[py * stride + px] = cVal;
+                        p += rySq + px;
                     }
-
-                    int x = 0, y = r2;
-                    long rx = r1, ry = r2; // Använd long för att undvika overflow vid kvadrat
-                    long rxSq = rx * rx;
-                    long rySq = ry * ry;
-                    long twoRxSq = 2 * rxSq;
-                    long twoRySq = 2 * rySq;
-                    long p;
-                    long px = 0;
-                    long py = twoRxSq * y;
-
-                    // Region 1
-                    p = (long)Math.Round(rySq - (rxSq * ry) + (0.25 * rxSq));
-                    while (px < py)
+                    else
                     {
-                        SetPixel(x1 + x, y1 + y);
-                        SetPixel(x1 - x, y1 + y);
-                        SetPixel(x1 + x, y1 - y);
-                        SetPixel(x1 - x, y1 - y);
-                        x++;
-                        px += twoRySq;
-                        if (p < 0)
-                        {
-                            p += rySq + px;
-                        }
-                        else
-                        {
-                            y--;
-                            py -= twoRxSq;
-                            p += rySq + px - py;
-                        }
-                    }
-
-                    // Region 2
-                    p = (long)Math.Round(rySq * (x + 0.5) * (x + 0.5) + rxSq * (y - 1) * (y - 1) - rxSq * rySq);
-                    while (y >= 0)
-                    {
-                        SetPixel(x1 + x, y1 + y);
-                        SetPixel(x1 - x, y1 + y);
-                        SetPixel(x1 + x, y1 - y);
-                        SetPixel(x1 - x, y1 - y);
                         y--;
                         py -= twoRxSq;
-                        if (p > 0)
-                        {
-                            p += rxSq - py;
-                        }
-                        else
-                        {
-                            x++;
-                            px += twoRySq;
-                            p += rxSq - py + px;
-                        }
+                        p += rySq + px - py;
                     }
                 }
-            }
-        }
-    
-        public void CircleF(int x1, int y1, int r1, int r2)
-        {
-            lock (LockObject)
-            {
-                EnsureScreen();
-                var bmp = GetActiveScreen();
-                using var fb = bmp.Lock();
 
-                int w = bmp.PixelSize.Width;
-                int h = bmp.PixelSize.Height;
-                uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
-
-                unsafe
+                // Region 2
+                p = (long)Math.Round(rySq * (x + 0.5) * (x + 0.5) + rxSq * (y - 1) * (y - 1) - rxSq * rySq);
+                while (y >= 0)
                 {
-                    uint* ptr = (uint*)fb.Address;
-                    int stride = fb.RowBytes / 4;
-
-                    // Iterera genom höjden (Y-axeln)
-                    for (int y = -r2; y <= r2; y++)
+                    SetPixel(x1 + x, y1 + y);
+                    SetPixel(x1 - x, y1 + y);
+                    SetPixel(x1 + x, y1 - y);
+                    SetPixel(x1 - x, y1 - y);
+                    y--;
+                    py -= twoRxSq;
+                    if (p > 0)
                     {
-                        // Beräkna bredden vid denna Y-koordinat baserat på ellips-ekvationen
-                        // x = r1 * sqrt(1 - y^2/r2^2)
-                        int halfWidth = (int)(r1 * Math.Sqrt(1.0 - (double)(y * y) / (r2 * r2)));
+                        p += rxSq - py;
+                    }
+                    else
+                    {
+                        x++;
+                        px += twoRySq;
+                        p += rxSq - py + px;
+                    }
+                }
+            }
+        }
+    }
+    
+    public void CircleF(int x1, int y1, int r1, int r2)
+    {
+        lock (LockObject)
+        {
+            EnsureScreen();
+            var bmp = GetActiveScreen();
+            using var fb = bmp.Lock();
 
-                        int drawY = y1 + y;
-                        if (drawY < 0 || drawY >= h) continue;
+            int w = bmp.PixelSize.Width;
+            int h = bmp.PixelSize.Height;
+            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
 
-                        int startX = x1 - halfWidth;
-                        int endX = x1 + halfWidth;
+            unsafe
+            {
+                uint* ptr = (uint*)fb.Address;
+                int stride = fb.RowBytes / 4;
 
-                        // Clamp X
-                        if (startX < 0) startX = 0;
-                        if (endX >= w) endX = w - 1;
+                // Iterera genom höjden (Y-axeln)
+                for (int y = -r2; y <= r2; y++)
+                {
+                    // Beräkna bredden vid denna Y-koordinat baserat på ellips-ekvationen
+                    // x = r1 * sqrt(1 - y^2/r2^2)
+                    int halfWidth = (int)(r1 * Math.Sqrt(1.0 - (double)(y * y) / (r2 * r2)));
 
-                        if (startX <= endX)
+                    int drawY = y1 + y;
+                    if (drawY < 0 || drawY >= h) continue;
+
+                    int startX = x1 - halfWidth;
+                    int endX = x1 + halfWidth;
+
+                    // Clamp X
+                    if (startX < 0) startX = 0;
+                    if (endX >= w) endX = w - 1;
+
+                    if (startX <= endX)
+                    {
+                        uint* row = ptr + drawY * stride;
+                        for (int xx = startX; xx <= endX; xx++)
                         {
-                            uint* row = ptr + drawY * stride;
-                            for (int xx = startX; xx <= endX; xx++)
-                            {
-                                row[xx] = cVal;
-                            }
+                            row[xx] = cVal;
                         }
                     }
                 }
             }
         }
+    }
     
-        public void Fill(int x1, int y1)
+    public void Fill(int x1, int y1)
+    {
+        lock (LockObject)
         {
-            lock (LockObject)
-            {
-                EnsureScreen();
-                var bmp = GetActiveScreen();
-                using var fb = bmp.Lock();
-                int w = bmp.PixelSize.Width;
-                int h = bmp.PixelSize.Height;
+            EnsureScreen();
+            var bmp = GetActiveScreen();
+            using var fb = bmp.Lock();
+            int w = bmp.PixelSize.Width;
+            int h = bmp.PixelSize.Height;
                 
-                if (x1 < 0 || x1 >= w || y1 < 0 || y1 >= h) return;
+            if (x1 < 0 || x1 >= w || y1 < 0 || y1 >= h) return;
 
-                uint fillColor = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+            uint fillColor = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
 
-                unsafe
+            unsafe
+            {
+                uint* ptr = (uint*)fb.Address;
+                int stride = fb.RowBytes / 4;
+
+                // Hämta färgen som vi ska ersätta (Target Color)
+                uint targetColor = ptr[y1 * stride + x1];
+
+                // Om vi redan har rätt färg, gör inget
+                if (targetColor == fillColor) return;
+
+                // Scanline Flood Fill Algorithm (Stack-baserad)
+                Stack<(int x, int y)> stack = new();
+                stack.Push((x1, y1));
+
+                while (stack.Count > 0)
                 {
-                    uint* ptr = (uint*)fb.Address;
-                    int stride = fb.RowBytes / 4;
-
-                    // Hämta färgen som vi ska ersätta (Target Color)
-                    uint targetColor = ptr[y1 * stride + x1];
-
-                    // Om vi redan har rätt färg, gör inget
-                    if (targetColor == fillColor) return;
-
-                    // Scanline Flood Fill Algorithm (Stack-baserad)
-                    Stack<(int x, int y)> stack = new();
-                    stack.Push((x1, y1));
-
-                    while (stack.Count > 0)
-                    {
-                        var (cx, cy) = stack.Pop();
-                        int offset = cy * stride + cx;
+                    var (cx, cy) = stack.Pop();
+                    int offset = cy * stride + cx;
                         
-                        // Flytta vänster så långt det går
-                        int lx = cx;
-                        while (lx >= 0 && ptr[cy * stride + lx] == targetColor)
+                    // Flytta vänster så långt det går
+                    int lx = cx;
+                    while (lx >= 0 && ptr[cy * stride + lx] == targetColor)
+                    {
+                        lx--;
+                    }
+                    lx++; // Gå tillbaka ett steg till sista giltiga pixel
+
+                    // Flytta höger och fyll, samt scanna raderna ovanför och under
+                    bool spanAbove = false;
+                    bool spanBelow = false;
+
+                    int rx = lx;
+                    while (rx < w && ptr[cy * stride + rx] == targetColor)
+                    {
+                        // Fyll pixel
+                        ptr[cy * stride + rx] = fillColor;
+
+                        // Kolla raden ovanför
+                        if (cy > 0)
                         {
-                            lx--;
+                            uint colorAbove = ptr[(cy - 1) * stride + rx];
+                            if (!spanAbove && colorAbove == targetColor)
+                            {
+                                stack.Push((rx, cy - 1));
+                                spanAbove = true;
+                            }
+                            else if (spanAbove && colorAbove != targetColor)
+                            {
+                                spanAbove = false;
+                            }
                         }
-                        lx++; // Gå tillbaka ett steg till sista giltiga pixel
 
-                        // Flytta höger och fyll, samt scanna raderna ovanför och under
-                        bool spanAbove = false;
-                        bool spanBelow = false;
-
-                        int rx = lx;
-                        while (rx < w && ptr[cy * stride + rx] == targetColor)
+                        // Kolla raden under
+                        if (cy < h - 1)
                         {
-                            // Fyll pixel
-                            ptr[cy * stride + rx] = fillColor;
-
-                            // Kolla raden ovanför
-                            if (cy > 0)
+                            uint colorBelow = ptr[(cy + 1) * stride + rx];
+                            if (!spanBelow && colorBelow == targetColor)
                             {
-                                uint colorAbove = ptr[(cy - 1) * stride + rx];
-                                if (!spanAbove && colorAbove == targetColor)
-                                {
-                                    stack.Push((rx, cy - 1));
-                                    spanAbove = true;
-                                }
-                                else if (spanAbove && colorAbove != targetColor)
-                                {
-                                    spanAbove = false;
-                                }
+                                stack.Push((rx, cy + 1));
+                                spanBelow = true;
                             }
-
-                            // Kolla raden under
-                            if (cy < h - 1)
+                            else if (spanBelow && colorBelow != targetColor)
                             {
-                                uint colorBelow = ptr[(cy + 1) * stride + rx];
-                                if (!spanBelow && colorBelow == targetColor)
-                                {
-                                    stack.Push((rx, cy + 1));
-                                    spanBelow = true;
-                                }
-                                else if (spanBelow && colorBelow != targetColor)
-                                {
-                                    spanBelow = false;
-                                }
+                                spanBelow = false;
                             }
-
-                            rx++;
                         }
+
+                        rx++;
                     }
                 }
             }
         }
+    }
     
 
     public void DrawText(int x, int y, string t)
@@ -1712,522 +1712,522 @@ public sealed class AmosGraphics
 
     public void FontLoad(int id, string file, int tw, int th)
     {
-    try
-    {
-        string fullPath = ResourceLoader.GetPath(file);
-        
-        using var b = new Bitmap(fullPath);
-        var font = new Font { CharWidth = tw, CharHeight = th };
-        int cols = (int)b.Size.Width / tw;
-        int rows = (int)b.Size.Height / th;
-
-        for (int y = 0; y < rows; y++)
+        try
         {
-            for (int x = 0; x < cols; x++)
+            string fullPath = ResourceLoader.GetPath(file);
+        
+            using var b = new Bitmap(fullPath);
+            var font = new Font { CharWidth = tw, CharHeight = th };
+            int cols = (int)b.Size.Width / tw;
+            int rows = (int)b.Size.Height / th;
+
+            for (int y = 0; y < rows; y++)
             {
-                var t = CreateEmptyBitmap(tw, th);
-
-                using (var fb = t.Lock())
+                for (int x = 0; x < cols; x++)
                 {
-                    // 1. KOPIERA PIXLAR FRÅN FONT-ATLAS
-                    b.CopyPixels(
-                        new PixelRect(x * tw, y * th, tw, th),
-                        fb.Address,
-                        fb.RowBytes * th,
-                        fb.RowBytes);
+                    var t = CreateEmptyBitmap(tw, th);
 
-                    unsafe
+                    using (var fb = t.Lock())
                     {
-                        uint* p = (uint*)fb.Address;
-                        int count = tw * th;
+                        // 1. KOPIERA PIXLAR FRÅN FONT-ATLAS
+                        b.CopyPixels(
+                            new PixelRect(x * tw, y * th, tw, th),
+                            fb.Address,
+                            fb.RowBytes * th,
+                            fb.RowBytes);
 
-                        for (int i = 0; i < count; i++)
+                        unsafe
                         {
-                            uint pixel = p[i];
+                            uint* p = (uint*)fb.Address;
+                            int count = tw * th;
 
-                            uint a = (pixel >> 24) & 0xFF;
-                            uint r = (pixel >> 16) & 0xFF;
-                            uint g = (pixel >> 8) & 0xFF;
-                            uint bcol = pixel & 0xFF;
-
-                            // Svart = transparent
-                            if (r == 0 && g == 0 && bcol == 0)
+                            for (int i = 0; i < count; i++)
                             {
-                                p[i] = 0;
-                            }
-                            else
-                            {
-                                // Premultiplied alpha
-                                r = (r * a) / 255;
-                                g = (g * a) / 255;
-                                bcol = (bcol * a) / 255;
+                                uint pixel = p[i];
 
-                                // BGRA + Premul (Skia)
-                                p[i] =
-                                    (a << 24) |
-                                    (r << 0) |
-                                    (g << 8) |
-                                    (bcol << 16);
+                                uint a = (pixel >> 24) & 0xFF;
+                                uint r = (pixel >> 16) & 0xFF;
+                                uint g = (pixel >> 8) & 0xFF;
+                                uint bcol = pixel & 0xFF;
+
+                                // Svart = transparent
+                                if (r == 0 && g == 0 && bcol == 0)
+                                {
+                                    p[i] = 0;
+                                }
+                                else
+                                {
+                                    // Premultiplied alpha
+                                    r = (r * a) / 255;
+                                    g = (g * a) / 255;
+                                    bcol = (bcol * a) / 255;
+
+                                    // BGRA + Premul (Skia)
+                                    p[i] =
+                                        (a << 24) |
+                                        (r << 0) |
+                                        (g << 8) |
+                                        (bcol << 16);
+                                }
                             }
                         }
                     }
+
+                    font.CharBitmaps.Add(t);
                 }
-
-                font.CharBitmaps.Add(t);
             }
-        }
 
-        _fonts[id] = font;
+            _fonts[id] = font;
+        }
+        catch (Exception ex)
+        {
+            OnError?.Invoke($"[FONT LOAD] Error loading '{file}': {ex.Message}");
+        }
     }
-    catch (Exception ex)
+    
+    public void FontRotate(int id, double angle) { if (_fonts.TryGetValue(id, out var f)) f.Angle = angle; }
+    public void FontZoom(int id, double zx, double zy)
     {
-        OnError?.Invoke($"[FONT LOAD] Error loading '{file}': {ex.Message}");
-    }
-}
-    
-        public void FontRotate(int id, double angle) { if (_fonts.TryGetValue(id, out var f)) f.Angle = angle; }
-        public void FontZoom(int id, double zx, double zy)
-        {
-            if (!_fonts.TryGetValue(id, out var f))
-                return;
+        if (!_fonts.TryGetValue(id, out var f))
+            return;
         
-            if (!f.BaseZoomInitialized)
-            {
-                f.BaseZoomX = zx;
-                f.BaseZoomY = zy;
-                f.BaseZoomInitialized = true;
-            }
-            
-            f.ZoomX = zx;
-            f.ZoomY = zy;
-        }        public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
-
-        public unsafe void FontPrint(int id, int x, int y, string text)
+        if (!f.BaseZoomInitialized)
         {
-            if (!_fonts.TryGetValue(id, out var f)) return;
+            f.BaseZoomX = zx;
+            f.BaseZoomY = zy;
+            f.BaseZoomInitialized = true;
+        }
             
-            double totalUnscaledW = text.Length * f.CharWidth;
-            double totalUnscaledH = f.CharHeight;
+        f.ZoomX = zx;
+        f.ZoomY = zy;
+    }        public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
 
-            double centerX = totalUnscaledW / 2.0;
-            double centerY = totalUnscaledH / 2.0;
+    public unsafe void FontPrint(int id, int x, int y, string text)
+    {
+        if (!_fonts.TryGetValue(id, out var f)) return;
             
-            // --- Kompensation för att flytta texten utan att påverka rotation/zoom ---
-            double compensateX = centerX * (f.BaseZoomX - 1.0);
-            double compensateY = centerY * (f.BaseZoomY - 1.0);
+        double totalUnscaledW = text.Length * f.CharWidth;
+        double totalUnscaledH = f.CharHeight;
 
-            x = x + (int)compensateX;
-            y = y + (int)compensateY;
+        double centerX = totalUnscaledW / 2.0;
+        double centerY = totalUnscaledH / 2.0;
             
-            lock (LockObject)
+        // --- Kompensation för att flytta texten utan att påverka rotation/zoom ---
+        double compensateX = centerX * (f.BaseZoomX - 1.0);
+        double compensateY = centerY * (f.BaseZoomY - 1.0);
+
+        x = x + (int)compensateX;
+        y = y + (int)compensateY;
+            
+        lock (LockObject)
+        {
+
+            if (_currentScreen == 0)
             {
-
-                if (_currentScreen == 0)
+                _fontTexts.Add(new QueuedFontText
                 {
-                    _fontTexts.Add(new QueuedFontText
-                    {
-                        FontId = id,
-                        X = x,
-                        Y = y,
-                        Text = text,
-                        Angle = f.Angle,
-                        ZoomX = f.ZoomX,
-                        ZoomY = f.ZoomY
-                    });
-                }
-                else
-                {
-                    var target = GetActiveScreen();
-                    using var dst = target.Lock();
-                    byte* dp = (byte*)dst.Address;
-                    int rb = dst.RowBytes;
-                    var qt = new QueuedFontText { Angle = f.Angle, ZoomX = f.ZoomX, ZoomY = f.ZoomY };
-                    int curX = x;
-
-                    foreach (var c in text)
-                    {
-                        if (c == ' ') { curX += (int)(f.CharWidth * f.ZoomX); continue; }
-                        RenderFontCharInternal(dp, rb, f, curX, y, c, qt);
-                        curX += (int)(f.CharWidth * f.ZoomX);
-                    }
-                }
-            }
-        }
-
-    
-        public void FontClear()
-        {
-            lock (LockObject)
-            {
-                _fontTexts.Clear();
-            }
-        }
-
-        private unsafe void RenderFontTextInternal(byte* dp, int rb, QueuedFontText qt)
-        {
-            if (!_fonts.TryGetValue(qt.FontId, out var f)) return;
-            int curX = qt.X;
-            foreach (var c in qt.Text) 
-
-            {            
-                if (c == ' ')
-                { 
-                    curX += (int)(f.CharWidth * qt.ZoomX);
-                    continue;
-                }   
-                RenderFontCharInternal(dp, rb, f, curX, qt.Y, c, qt); 
-                curX += (int)(f.CharWidth * qt.ZoomX);
-            }
-        }
-
-        private unsafe void RenderFontCharInternal(byte* dp, int rb, Font f, int x, int y, char c, QueuedFontText qt)
-        {
-            string map = string.IsNullOrEmpty(f.CharMap) ? "" : f.CharMap;
-            int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
-            if (charIdx < 0 || charIdx >= f.CharBitmaps.Count) return;
-
-            var charBmp = f.CharBitmaps[charIdx];
-            using var src = charBmp.Lock();
-            byte* sp = (byte*)src.Address;
-            int srb = src.RowBytes;
-
-            float zoomX = (float)qt.ZoomX;
-            float zoomY = (float)qt.ZoomY;
-
-            float cx = f.CharWidth / 2f;
-            float cy = f.CharHeight / 2f;
-
-            // För rotation
-            double angleRad = qt.Angle * Math.PI / 180.0;
-            double cosA = Math.Cos(angleRad);
-            double sinA = Math.Sin(angleRad);
-
-            int w = (int)(f.CharWidth * Math.Abs(zoomX));
-            int h = (int)(f.CharHeight * Math.Abs(zoomY));
-
-            for (int py = 0; py < h; py++)
-            {
-                for (int px = 0; px < w; px++)
-                {
-                    // Koordinater i "tecknets lokala centrum"
-                    float nx = (px / Math.Abs(zoomX)) - cx;
-                    float ny = (py / Math.Abs(zoomY)) - cy;
-
-                    // Spegling vid negativ zoom
-                    if (zoomX < 0) nx = -nx;
-                    if (zoomY < 0) ny = -ny;
-
-                    // Rotation
-                    double rx = nx * cosA - ny * sinA;
-                    double ry = nx * sinA + ny * cosA;
-
-                    // Åter till tecknets pixelkoordinater
-                    int srcX = (int)(cx + rx);
-                    int srcY = (int)(cy + ry);
-
-                    if (srcX < 0 || srcX >= f.CharWidth || srcY < 0 || srcY >= f.CharHeight) continue;
-
-                    byte* srcPx = sp + srcY * srb + srcX * 4;
-                    if (srcPx[3] == 0) continue;
-
-                    int di = (x + px) * 4;
-                    byte* dr = dp + (y + py) * rb;
-                    dr[di + 0] = srcPx[0];
-                    dr[di + 1] = srcPx[1];
-                    dr[di + 2] = srcPx[2];
-                    dr[di + 3] = 255;
-                }
-            }
-        }
-
-    
-        public void FontChar(int id, int x, int y, string c)
-        {
-            if (!_fonts.TryGetValue(id, out var f) || string.IsNullOrEmpty(c)) return;
-            
-            // Justering: Ditt ark verkar börja på 'A' (ASCII 65). 
-            // Om vi vill ha siffror och tecken som i din bild behöver vi mappa rätt.
-            int charIdx = -1;
-            if (!string.IsNullOrEmpty(f.CharMap))
-            {
-                // Om vi har en karta, använd den
-                charIdx = f.CharMap.IndexOf(char.ToUpper(c[0]));
+                    FontId = id,
+                    X = x,
+                    Y = y,
+                    Text = text,
+                    Angle = f.Angle,
+                    ZoomX = f.ZoomX,
+                    ZoomY = f.ZoomY
+                });
             }
             else
             {
-                // Annars kör vi standard ASCII-offset (börjar på space)
-                charIdx = c[0] - 32;
-            }
-            
-            if (charIdx < 0 || charIdx >= f.CharBitmaps.Count) return;
-
-            var charBmp = f.CharBitmaps[charIdx];
-            var target = GetActiveScreen();
-            
-            // Vi använder en förenklad RenderSprite-logik här för att stödja Zoom/Rotate
-            using var dst = target.Lock();
-            using var src = charBmp.Lock();
-            unsafe
-            {
+                var target = GetActiveScreen();
+                using var dst = target.Lock();
                 byte* dp = (byte*)dst.Address;
-                byte* sp = (byte*)src.Address;
                 int rb = dst.RowBytes;
-                int srb = src.RowBytes;
-                
-                double angleRad = f.Angle * Math.PI / 180.0;
-                double cosA = Math.Cos(angleRad), sinA = Math.Sin(angleRad);
-                double invZx = 1.0 / f.ZoomX, invZy = 1.0 / f.ZoomY;
-                int hx = f.CharWidth / 2, hy = f.CharHeight / 2;
+                var qt = new QueuedFontText { Angle = f.Angle, ZoomX = f.ZoomX, ZoomY = f.ZoomY };
+                int curX = x;
 
-                double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(f.ZoomX, f.ZoomY);
-                int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(target.PixelSize.Width - 1, (int)(x + radius));
-                int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(target.PixelSize.Height - 1, (int)(y + radius));
-
-                for (int py = minY; py <= maxY; py++)
+                foreach (var c in text)
                 {
-                    byte* rowPtr = dp + py * rb;
-                    double dy = py - y;
-                    for (int px = minX; px <= maxX; px++)
-                    {
-                        double dx = px - x;
-                        double lx = (dx * cosA + dy * sinA) * invZx + hx;
-                        double ly = (dy * cosA - dx * sinA) * invZy + hy;
-                        int ilx = (int)lx, ily = (int)ly;
-
-                        if (ilx >= 0 && ilx < f.CharWidth && ily >= 0 && ily < f.CharHeight)
-                        {
-                            byte* srcPx = sp + ily * srb + ilx * 4;
-                            if (srcPx[3] == 0 || (srcPx[0] == 0 && srcPx[1] == 0 && srcPx[2] == 0)) continue; 
-                            int di = px * 4;
-                            rowPtr[di + 0] = srcPx[0];
-                            rowPtr[di + 1] = srcPx[1];
-                            rowPtr[di + 2] = srcPx[2];
-                            rowPtr[di + 3] = 255;
-                        }
-                    }
+                    if (c == ' ') { curX += (int)(f.CharWidth * f.ZoomX); continue; }
+                    RenderFontCharInternal(dp, rb, f, curX, y, c, qt);
+                    curX += (int)(f.CharWidth * f.ZoomX);
                 }
             }
         }
+    }
+
     
-        // -------------------------------------------------------------------------------
-        //  HJÄLPMETOD FÖR FÄRGKORRIGERING (MAC vs PC)
-        // -------------------------------------------------------------------------------
-        private unsafe void FixupImageColors(void* address, int pixelCount)
+    public void FontClear()
+    {
+        lock (LockObject)
         {
-            uint* p = (uint*)address;
+            _fontTexts.Clear();
+        }
+    }
 
-            if (OperatingSystem.IsMacOS())
+    private unsafe void RenderFontTextInternal(byte* dp, int rb, QueuedFontText qt)
+    {
+        if (!_fonts.TryGetValue(qt.FontId, out var f)) return;
+        int curX = qt.X;
+        foreach (var c in qt.Text) 
+
+        {            
+            if (c == ' ')
+            { 
+                curX += (int)(f.CharWidth * qt.ZoomX);
+                continue;
+            }   
+            RenderFontCharInternal(dp, rb, f, curX, qt.Y, c, qt); 
+            curX += (int)(f.CharWidth * qt.ZoomX);
+        }
+    }
+
+    private unsafe void RenderFontCharInternal(byte* dp, int rb, Font f, int x, int y, char c, QueuedFontText qt)
+    {
+        string map = string.IsNullOrEmpty(f.CharMap) ? "" : f.CharMap;
+        int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
+        if (charIdx < 0 || charIdx >= f.CharBitmaps.Count) return;
+
+        var charBmp = f.CharBitmaps[charIdx];
+        using var src = charBmp.Lock();
+        byte* sp = (byte*)src.Address;
+        int srb = src.RowBytes;
+
+        float zoomX = (float)qt.ZoomX;
+        float zoomY = (float)qt.ZoomY;
+
+        float cx = f.CharWidth / 2f;
+        float cy = f.CharHeight / 2f;
+
+        // För rotation
+        double angleRad = qt.Angle * Math.PI / 180.0;
+        double cosA = Math.Cos(angleRad);
+        double sinA = Math.Sin(angleRad);
+
+        int w = (int)(f.CharWidth * Math.Abs(zoomX));
+        int h = (int)(f.CharHeight * Math.Abs(zoomY));
+
+        for (int py = 0; py < h; py++)
+        {
+            for (int px = 0; px < w; px++)
             {
-                // ===== MAC LOGIK (Från din fungerande LoadBackground) =====
-                for (int i = 0; i < pixelCount; i++)
-                {
-                    uint pixel = p[i];
+                // Koordinater i "tecknets lokala centrum"
+                float nx = (px / Math.Abs(zoomX)) - cx;
+                float ny = (py / Math.Abs(zoomY)) - cy;
 
-                    uint a = (pixel >> 24) & 0xFF;
-                    uint r = (pixel >> 16) & 0xFF;
-                    uint g = (pixel >> 8) & 0xFF;
-                    uint b = pixel & 0xFF;
+                // Spegling vid negativ zoom
+                if (zoomX < 0) nx = -nx;
+                if (zoomY < 0) ny = -ny;
 
-                    // Om helt svart (0,0,0), gör transparent om så önskas
-                    if (r == 0 && g == 0 && b == 0)
-                        p[i] = 0;
-                    else
-                        // RGBA -> BGRA (Skia på Mac vill ofta ha BGRA)
-                        p[i] = (a << 24) | (r << 0) | (g << 8) | (b << 16);
-                }
-            }
-            else 
-            {
-                // ===== WINDOWS LOGIK (Från din fungerande LoadBackground) =====
-                // Fallback för Windows (och Linux om det beter sig likadant)
-                for (int i = 0; i < pixelCount; i++)
-                {
-                    uint pixel = p[i];
+                // Rotation
+                double rx = nx * cosA - ny * sinA;
+                double ry = nx * sinA + ny * cosA;
 
-                    uint a = (pixel >> 24) & 0xFF;
-                    uint b = (pixel >> 16) & 0xFF; // OBS: Windows-logiken du hade tolkade input lite annorlunda
-                    uint g = (pixel >> 8) & 0xFF;
-                    uint r = pixel & 0xFF;
+                // Åter till tecknets pixelkoordinater
+                int srcX = (int)(cx + rx);
+                int srcY = (int)(cy + ry);
 
-                    if (r == 0 && g == 0 && b == 0)
-                        p[i] = 0;
-                    else
-                        p[i] = (a << 24) | (b << 16) | (g << 8) | (r << 0);
-                }
+                if (srcX < 0 || srcX >= f.CharWidth || srcY < 0 || srcY >= f.CharHeight) continue;
+
+                byte* srcPx = sp + srcY * srb + srcX * 4;
+                if (srcPx[3] == 0) continue;
+
+                int di = (x + px) * 4;
+                byte* dr = dp + (y + py) * rb;
+                dr[di + 0] = srcPx[0];
+                dr[di + 1] = srcPx[1];
+                dr[di + 2] = srcPx[2];
+                dr[di + 3] = 255;
             }
         }
-        
-        public void LoadBackground(string f)
-        {
-            try
-            {
-                string fullPath = ResourceLoader.GetPath(f);
+    }
+
+    
+    public void FontChar(int id, int x, int y, string c)
+    {
+        if (!_fonts.TryGetValue(id, out var f) || string.IsNullOrEmpty(c)) return;
             
-                using var b = new Bitmap(fullPath);
-                lock (LockObject)
-                {
-                    EnsureScreen();
-                    var layer = DrawingFrame[_currentScreen];
-                    using (var fb = layer.Bitmap.Lock())
-                    {
-                        b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address,
-                            fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
-                        
-                        // ANVÄND HJÄLPMETODEN
-                        unsafe
-                        {
-                            int count = layer.Bitmap.PixelSize.Width * layer.Bitmap.PixelSize.Height;
-                            FixupImageColors(fb.Address.ToPointer(), count);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                OnError?.Invoke($"[LOADBACKGROUND]: {ex.Message}");
-            }
+        // Justering: Ditt ark verkar börja på 'A' (ASCII 65). 
+        // Om vi vill ha siffror och tecken som i din bild behöver vi mappa rätt.
+        int charIdx = -1;
+        if (!string.IsNullOrEmpty(f.CharMap))
+        {
+            // Om vi har en karta, använd den
+            charIdx = f.CharMap.IndexOf(char.ToUpper(c[0]));
         }
-
-        // ---------------- BOBS (NY SEKTION) ----------------
-
-        // Motsvarar: LOAD 1,"bild.png"
-        public void LoadBobImage(int index, string path)
+        else
         {
-            try
-            {
-                string fullPath = ResourceLoader.GetPath(path);
-                using var b = new Bitmap(fullPath);
-                int w = (int)b.Size.Width;
-                int h = (int)b.Size.Height;
+            // Annars kör vi standard ASCII-offset (börjar på space)
+            charIdx = c[0] - 32;
+        }
             
-                // Skapa en bitmap kompatibel med motorn
-                var targetBmp = CreateEmptyBitmap(w, h);
+        if (charIdx < 0 || charIdx >= f.CharBitmaps.Count) return;
+
+        var charBmp = f.CharBitmaps[charIdx];
+        var target = GetActiveScreen();
             
-                using (var fb = targetBmp.Lock())
-                {
-                    // Kopiera pixlar
-                    b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
+        // Vi använder en förenklad RenderSprite-logik här för att stödja Zoom/Rotate
+        using var dst = target.Lock();
+        using var src = charBmp.Lock();
+        unsafe
+        {
+            byte* dp = (byte*)dst.Address;
+            byte* sp = (byte*)src.Address;
+            int rb = dst.RowBytes;
+            int srb = src.RowBytes;
                 
-                    // Fixa färgordning med central metod
-                    unsafe
+            double angleRad = f.Angle * Math.PI / 180.0;
+            double cosA = Math.Cos(angleRad), sinA = Math.Sin(angleRad);
+            double invZx = 1.0 / f.ZoomX, invZy = 1.0 / f.ZoomY;
+            int hx = f.CharWidth / 2, hy = f.CharHeight / 2;
+
+            double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(f.ZoomX, f.ZoomY);
+            int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(target.PixelSize.Width - 1, (int)(x + radius));
+            int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(target.PixelSize.Height - 1, (int)(y + radius));
+
+            for (int py = minY; py <= maxY; py++)
+            {
+                byte* rowPtr = dp + py * rb;
+                double dy = py - y;
+                for (int px = minX; px <= maxX; px++)
+                {
+                    double dx = px - x;
+                    double lx = (dx * cosA + dy * sinA) * invZx + hx;
+                    double ly = (dy * cosA - dx * sinA) * invZy + hy;
+                    int ilx = (int)lx, ily = (int)ly;
+
+                    if (ilx >= 0 && ilx < f.CharWidth && ily >= 0 && ily < f.CharHeight)
                     {
-                        FixupImageColors(fb.Address.ToPointer(), w * h);
+                        byte* srcPx = sp + ily * srb + ilx * 4;
+                        if (srcPx[3] == 0 || (srcPx[0] == 0 && srcPx[1] == 0 && srcPx[2] == 0)) continue; 
+                        int di = px * 4;
+                        rowPtr[di + 0] = srcPx[0];
+                        rowPtr[di + 1] = srcPx[1];
+                        rowPtr[di + 2] = srcPx[2];
+                        rowPtr[di + 3] = 255;
                     }
                 }
-            
-                lock (LockObject)
-                {
-                    _bobImages[index] = targetBmp;
-                }
-            }
-            catch (Exception ex)
-            {
-                OnError?.Invoke($"[LOAD BOB IMAGE] Error: {ex.Message}");
             }
         }
+    }
+    
+    // -------------------------------------------------------------------------------
+    //  HJÄLPMETOD FÖR FÄRGKORRIGERING (MAC vs PC)
+    // -------------------------------------------------------------------------------
+    private unsafe void FixupImageColors(void* address, int pixelCount)
+    {
+        uint* p = (uint*)address;
 
-        // Motsvarar: BOB 1, X, Y, BILD_NR
-        public void SetBob(int bobId, int x, int y, int imageIndex)
+        if (OperatingSystem.IsMacOS())
         {
+            // ===== MAC LOGIK (Från din fungerande LoadBackground) =====
+            for (int i = 0; i < pixelCount; i++)
+            {
+                uint pixel = p[i];
+
+                uint a = (pixel >> 24) & 0xFF;
+                uint r = (pixel >> 16) & 0xFF;
+                uint g = (pixel >> 8) & 0xFF;
+                uint b = pixel & 0xFF;
+
+                // Om helt svart (0,0,0), gör transparent om så önskas
+                if (r == 0 && g == 0 && b == 0)
+                    p[i] = 0;
+                else
+                    // RGBA -> BGRA (Skia på Mac vill ofta ha BGRA)
+                    p[i] = (a << 24) | (r << 0) | (g << 8) | (b << 16);
+            }
+        }
+        else 
+        {
+            // ===== WINDOWS LOGIK (Från din fungerande LoadBackground) =====
+            // Fallback för Windows (och Linux om det beter sig likadant)
+            for (int i = 0; i < pixelCount; i++)
+            {
+                uint pixel = p[i];
+
+                uint a = (pixel >> 24) & 0xFF;
+                uint b = (pixel >> 16) & 0xFF; // OBS: Windows-logiken du hade tolkade input lite annorlunda
+                uint g = (pixel >> 8) & 0xFF;
+                uint r = pixel & 0xFF;
+
+                if (r == 0 && g == 0 && b == 0)
+                    p[i] = 0;
+                else
+                    p[i] = (a << 24) | (b << 16) | (g << 8) | (r << 0);
+            }
+        }
+    }
+        
+    public void LoadBackground(string f)
+    {
+        try
+        {
+            string fullPath = ResourceLoader.GetPath(f);
+            
+            using var b = new Bitmap(fullPath);
             lock (LockObject)
             {
-                if (!_bobs.TryGetValue(bobId, out var bob))
+                EnsureScreen();
+                var layer = DrawingFrame[_currentScreen];
+                using (var fb = layer.Bitmap.Lock())
                 {
-                    bob = new Bob();
-                    _bobs[bobId] = bob;
+                    b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address,
+                        fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
+                        
+                    // ANVÄND HJÄLPMETODEN
+                    unsafe
+                    {
+                        int count = layer.Bitmap.PixelSize.Width * layer.Bitmap.PixelSize.Height;
+                        FixupImageColors(fb.Address.ToPointer(), count);
+                    }
                 }
-                bob.X = x;
-                bob.Y = y;
-                bob.ImageIndex = imageIndex;
-                bob.Visible = true; // Sätts automatiskt på vid uppdatering, likt AMOS
             }
         }
-
-        public void BobOn(int id)
+        catch (Exception ex)
         {
-            if (_bobs.TryGetValue(id, out var b)) b.Visible = true;
+            OnError?.Invoke($"[LOADBACKGROUND]: {ex.Message}");
         }
+    }
 
-        public void BobOff(int id)
+    // ---------------- BOBS (NY SEKTION) ----------------
+
+    // Motsvarar: LOAD 1,"bild.png"
+    public void LoadBobImage(int index, string path)
+    {
+        try
         {
-            if (_bobs.TryGetValue(id, out var b)) b.Visible = false;
+            string fullPath = ResourceLoader.GetPath(path);
+            using var b = new Bitmap(fullPath);
+            int w = (int)b.Size.Width;
+            int h = (int)b.Size.Height;
+            
+            // Skapa en bitmap kompatibel med motorn
+            var targetBmp = CreateEmptyBitmap(w, h);
+            
+            using (var fb = targetBmp.Lock())
+            {
+                // Kopiera pixlar
+                b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
+                
+                // Fixa färgordning med central metod
+                unsafe
+                {
+                    FixupImageColors(fb.Address.ToPointer(), w * h);
+                }
+            }
+            
+            lock (LockObject)
+            {
+                _bobImages[index] = targetBmp;
+            }
         }
+        catch (Exception ex)
+        {
+            OnError?.Invoke($"[LOAD BOB IMAGE] Error: {ex.Message}");
+        }
+    }
+
+    // Motsvarar: BOB 1, X, Y, BILD_NR
+    public void SetBob(int bobId, int x, int y, int imageIndex)
+    {
+        lock (LockObject)
+        {
+            if (!_bobs.TryGetValue(bobId, out var bob))
+            {
+                bob = new Bob();
+                _bobs[bobId] = bob;
+            }
+            bob.X = x;
+            bob.Y = y;
+            bob.ImageIndex = imageIndex;
+            bob.Visible = true; // Sätts automatiskt på vid uppdatering, likt AMOS
+        }
+    }
+
+    public void BobOn(int id)
+    {
+        if (_bobs.TryGetValue(id, out var b)) b.Visible = true;
+    }
+
+    public void BobOff(int id)
+    {
+        if (_bobs.TryGetValue(id, out var b)) b.Visible = false;
+    }
         
     // ---------------- Tiles ----------------
     public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
 
-        public void LoadTileBank(string f, int tw, int th) {
-            try {
-                string fullPath = ResourceLoader.GetPath(f);
+    public void LoadTileBank(string f, int tw, int th) {
+        try {
+            string fullPath = ResourceLoader.GetPath(f);
             
-                using var b = new Bitmap(fullPath); 
-                _tileWidth = tw; 
-                _tileHeight = th; 
-                _tiles.Clear();
+            using var b = new Bitmap(fullPath); 
+            _tileWidth = tw; 
+            _tileHeight = th; 
+            _tiles.Clear();
             
-                // Uppdatera klassvariabeln för att undvika division med noll i paletten
-                _tilesInWidth = (int)b.Size.Width / tw;
+            // Uppdatera klassvariabeln för att undvika division med noll i paletten
+            _tilesInWidth = (int)b.Size.Width / tw;
             
-                int cs = _tilesInWidth; 
-                int rs = (int)b.Size.Height / th;
+            int cs = _tilesInWidth; 
+            int rs = (int)b.Size.Height / th;
 
-                for (int y = 0; y < rs; y++) {
-                    for (int x = 0; x < cs; x++) {
-                        var t = CreateEmptyBitmap(tw, th);
-                        using (var fb = t.Lock()) {
-                            b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
-                            unsafe {
-                                FixupImageColors(fb.Address.ToPointer(), tw * th);
-                            }
+            for (int y = 0; y < rs; y++) {
+                for (int x = 0; x < cs; x++) {
+                    var t = CreateEmptyBitmap(tw, th);
+                    using (var fb = t.Lock()) {
+                        b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
+                        unsafe {
+                            FixupImageColors(fb.Address.ToPointer(), tw * th);
                         }
-                        _tiles.Add(t);
                     }
+                    _tiles.Add(t);
                 }
             }
-            catch (Exception ex) {
-                OnError?.Invoke($"[TILE LOAD] Error loading '{f}': {ex.Message}");
-            }
         }
+        catch (Exception ex) {
+            OnError?.Invoke($"[TILE LOAD] Error loading '{f}': {ex.Message}");
+        }
+    }
 
-        public void LoadTileBank(System.IO.Stream stream, int tw, int th)
+    public void LoadTileBank(System.IO.Stream stream, int tw, int th)
+    {
+        try
         {
-            try
+            using var b = new Bitmap(stream);
+            _tileWidth = tw;
+            _tileHeight = th;
+            _tiles.Clear();
+
+            // Deklarera tilesInWidth här och spara den i klassvariabeln _tilesInWidth
+            int tilesInWidth = (int)b.Size.Width / tw;
+            _tilesInWidth = tilesInWidth;
+
+            int tilesInHeight = (int)b.Size.Height / th;
+
+            for (int y = 0; y < tilesInHeight; y++)
             {
-                using var b = new Bitmap(stream);
-                _tileWidth = tw;
-                _tileHeight = th;
-                _tiles.Clear();
-
-                // Deklarera tilesInWidth här och spara den i klassvariabeln _tilesInWidth
-                int tilesInWidth = (int)b.Size.Width / tw;
-                _tilesInWidth = tilesInWidth;
-
-                int tilesInHeight = (int)b.Size.Height / th;
-
-                for (int y = 0; y < tilesInHeight; y++)
+                for (int x = 0; x < tilesInWidth; x++)
                 {
-                    for (int x = 0; x < tilesInWidth; x++)
+                    var t = CreateEmptyBitmap(tw, th);
+                    using (var fb = t.Lock())
                     {
-                        var t = CreateEmptyBitmap(tw, th);
-                        using (var fb = t.Lock())
+                        // Kopiera exakt den rutan från källbilden
+                        b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
+                        unsafe
                         {
-                            // Kopiera exakt den rutan från källbilden
-                            b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
-                            unsafe
-                            {
-                                FixupImageColors(fb.Address.ToPointer(), tw * th);
-                            }
+                            FixupImageColors(fb.Address.ToPointer(), tw * th);
                         }
-
-                        _tiles.Add(t);
                     }
+
+                    _tiles.Add(t);
                 }
             }
-            catch (Exception ex)
-            {
-                OnError?.Invoke($"[TILE STREAM] Error: {ex.Message}");
-            }
         }
+        catch (Exception ex)
+        {
+            OnError?.Invoke($"[TILE STREAM] Error: {ex.Message}");
+        }
+    }
 
     public void SetMapSize(int newW, int newH)
     {
@@ -2392,116 +2392,116 @@ public sealed class AmosGraphics
     public WriteableBitmap GetSpriteBitmap(int id) => GetSprite(id).Bitmap;
     public List<int> GetSpriteIds() => _sprites.Keys.OrderBy(id => id).ToList();
 
-        public void LoadSprite(int id, string fileName)
+    public void LoadSprite(int id, string fileName)
+    {
+        try
         {
-            try
-            {
-                string fullPath = ResourceLoader.GetPath(fileName);
-                using var b = new Bitmap(fullPath);
-                int w = (int)b.Size.Width, h = (int)b.Size.Height;
-                CreateSprite(id, w, h);
-                var s = GetSprite(id);
-                using (var fb = s.Bitmap.Lock())
-                {
-                    b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
-                    
-                    unsafe
-                    {
-                        // Fixa färger först
-                        FixupImageColors(fb.Address.ToPointer(), w * h);
-
-                        // Läs sedan av transparent key från den fixade datan (första pixeln)
-                        var p = (byte*)fb.Address;
-                        // Skia/WriteableBitmap är BGRA (Little Endian uint: B, G, R, A)
-                        // Så p[0]=B, p[1]=G, p[2]=R, p[3]=A
-                        s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                OnError?.Invoke($"[SPRITE LOAD] Error loading '{fileName}': {ex.Message}");
-            }
-        }
-
-             public void LoadSpriteSheet(int id, string fileName, int frameW, int frameH, int count)
-            {
-                try
-                {
-                    string fullPath = ResourceLoader.GetPath(fileName);
-                
-                    using var sourceInfo = new Bitmap(fullPath);
-                    int sheetW = (int)sourceInfo.Size.Width;
-                    int sheetH = (int)sourceInfo.Size.Height;
-                    int cols = sheetW / frameW; // Hur många får plats på en rad?
-
-                    // Skapa spriten (initierar listan och properties)
-                    CreateSprite(id, frameW, frameH);
-                    var s = GetSprite(id);
-                
-                    // Rensa den tomma standard-framen som skapades av CreateSprite
-                    s.Frames.Clear(); 
-
-                    for (int i = 0; i < count; i++)
-                    {
-                        // Räkna ut X och Y i texturen
-                        int col = i % cols;
-                        int row = i / cols;
-                    
-                        int srcX = col * frameW;
-                        int srcY = row * frameH;
-
-                        // Om vi försöker läsa utanför bilden, avbryt eller ignorera
-                        if (srcY + frameH > sheetH) break;
-
-                        var f = CreateEmptyBitmap(frameW, frameH);
-                        using (var fb = f.Lock())
-                        {
-                            // Kopiera snittet från stora bilden
-                            sourceInfo.CopyPixels(new PixelRect(srcX, srcY, frameW, frameH), fb.Address, fb.RowBytes * frameH, fb.RowBytes);
-                        
-                            unsafe
-                            {
-                                // Fixa färger
-                                FixupImageColors(fb.Address.ToPointer(), frameW * frameH);
-
-                                // Sätt transparent key baserat på första pixeln i FÖRSTA framen
-                                if (i == 0) 
-                                {
-                                    var p = (byte*)fb.Address;
-                                    s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
-                                }
-                            }
-                        }
-                        s.Frames.Add(f);
-                    }
-                
-                    // Se till att current frame är 0
-                    s.CurrentFrame = 0;
-                }
-                catch (Exception ex)
-                {
-                    OnError?.Invoke($"[SPRITE SHEET LOAD] Error loading '{fileName}': {ex.Message}");
-                }
-            }
-         
-        public void AddFrame(int id, string file)
-        {
+            string fullPath = ResourceLoader.GetPath(fileName);
+            using var b = new Bitmap(fullPath);
+            int w = (int)b.Size.Width, h = (int)b.Size.Height;
+            CreateSprite(id, w, h);
             var s = GetSprite(id);
-            using var b = new Bitmap(file);
-            var f = CreateEmptyBitmap(s.Width, s.Height);
-            using (var fb = f.Lock())
+            using (var fb = s.Bitmap.Lock())
             {
-                b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address, fb.RowBytes * s.Height,
-                    fb.RowBytes);
+                b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
+                    
                 unsafe
                 {
-                    FixupImageColors(fb.Address.ToPointer(), s.Width * s.Height);
+                    // Fixa färger först
+                    FixupImageColors(fb.Address.ToPointer(), w * h);
+
+                    // Läs sedan av transparent key från den fixade datan (första pixeln)
+                    var p = (byte*)fb.Address;
+                    // Skia/WriteableBitmap är BGRA (Little Endian uint: B, G, R, A)
+                    // Så p[0]=B, p[1]=G, p[2]=R, p[3]=A
+                    s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
                 }
             }
-
-            s.Frames.Add(f);
         }
+        catch (Exception ex)
+        {
+            OnError?.Invoke($"[SPRITE LOAD] Error loading '{fileName}': {ex.Message}");
+        }
+    }
+
+    public void LoadSpriteSheet(int id, string fileName, int frameW, int frameH, int count)
+    {
+        try
+        {
+            string fullPath = ResourceLoader.GetPath(fileName);
+                
+            using var sourceInfo = new Bitmap(fullPath);
+            int sheetW = (int)sourceInfo.Size.Width;
+            int sheetH = (int)sourceInfo.Size.Height;
+            int cols = sheetW / frameW; // Hur många får plats på en rad?
+
+            // Skapa spriten (initierar listan och properties)
+            CreateSprite(id, frameW, frameH);
+            var s = GetSprite(id);
+                
+            // Rensa den tomma standard-framen som skapades av CreateSprite
+            s.Frames.Clear(); 
+
+            for (int i = 0; i < count; i++)
+            {
+                // Räkna ut X och Y i texturen
+                int col = i % cols;
+                int row = i / cols;
+                    
+                int srcX = col * frameW;
+                int srcY = row * frameH;
+
+                // Om vi försöker läsa utanför bilden, avbryt eller ignorera
+                if (srcY + frameH > sheetH) break;
+
+                var f = CreateEmptyBitmap(frameW, frameH);
+                using (var fb = f.Lock())
+                {
+                    // Kopiera snittet från stora bilden
+                    sourceInfo.CopyPixels(new PixelRect(srcX, srcY, frameW, frameH), fb.Address, fb.RowBytes * frameH, fb.RowBytes);
+                        
+                    unsafe
+                    {
+                        // Fixa färger
+                        FixupImageColors(fb.Address.ToPointer(), frameW * frameH);
+
+                        // Sätt transparent key baserat på första pixeln i FÖRSTA framen
+                        if (i == 0) 
+                        {
+                            var p = (byte*)fb.Address;
+                            s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
+                        }
+                    }
+                }
+                s.Frames.Add(f);
+            }
+                
+            // Se till att current frame är 0
+            s.CurrentFrame = 0;
+        }
+        catch (Exception ex)
+        {
+            OnError?.Invoke($"[SPRITE SHEET LOAD] Error loading '{fileName}': {ex.Message}");
+        }
+    }
+         
+    public void AddFrame(int id, string file)
+    {
+        var s = GetSprite(id);
+        using var b = new Bitmap(file);
+        var f = CreateEmptyBitmap(s.Width, s.Height);
+        using (var fb = f.Lock())
+        {
+            b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address, fb.RowBytes * s.Height,
+                fb.RowBytes);
+            unsafe
+            {
+                FixupImageColors(fb.Address.ToPointer(), s.Width * s.Height);
+            }
+        }
+
+        s.Frames.Add(f);
+    }
 
     public void SetSpriteFrame(int id, int idx)
     {
