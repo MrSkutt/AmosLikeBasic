@@ -281,6 +281,7 @@ public sealed class AmosGpuView : Control
                     }
                 }
 
+                // Print out BOBs
                 foreach (var bobId in Graphics.GetBobIds())
                 {
                     var bob = Graphics.GetBob(bobId);
@@ -289,12 +290,33 @@ public sealed class AmosGpuView : Control
                     var img = Graphics.GetBobImage(bob.ImageIndex);
                     if (img == null) continue;
 
-                    // Rita bilden på Bobens position
-                    // Här kan man lägga till stöd för hotspots senare om man vill
-                    fbCtx.DrawImage(img, new Rect(img.Size), new Rect(bob.X, bob.Y, img.Size.Width, img.Size.Height));
+                    double totalUnscaledW = img.Size.Width;
+                    double totalUnscaledH = img.Size.Height;
+                    
+                    // Pivot = center av texten
+                    double centerX = totalUnscaledW / 2.0;
+                    double centerY = totalUnscaledH / 2.0;
+
+                    double angleRad = bob.Angle * Math.PI / 180.0;
+                    
+                    double bobLocalX = 0;
+                    double bobLocalY = 0;
+                    
+                    // Transformkedja: rotation och zoom runt center
+                    var transform =
+                        Matrix.CreateTranslation(bobLocalX, bobLocalY) // glyph lokalt
+                        * Matrix.CreateTranslation(-centerX, -centerY)   // flytta center till origo
+                        * Matrix.CreateScale(bob.ZoomX, bob.ZoomY)         // zoom
+                        * Matrix.CreateRotation(angleRad)                // rotation
+                        * Matrix.CreateTranslation(centerX + bob.X, centerY + bob.Y); // tillbaka till center + top-left
+
+                    using (fbCtx.PushPostTransform(transform))
+                    {
+                        fbCtx.DrawImage(img, new Rect(img.Size), new Rect(0,0, img.Size.Width, img.Size.Height));
+                    }
                 }
           
-// ... inuti AmosGpuView.Render, i loopen för queued texts ...
+                // Print out Graphics text
                 foreach (var qt in Graphics.GetQueuedTexts().ToList())
                 {
                     var f = Graphics.GetFont(qt.FontId);
@@ -340,47 +362,40 @@ public sealed class AmosGpuView : Control
                     }
                 }
 
-
-
-
                 
-                // RITA SPRITES
+                // WRITE SPRITES
                 foreach (var id in Graphics.GetSpriteIds())
                 {
                     var sprite = Graphics.GetSprite(id);
                     if (!sprite.Visible) continue;
 
                     var bmp = Graphics.GetSpriteBitmap(id);
+                    
+                    double totalUnscaledW = bmp.Size.Width;
+                    double totalUnscaledH = bmp.Size.Height;
+                    
+                    // Pivot = center av texten
+                    double centerX = totalUnscaledW / 2.0;
+                    double centerY = totalUnscaledH / 2.0;
 
-                    var destRect = new Rect(sprite.X - sprite.HandleX, sprite.Y - sprite.HandleY,
-                        bmp.Size.Width * sprite.ZoomX, bmp.Size.Height * sprite.ZoomY);
-
-
-                    // Target position BEFORE rotation
-                    double x = sprite.X - sprite.HandleX * sprite.ZoomX;
-                    double y = sprite.Y - sprite.HandleY * sprite.ZoomY;
-
-                    // Center about which we rotate
-                    double cx = sprite.X;
-                    double cy = sprite.Y;
-
-                    // Rotation in radians
                     double angleRad = sprite.Angle * Math.PI / 180.0;
-                    double cos = Math.Cos(angleRad);
-                    double sin = Math.Sin(angleRad);
+                    
+                    double bobLocalX = 0;
+                    double bobLocalY = 0;
 
-                    // Build matrix: Translate to center → rotate → translate back
-                    var matrix = new Matrix(
-                        cos, sin,
-                        -sin, cos,
-                        cx - cos * cx + sin * cy - x + cx,
-                        cy - sin * cx - cos * cy - y + cy
-                    );
+                    // Transformkedja: rotation och zoom runt center
+                    var transform =
+                        Matrix.CreateTranslation(bobLocalX, bobLocalY) // glyph lokalt
+                        * Matrix.CreateTranslation(-centerX, -centerY)   // flytta center till origo
+                        * Matrix.CreateScale(sprite.ZoomX, sprite.ZoomY)         // zoom
+                        * Matrix.CreateRotation(angleRad)                // rotation
+                        * Matrix.CreateTranslation(centerX + sprite.X, centerY + sprite.Y); // tillbaka till center + top-left
+
 
                     // Push transform + draw
-                    using (fbCtx.PushPostTransform(matrix))
+                    using (fbCtx.PushPostTransform(transform))
                     {
-                        fbCtx.DrawImage(bmp, new Rect(bmp.Size), new Rect(x, y, sprite.Width, sprite.Height));
+                        fbCtx.DrawImage(bmp, new Rect(bmp.Size), new Rect(0, 0, sprite.Width, sprite.Height));
                     }
                 }
             }
@@ -705,11 +720,16 @@ public sealed class AmosGraphics
         public bool BaseZoomInitialized;
         public string CharMap { get; set; } = "";
     }
-    // NYTT: Bob-klass
+    // Class for BOB
     public sealed class Bob
     {
         public int X { get; set; }
         public int Y { get; set; }
+        public double Angle { get; set; } = 0;
+        public double ZoomX { get; set; } = 1.0;
+        public double ZoomY { get; set; } = 1.0;
+        public int HandleX { get; set; }
+        public int HandleY { get; set; }
         public int ImageIndex { get; set; }
         public bool Visible { get; set; } = true;
     }
@@ -1058,9 +1078,6 @@ public sealed class AmosGraphics
             // Vi gör det via ett anrop till InvalidateMeasure i MainWindow
         }, Avalonia.Threading.DispatcherPriority.Render);
     }
-
-    
-  
     
     public void SetDrawingScreen(int id)
     {
@@ -2153,6 +2170,30 @@ public sealed class AmosGraphics
         if (_bobs.TryGetValue(id, out var b)) b.Visible = false;
     }
         
+    public void BobHandle(int id, int hx, int hy)
+    {
+        var s = GetBob(id);
+        s.HandleX = hx;
+        s.HandleY = hy;
+    }
+
+    public void BobPos(int id, int x, int y)
+    {
+        var s = GetBob(id);
+        s.X = x;
+        s.Y = y;
+    }
+
+    public void BobRotate(int id, double angle) => GetBob(id).Angle = angle;
+
+    public void BobZoom(int id, double zx, double zy)
+    {
+        var s = GetBob(id);
+        s.ZoomX = zx;
+        s.ZoomY = zy;
+    }
+    
+    
     // ---------------- Tiles ----------------
     public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
 

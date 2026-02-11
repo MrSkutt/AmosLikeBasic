@@ -18,6 +18,7 @@ using Avalonia.Media;
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
 using AvaloniaEdit;
+using AvaloniaEdit.Rendering;
 
 
 namespace AmosLikeBasic;
@@ -37,6 +38,8 @@ public partial class MainWindow : Window
     private bool _isDirty = false;
     private readonly HashSet<string> _pressedKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConfigService configService;
+    private readonly HashSet<int> _breakpoints = new(); // breakpoints list
+
     public MainWindow()
     {
         InitializeComponent();
@@ -95,6 +98,11 @@ public partial class MainWindow : Window
                 UpdateTitleBar();
             }
         };
+        
+        // Manage breakpoints
+        var breakpointMargin = new BreakpointMargin(this);
+        Editor.TextArea.LeftMargins.Insert(0, breakpointMargin);
+        Editor.ShowLineNumbers = true; // Aktivera linjenummer för att marginalen ska synas
         
         _gfx.Screen(640, 480);
         _gfx.Clear(Colors.Black);
@@ -283,6 +291,14 @@ public partial class MainWindow : Window
             }
         }
         
+        // F1 - VARIABLE WATCH
+        if (e.Key == Key.F1) 
+        { 
+            VariableWatchPanel.IsVisible = !VariableWatchPanel.IsVisible; 
+            e.Handled = true; 
+            return; 
+        }
+        
         // F5 - RUN / DEBUG
         if (e.Key == Key.F5) 
         { 
@@ -309,12 +325,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        // F9 - VARIABLE WATCH
-        if (e.Key == Key.F9) 
-        { 
-            VariableWatchPanel.IsVisible = !VariableWatchPanel.IsVisible; 
-            e.Handled = true; 
-            return; 
+        // F9 - TOGGLE BREAKPOINT (NYTT!)
+        if (e.Key == Key.F9)
+        {
+            ToggleBreakpointAtCurrentLine();
+            e.Handled = true;
+            return;
         }
         
         // F10 - FULLSCREEN
@@ -793,28 +809,70 @@ public partial class MainWindow : Window
                     token: token,
                     onVariablesChanged: (vars) => {
                         Dispatcher.UIThread.Post(() => {
-                            VariableListBox.ItemsSource = vars.OrderBy(v => v.Key).ToList();
+                            // NYTT: Filtrera bort interna variabler (som börjar med __)
+                            var userVars = vars
+                                .Where(kvp => !kvp.Key.StartsWith("__"))
+                                .OrderBy(v => v.Key)
+                                .ToList();
+                                
+                            VariableListBox.ItemsSource = userVars;
                         });
                     },
                     // VIKTIGT: async här för debug-steget
                     waitForStep: async (pc) => {
+                        // NYTT: Kolla om vi träffade en breakpoint
+                        bool hitBreakpoint = _breakpoints.Contains(pc + 1);
+                            
+                        if (hitBreakpoint && !_isPaused)
+                        {
+                            // Aktivera paus-läge automatiskt
+                            _isPaused = true;
+                            Dispatcher.UIThread.Post(() => {
+                                PauseButton.Content = "[ RESUME ]";
+                                StepButton.IsEnabled = true;
+                            });
+                        }   
+                        
                         if (_isPaused)
                         {
-                            Dispatcher.UIThread.Post(() => { 
-                                StatusText.Text = "Status: PAUSED";
-                                CurrentLineText.Text = $"Line: {pc + 1}";
-                                if (Editor.Text != null)
-                                {
-                                    var textLines = Editor.Text.Replace("\r\n", "\n").Split('\n');
-                                    int charIndex = 0;
-                                    for (int i = 0; i < pc && i < textLines.Length; i++) charIndex += textLines[i].Length + 1;
+                                Dispatcher.UIThread.Post(() => { 
+                                    StatusText.Text = hitBreakpoint ? "Status: BREAKPOINT" : "Status: PAUSED";
+                                    CurrentLineText.Text = $"Line: {pc + 1}";
                                     
-                                    int lineLength = (pc < textLines.Length) ? textLines[pc].Length : 0;
-                                    Editor.SelectionStart = charIndex;
-                                    Editor.SelectionLength = lineLength;
-                                    Editor.CaretOffset = charIndex;
-                                    Editor.Focus();
-                                }
+                                    if (Editor.Text != null && Editor.Document != null)
+                                    {
+                                        try
+                                        {
+                                            // FIXAT: Använd Document API istället för manuell beräkning
+                                            if (pc >= 0 && pc < Editor.Document.LineCount)
+                                            {
+                                                // Få raden från dokumentet (1-baserad -> 0-baserad)
+                                                var docLine = Editor.Document.GetLineByNumber(pc + 1);
+                                                int lineStart = docLine.Offset;
+                                                int lineLength = docLine.Length;
+                                                
+                                                // VIKTIGT: Använd Select() istället för att sätta properties direkt
+                                                Editor.CaretOffset = lineStart;
+                                                
+                                                if (lineLength > 0)
+                                                {
+                                                    Editor.Select(lineStart, lineLength);
+                                                }
+                                                
+                                                Editor.Focus();
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            // Säkerhetsåtgärd: Om något går fel, sätt bara caret
+                                            System.Diagnostics.Debug.WriteLine($"Error selecting line: {ex.Message}");
+                                            if (pc >= 0 && pc < Editor.Document.LineCount)
+                                            {
+                                                var docLine = Editor.Document.GetLineByNumber(pc + 1);
+                                                Editor.CaretOffset = docLine.Offset;
+                                            }
+                                        }
+                                    }
                             });
                             _stepSignal = new TaskCompletionSource<bool>();
                             await _stepSignal.Task;
@@ -868,7 +926,83 @@ public partial class MainWindow : Window
             _stepSignal?.TrySetResult(true);
         }
     }
-
+    
+    public bool HasBreakpoint(int lineNumber)
+    {
+        return _breakpoints.Contains(lineNumber);
+    }
+    
+    // NYTT: Kolla om en rad är tom eller bara innehåller whitespace/kommentarer
+    public bool IsEmptyOrCommentLine(int lineNumber)
+    {
+        if (Editor.Document == null) return true;
+            
+        // Kolla om radnumret är giltigt
+        if (lineNumber < 1 || lineNumber > Editor.Document.LineCount) return true;
+            
+        var line = Editor.Document.GetLineByNumber(lineNumber);
+        var text = Editor.Document.GetText(line.Offset, line.Length).Trim();
+            
+        // Tom rad
+        if (string.IsNullOrWhiteSpace(text)) return true;
+            
+        // Bara kommentar (börjar med ;)
+        if (text.StartsWith(";")) return true;
+            
+        // Bara en label (slutar med :)
+        if (text.EndsWith(":")) return true;
+            
+        // Hantera radnummer först (t.ex. "100 REM comment")
+        // Ta bort eventuellt radnummer i början
+        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length > 0)
+        {
+            // Om första ordet är ett tal, skippa det
+            if (int.TryParse(parts[0], out _) && parts.Length > 1)
+            {
+                var commandPart = parts[1].ToUpperInvariant();
+                    
+                // REM-rader är också kommentarer
+                if (commandPart == "REM" || commandPart.StartsWith("REM"))
+                    return true;
+            }
+            else
+            {
+                // Ingen radnummer, kolla första ordet direkt
+                var commandPart = parts[0].ToUpperInvariant();
+                if (commandPart == "REM" || commandPart.StartsWith("REM"))
+                    return true;
+            }
+        }
+            
+        return false;
+    }
+    
+    // NYTT: Toggle breakpoint på aktuell rad (F9)
+    private void ToggleBreakpointAtCurrentLine()
+    {
+        if (Editor.Document == null) return;
+            
+        // Få aktuell rad från caret-positionen
+        int offset = Editor.CaretOffset;
+        var location = Editor.Document.GetLocation(offset);
+        int lineNumber = location.Line;
+            
+        // NYTT: Hindra breakpoint på tomma rader
+        if (IsEmptyOrCommentLine(lineNumber))
+        {
+            return; // Gör ingenting
+        }
+            
+        if (_breakpoints.Contains(lineNumber))
+            _breakpoints.Remove(lineNumber);
+        else
+            _breakpoints.Add(lineNumber);
+            
+        // Tvinga en uppdatering av marginalen
+        Editor.TextArea.TextView.Redraw();
+    }
+    
     private void StepButton_OnClick(object? sender, RoutedEventArgs e) => _stepSignal?.TrySetResult(true);
 
     private void StopButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1214,6 +1348,7 @@ public partial class MainWindow : Window
                 _buf[_row, _col] = s[i];
                 _col++;
             }
+
             NewLine();
         }
 
@@ -1245,7 +1380,92 @@ public partial class MainWindow : Window
                 for (var c = 0; c < _cols; c++) sb.Append(_buf[r, c]);
                 if (r != _rows - 1) sb.Append('\n');
             }
+
             return sb.ToString();
         }
+
     }
-}
+
+    // NYTT: Breakpoint-marginal för editorn
+        private class BreakpointMargin : AvaloniaEdit.Editing.AbstractMargin
+        {
+            private readonly MainWindow _window;
+            
+            public BreakpointMargin(MainWindow window)
+            {
+                _window = window;
+            }
+            
+            public override void Render(DrawingContext context)
+            {
+                var textView = TextView;
+                if (textView == null || !textView.VisualLinesValid)
+                    return;
+
+                // Rita bakgrund för marginalen
+                context.FillRectangle(
+                    new SolidColorBrush(Color.FromRgb(30, 30, 30)),
+                    new Rect(0, 0, Bounds.Width, Bounds.Height));
+
+                foreach (var line in textView.VisualLines)
+                {
+                    int lineNumber = line.FirstDocumentLine.LineNumber;
+                    
+                    if (_window._breakpoints.Contains(lineNumber))
+                    {
+                        // Rita röd cirkel för breakpoint
+                        var y = line.GetTextLineVisualYPosition(line.TextLines[0], VisualYPosition.LineTop) - textView.VerticalOffset;
+                        
+                        // Fyllda cirkel
+                        context.DrawEllipse(
+                            Brushes.Red,
+                            new Pen(Brushes.DarkRed, 1),
+                            new Point(Bounds.Width / 2, y + 10),
+                            7, 7);
+                    }
+                }
+            }
+            
+            protected override void OnPointerPressed(PointerPressedEventArgs e)
+            {
+                base.OnPointerPressed(e);
+                
+                var textView = TextView;
+                if (textView == null) return;
+                
+                // ÄNDRAT: Få position relativt till DENNA margin, inte textView
+                var pos = e.GetPosition(this);
+                
+                // Hitta vilken rad som klickades på
+                var line = textView.GetVisualLineFromVisualTop(pos.Y + textView.VerticalOffset);
+                if (line != null)
+                {
+                    int lineNumber = line.FirstDocumentLine.LineNumber;
+                    
+                    // NYTT: Hindra breakpoint på tomma rader
+                    if (_window.IsEmptyOrCommentLine(lineNumber))
+                    {
+                        e.Handled = true;
+                        return; // Gör ingenting
+                    }
+                    
+                    if (_window._breakpoints.Contains(lineNumber))
+                        _window._breakpoints.Remove(lineNumber);
+                    else
+                        _window._breakpoints.Add(lineNumber);
+                    
+                    InvalidateVisual();
+                    
+                    // Uppdatera även textView så att allt ritas om
+                    textView.Redraw();
+                }
+                
+                e.Handled = true;
+            }
+            
+            protected override Size MeasureOverride(Size availableSize)
+            {
+                return new Size(20, 0);
+            }
+        }
+    }

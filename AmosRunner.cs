@@ -8,6 +8,7 @@ using Avalonia.Media;
 using System.Linq;
 using System.Text;
 using AmoslikeBasic;
+using Avalonia.Interactivity;
 
 namespace AmosLikeBasic;
 
@@ -714,7 +715,18 @@ public static class AmosRunner
         int pc = 0;
         while (pc < lines.Length) {
             token.ThrowIfCancellationRequested();
+            
+            // Hoppa över tomma rader vid stepping
+            while (pc < lines.Length && IsEmptyLine(lines[pc]))
+            {
+                pc++;
+            }
+                
+            if (pc >= lines.Length) break;
+                
+            // Kolla breakpoint och vänta på step (endast EN gång!)
             await waitForStep(pc);
+            
             var ln = pc + 1; 
             var line = StripComments((lines[pc] ?? "").Trim());
             if (string.IsNullOrWhiteSpace(line) || line.EndsWith(':')) { pc++; continue; }
@@ -1754,6 +1766,24 @@ public static class AmosRunner
                                     int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.BobOn(id);
                                 }
+                                else if (sub == "MOVE" && bArgs.Count >= 3)
+                                {
+                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int x1 = graphics.GetBob(id).X;
+                                    int y1 = graphics.GetBob(id).Y;
+                                    //int img = graphics.GetBob(id).ImageIndex;
+                                    x1 = x1 + EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    y1 = y1 + EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.BobPos(id, x1, y1);
+                                }
+                                else if (sub=="HANDLE") graphics.BobHandle(EvalInt(bArgs[1],vars,ln,getInkey,isKeyDown, graphics), EvalInt(bArgs[2],vars,ln,getInkey,isKeyDown, graphics), EvalInt(bArgs[3],vars,ln,getInkey,isKeyDown, graphics));
+                                else if (sub=="ROTATE") graphics.BobRotate(EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics), EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (sub=="ZOOM") {
+                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    double zx = EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics) / 100.0;
+                                    double zy = (bArgs.Count >= 4) ? EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics) / 100.0 : zx;
+                                    graphics.BobZoom(id, zx, zy);
+                                }
                                 else if (bArgs.Count >= 4)
                                 {
                                     // BOB id, x, y, imageIndex
@@ -2418,6 +2448,18 @@ public static class AmosRunner
         return l;
     }
 
+    // NYTT: Hjälpmetod för att kolla om rad är tom eller bara kommentar
+    private static bool IsEmptyLine(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return true;
+            
+        var stripped = StripComments(line.Trim());
+        stripped = StripLeadingLineNumber(stripped).Trim();
+            
+        // Rad är tom om den bara innehåller label eller är tom efter stripping
+        return string.IsNullOrWhiteSpace(stripped) || stripped.EndsWith(":");
+    }
+    
     private static object EvalValue(string t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         if (string.IsNullOrWhiteSpace(t)) return "";
         var tok = new Tokenizer(t);

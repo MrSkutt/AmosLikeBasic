@@ -108,15 +108,19 @@ public sealed class AudioEngine : IDisposable
                 // OBS: Om den loopar körs aldrig SyncEnd, så vi slipper städa bort den för tidigt.
                 if (!loop)
                 {
+                    string capturedPath = fullPath;
+                    int capturedHandle = effectStream;
+                    
                     Bass.ChannelSetSync(effectStream, SyncFlags.End, 0, (handle, channel, data, user) => 
                     {
                         if (!_isDisposed)
                         {
                             lock(_activeSamples) 
                             {
-                                if (_activeSamples.ContainsKey(fullPath) && _activeSamples[filePath] == effectStream)
+                                if (_activeSamples.TryGetValue(capturedPath, out int existingHandle) && 
+                                    existingHandle == capturedHandle)
                                 {
-                                    _activeSamples.Remove(fullPath);
+                                    _activeSamples.Remove(capturedPath);
                                 }
                             }
                         }

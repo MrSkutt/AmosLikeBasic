@@ -83,7 +83,7 @@
                     <avaloniaEdit:TextEditor Grid.Row="0"
                                              x:Name="Editor" 
                                              Classes="amos-editor" 
-                                             ShowLineNumbers="True"
+                                             ShowLineNumbers="false"
                                              BorderThickness="0" 
                                              Padding="10">
 
@@ -124,7 +124,7 @@
                 <DockPanel>
                     <Border DockPanel.Dock="Top" Background="#06206F" Padding="5">
                         <StackPanel>
-                            <TextBlock Text="VARIABLE WATCH [F9]" Foreground="Yellow" FontWeight="Bold"/>
+                            <TextBlock Text="VARIABLE WATCH [F1]" Foreground="Yellow" FontWeight="Bold"/>
                             <TextBlock Name="StatusText" Text="Status: Idle" Foreground="#7FB2FF" FontSize="11" Margin="0,5,0,0"/>
                             <TextBlock Name="CurrentLineText" Text="Line: -" Foreground="Lime" FontWeight="Bold" FontSize="14" Margin="0,2,0,0"/>
                         </StackPanel>
@@ -133,7 +133,7 @@
                                  Background="Transparent" 
                                  Foreground="#7FB2FF"
                                  FontFamily="Courier New"
-                                 FontSize="12">
+                                 FontSize="16">
                         <ListBox.ItemTemplate>
                             <DataTemplate x:CompileBindings="False">
                                 <Grid ColumnDefinitions="*, Auto">
