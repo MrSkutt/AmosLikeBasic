@@ -2,14 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
-using System.IO;
 using System.Numerics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Avalonia.Media.Imaging;
-using Avalonia.Media.Immutable;
 using Avalonia.Rendering.SceneGraph;
 using Avalonia.Skia;
 using SkiaSharp;
@@ -226,20 +224,7 @@ public sealed class AmosGpuView : Control
             {
                 var amosRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
                 fbCtx.DrawRectangle(Brushes.Transparent, null, amosRect);
-
-                // RITA RAINBOWS, Kan tas bort?
-                foreach (var rb in Graphics.GetRainbows())
-                {
-                    if (rb.Colors.Count == 0) continue;
-                    for (int y = 0; y < rb.Height; y++)
-                    {
-                        int screenY = rb.Offset + y;
-                        if (screenY < 0 || screenY >= Graphics.Height) continue;
-                        var color = rb.Colors[y % rb.Colors.Count];
-                        fbCtx.DrawRectangle(new SolidColorBrush(color), null, new Rect(0, screenY, Graphics.Width, 1));
-                    }
-                }
-
+                
                 // RITA GPU-LAGER
                 foreach (var layer in Graphics.ActiveFrame)
                 {
@@ -664,10 +649,10 @@ public sealed class AmosGraphics
                 if (bytesToMove > 0)
                 {
                     Buffer.MemoryCopy(
-                        ptr + pixels * rowBytes, // Source
-                        ptr,                     // Dest
-                        bytesToMove,             // DestSize
-                        bytesToMove              // SourceSize
+                        ptr + pixels * rowBytes,      // Source
+                        ptr,                       // Dest
+                        bytesToMove,                        // DestSize
+                        bytesToMove                         // SourceSize
                     );
                 }
 
@@ -835,50 +820,138 @@ public sealed class AmosGraphics
     public void SetShadervalues(int layerIdx, int slot, float nr, float value)
     {
         lock (LockObject) {
-            var frame = DrawingFrame;
-            if (layerIdx >= 0 && layerIdx < frame.Count) {
-                var layer = frame[layerIdx];
-                if (slot >= 0 && slot < 2) {
-                    layer.ShaderValues[slot] = new Vector4(nr, value,0f,0f);
+            // VIKTIGT: Sätt på BÅDA frames i double buffer-läge
+            if (_doubleBufferMode)
+            {
+                // Sätt på båda frames
+                if (layerIdx >= 0 && layerIdx < _frameA.Count)
+                {
+                    var layerA = _frameA[layerIdx];
+                    if (slot >= 0 && slot < 2)
+                        layerA.ShaderValues[slot] = new Vector4(nr, value, 0f, 0f);
+                    layerA.SkSlCode = RasterShaderCode;
                 }
-                layer.SkSlCode = RasterShaderCode;   
+            
+                if (layerIdx >= 0 && layerIdx < _frameB.Count)
+                {
+                    var layerB = _frameB[layerIdx];
+                    if (slot >= 0 && slot < 2)
+                        layerB.ShaderValues[slot] = new Vector4(nr, value, 0f, 0f);
+                    layerB.SkSlCode = RasterShaderCode;
+                }
+            }
+            else
+            {
+                // Single buffer: Använd DrawingFrame som vanligt
+                var frame = DrawingFrame;
+                if (layerIdx >= 0 && layerIdx < frame.Count)
+                {
+                    var layer = frame[layerIdx];
+                    if (slot >= 0 && slot < 2)
+                        layer.ShaderValues[slot] = new Vector4(nr, value, 0f, 0f);
+                    layer.SkSlCode = RasterShaderCode;
+                }
             }
         }
     }
     
-    public void SetShaderParams(int layerIdx, int slot, float y, float height)
-    {
-        lock (LockObject) {
+
+public void SetShaderParams(int layerIdx, int slot, float y, float height)
+{
+    lock (LockObject) {
+        if (_doubleBufferMode)
+        {
+            if (layerIdx >= 0 && layerIdx < _frameA.Count)
+            {
+                var layerA = _frameA[layerIdx];
+                if (slot >= 0 && slot < 22)
+                {
+                    layerA.ShaderParams[slot] = y;
+                    layerA.ShaderHeights[slot] = height;
+                }
+                layerA.SkSlCode = RasterShaderCode;
+            }
+            
+            if (layerIdx >= 0 && layerIdx < _frameB.Count)
+            {
+                var layerB = _frameB[layerIdx];
+                if (slot >= 0 && slot < 22)
+                {
+                    layerB.ShaderParams[slot] = y;
+                    layerB.ShaderHeights[slot] = height;
+                }
+                layerB.SkSlCode = RasterShaderCode;
+            }
+        }
+        else
+        {
             var frame = DrawingFrame;
-            if (layerIdx >= 0 && layerIdx < frame.Count) {
+            if (layerIdx >= 0 && layerIdx < frame.Count)
+            {
                 var layer = frame[layerIdx];
-                if (slot >= 0 && slot < 22) { // Uppdaterat till 24
+                if (slot >= 0 && slot < 22)
+                {
                     layer.ShaderParams[slot] = y;
                     layer.ShaderHeights[slot] = height;
-                }layer.SkSlCode = RasterShaderCode;   
-            }
-        }
-    }
-
-    public void SetShaderColors(int layerIdx, int slot, Color c1, Color c2)
-    {
-        lock (LockObject) {
-            var frame = DrawingFrame;
-            if (layerIdx >= 0 && layerIdx < frame.Count) {
-                var layer = frame[layerIdx];
-                if (slot >= 0 && slot < 22) {
-                    layer.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255); // Sätt Alpha till 255
-                    layer.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
-                
-                    // Om det är slot 0 (bakgrund) och höjden är 0, sätt den till skärmhöjd
-                    if (slot == 0 && layer.ShaderHeights[0] <= 0) {
-                        layer.ShaderHeights[0] = (float)Height;
-                    }
                 }
-                layer.SkSlCode = RasterShaderCode;   
+                layer.SkSlCode = RasterShaderCode;
             }
         }
     }
+}
+
+public void SetShaderColors(int layerIdx, int slot, Color c1, Color c2)
+{
+    lock (LockObject) {
+        if (_doubleBufferMode)
+        {
+            if (layerIdx >= 0 && layerIdx < _frameA.Count)
+            {
+                var layerA = _frameA[layerIdx];
+                if (slot >= 0 && slot < 22)
+                {
+                    layerA.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
+                    layerA.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
+                    
+                    if (slot == 0 && layerA.ShaderHeights[0] <= 0)
+                        layerA.ShaderHeights[0] = (float)Height;
+                }
+                layerA.SkSlCode = RasterShaderCode;
+            }
+            
+            if (layerIdx >= 0 && layerIdx < _frameB.Count)
+            {
+                var layerB = _frameB[layerIdx];
+                if (slot >= 0 && slot < 22)
+                {
+                    layerB.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
+                    layerB.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
+                    
+                    if (slot == 0 && layerB.ShaderHeights[0] <= 0)
+                        layerB.ShaderHeights[0] = (float)Height;
+                }
+                layerB.SkSlCode = RasterShaderCode;
+            }
+        }
+        else
+        {
+            var frame = DrawingFrame;
+            if (layerIdx >= 0 && layerIdx < frame.Count)
+            {
+                var layer = frame[layerIdx];
+                if (slot >= 0 && slot < 22)
+                {
+                    layer.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
+                    layer.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
+                    
+                    if (slot == 0 && layer.ShaderHeights[0] <= 0)
+                        layer.ShaderHeights[0] = (float)Height;
+                }
+                layer.SkSlCode = RasterShaderCode;
+            }
+        }
+    }
+}
     
     // ---------------- Project Export/Import ----------------
 
@@ -1053,6 +1126,7 @@ public sealed class AmosGraphics
         {
             _doubleBufferMode = false;
             
+            ClearAll(Colors.Transparent);
             Width = w; Height = h;
             _frameA.Clear(); _frameB.Clear();
             
@@ -1173,6 +1247,13 @@ public sealed class AmosGraphics
         EnsureScreen();
         // Rensa bara den nuvarande aktiva skärmen/lagret
         ClearBitmap(GetActiveScreen(), color);
+    }
+    
+    public void ClearAll(Color color)
+    {
+        EnsureScreen();
+        // Rensa bara den nuvarande aktiva skärmen/lagret
+        ClearBitmap(GetActiveScreen(), color);
             
         lock (LockObject) 
         {
@@ -1274,11 +1355,11 @@ public sealed class AmosGraphics
                 _doubleBufferMode = true;
 
                 // Kopiera Active -> Inactive så att bakbufferten ser ut som skärmen
-                // gör just nu. Annars riskerar vi att första WAIT VBL visar en svart skärm.
+                // gör just nu. Förhindra rendering under kopieringen.
                 for (int i = 0; i < ActiveFrame.Count && i < InactiveFrame.Count; i++)
                 {
-                    var sourceBmp = ActiveFrame[i].Bitmap; // Det som syns nu
-                    var destBmp = InactiveFrame[i].Bitmap; // Det vi ska börja rita på
+                    var sourceBmp = ActiveFrame[i].Bitmap;
+                    var destBmp = InactiveFrame[i].Bitmap;
                     
                     if (sourceBmp != null && destBmp != null)
                     {
@@ -1287,12 +1368,24 @@ public sealed class AmosGraphics
                         unsafe
                         {
                             long size = (long)src.RowBytes * sourceBmp.PixelSize.Height;
-                            Buffer.MemoryCopy((void*)src.Address, (void*)dst.Address, size, size);
+                            // Använd explicit MemoryCopy för att undvika partial copies
+                            System.Buffer.MemoryCopy(
+                                (void*)src.Address, 
+                                (void*)dst.Address, 
+                                size, 
+                                size);
                         }
                     }
+                
+                    // Kopiera även shader-parametrar
+                    InactiveFrame[i].ShaderParams = (float[])ActiveFrame[i].ShaderParams.Clone();
+                    InactiveFrame[i].ShaderHeights = (float[])ActiveFrame[i].ShaderHeights.Clone();
+                    InactiveFrame[i].ShaderColors = (SKColor[])ActiveFrame[i].ShaderColors.Clone();
+                    InactiveFrame[i].ShaderColorsTo = (SKColor[])ActiveFrame[i].ShaderColorsTo.Clone();
+                    InactiveFrame[i].ShaderValues = (Vector4[])ActiveFrame[i].ShaderValues.Clone();
+                    InactiveFrame[i].Timer = ActiveFrame[i].Timer;
                 }
             }
-            // Om vi redan var i double buffer mode gör vi inget, eller så kan man tvinga en kopiering om man vill.
         }
     }
     
@@ -1305,14 +1398,7 @@ public sealed class AmosGraphics
             SetShadervalues(sid,0,x,y);
         //InactiveFrame[sid].Offset = new Point(-x, -y);
     }
-
-    //public Vector4 GetScreenOffset(int sid)
-    //{
-    //    if (sid >= 0 && sid < InactiveFrame.Count) 
-    //        return InactiveFrame[sid].Offset;
-    //    return new Point(0, 0);
-    // }
-
+    
     // ---------------- Drawing ----------------
     public void Plot(int x, int y) => Plot(x, y, Ink);
 
@@ -1817,7 +1903,9 @@ public sealed class AmosGraphics
             
         f.ZoomX = zx;
         f.ZoomY = zy;
-    }        public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
+    }        
+    
+    public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
 
     public unsafe void FontPrint(int id, int x, int y, string text)
     {
@@ -2643,13 +2731,60 @@ public sealed class AmosGraphics
             }
         }
     }
-
-    public bool SpriteHit(int id1, int id2)
+    
+    
+    public bool SpriteHit(int id1, int id2, int step = 2)
     {
         if (!_sprites.TryGetValue(id1, out var s1) || !_sprites.TryGetValue(id2, out var s2)) return false;
         if (!s1.Visible || !s2.Visible) return false;
-        int x1 = s1.X - s1.HandleX, y1 = s1.Y - s1.HandleY, x2 = s2.X - s2.HandleX, y2 = s2.Y - s2.HandleY;
-        return x1 < x2 + s2.Width && x1 + s1.Width > x2 && y1 < y2 + s2.Height && y1 + s1.Height > y2;
+    
+        int x1 = s1.X - s1.HandleX, y1 = s1.Y - s1.HandleY;
+        int x2 = s2.X - s2.HandleX, y2 = s2.Y - s2.HandleY;
+    
+        if (!(x1 < x2 + s2.Width && x1 + s1.Width > x2 && y1 < y2 + s2.Height && y1 + s1.Height > y2))
+            return false;
+    
+        int overlapLeft = Math.Max(x1, x2);
+        int overlapTop = Math.Max(y1, y2);
+        int overlapRight = Math.Min(x1 + s1.Width, x2 + s2.Width);
+        int overlapBottom = Math.Min(y1 + s1.Height, y2 + s2.Height);
+    
+        using var fb1 = s1.Bitmap.Lock();
+        using var fb2 = s2.Bitmap.Lock();
+    
+        unsafe
+        {
+            byte* p1 = (byte*)fb1.Address;
+            byte* p2 = (byte*)fb2.Address;
+            var key1 = s1.TransparentKey;
+            var key2 = s2.TransparentKey;
+        
+            // Kolla bara var N:te pixel
+            for (int y = overlapTop; y < overlapBottom; y += step)
+            {
+                for (int x = overlapLeft; x < overlapRight; x += step)
+                {
+                    int localX1 = x - x1;
+                    int localY1 = y - y1;
+                    int localX2 = x - x2;
+                    int localY2 = y - y2;
+                
+                    int idx1 = (localY1 * fb1.RowBytes) + (localX1 * 4);
+                    int idx2 = (localY2 * fb2.RowBytes) + (localX2 * 4);
+                
+                    byte* px1 = p1 + idx1;
+                    byte* px2 = p2 + idx2;
+                
+                    bool solid1 = !(px1[2] == key1.R && px1[1] == key1.G && px1[0] == key1.B);
+                    bool solid2 = !(px2[2] == key2.R && px2[1] == key2.G && px2[0] == key2.B);
+                
+                    if (solid1 && solid2)
+                        return true;
+                }
+            }
+        }
+    
+        return false;
     }
 
     public Sprite GetSprite(int id)

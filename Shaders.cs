@@ -62,50 +62,86 @@ half4 main(float2 fragCoord) {
     }
 
     // 2. WEATHER (Nu med slumpmässiga positioner)
+
     half3 pCol = half3(0.0);
     if (weatherType > 0.5) {
         float size = 15.0 + weatherDensity;
         float2 uv = fragCoord / iResolution.xy;
-        float2 grid = uv * float2(size, size * (iResolution.y / iResolution.x));
+        
+        // ===== GLOBAL VIND-OFFSET =====
+        float windStrength = sin(iTime * 0.5) * 0.0; // MYCKET STARK!
+        float windOffset = windStrength * iTime; // Ackumulerad rörelse
+        float baseWindStrength = sin(iTime * 0.5) * 0.8;
+
+        // Applicera på HELA gridet
+        float2 windVector = float2(windOffset, 0.0);
+        float2 grid = (uv + windVector / size) * float2(size, size * (iResolution.y / iResolution.x));
+        // ===============================
+        
         float2 id = floor(grid);
         float2 gUv = fract(grid) - 0.5;
-        float h = hash(id.x * 123.0 + id.y * 456.0);
-
         
-        // Skapa tre olika slumptal baserat på cellens ID
         float h1 = hash(id.x * 123.0 + id.y * 456.0);
         float h2 = hash(h1 * 789.0);
         float h3 = hash(h2 * 321.0);
         
-        // Slumpmässig offset inuti cellen (-0.4 till 0.4)
+        float layerDepth = fract(h3 * 3.0);
+        float depthScale = 0.6 + layerDepth * 0.4;
+        
         float2 pOffset = float2(h2 - 0.5, h3 - 0.5) * 0.8;
 
         if (weatherType < 1.5) { // SNÖ
-            float speed = 3.4 + h1 * 0.4;
-            float pX = pOffset.x + sin(iTime + h1 * 6.28) * 0.2;
+            float windStrength = baseWindStrength * 2.5;
+            
+            float speed = (3.4 + h1 * 0.4) * depthScale;
+            
+            // SNÖ: Stor sideways drift + rotation
+            float sway = sin(iTime * 1.2 + h1 * 6.28) * 0.25; // Mer sway
+            float drift = windStrength * 0.8; // Stor drift
+            float pX = fract(pOffset.x + sway + drift + 0.5) - 0.5;
             float pY = fract(h1 + iTime * speed) - 0.5;
-            if (length(gUv - float2(pX, pY)) < 0.05) {
-                float2 dv = gUv - float2(pX, pY);
-                float d = length(dv);
-                float radius = 0.05;
-                if (d < radius)
-                {
-                    float t = d / radius;
-                    t = saturate(t);
-
-                    float a = 1.0 - (t * t * (3.0 - 2.0 * t));
-                    pCol = half3(0.8, 0.9, 1.0);
-                }
+            
+            float2 dv = gUv - float2(pX, pY);
+            
+            // ROTERA snöflingan med vinden!
+            float rotation = windStrength * 2.0 + iTime + h1 * 6.28;
+            float cosR = cos(rotation);
+            float sinR = sin(rotation);
+            float2 dvRot;
+            dvRot.x = dv.x * cosR - dv.y * sinR;
+            dvRot.y = dv.x * sinR + dv.y * cosR;
+            
+            float d = length(dvRot);
+            float flakeSize = (0.03 + h2 * 0.04) * depthScale;
+            
+            if (d < flakeSize) {
+                float t = d / flakeSize;
+                t = saturate(t);
+                float a = 1.0 - (t * t * (3.0 - 2.0 * t));
+                
+                // Brightness baserat på djup
+                float brightness = 0.5 + depthScale * 0.5; // Närmare = ljusare
+                pCol = half3(brightness * 0.9, brightness * 0.95, brightness);
+                
+                // Sparkle
+                float sparkle = sin(iTime * 3.0 + h1 * 20.0) * 0.5 + 0.5;
+                pCol = pCol * half(0.85 + sparkle * 0.15);
             }
-        } 
+        }
 
         else if (weatherType < 2.5) { // REGN
-            float speed = 8.0;
+            float windStrength = baseWindStrength * 0.6; // Mindre påverkan
+            
+            float speed = (10.0 + h1 * 4.0) * depthScale;
             float pY = fract(h1 + iTime * speed) - 0.5;
-            float pX = fract(h1 * 12.34) - 0.5;
-
-            // Lutning ca -10° till +10°
-            float angle = (fract(h1 * 7.89) - 0.5) * (10.0 * 3.1415926 / 180.0);
+            
+            // REGN: Mindre sideways, mer lutning
+            float pX = fract(pOffset.x + windStrength * 0.2 + 0.5) - 0.5;
+            
+            // Lutning påverkas av vind
+            float windAngle = windStrength * 20.0; // Måttlig lutning
+            float angle = (h2 - 0.5) * (15.0 * 3.1415926 / 180.0) + 
+                          (windAngle * 3.1415926 / 180.0);
             float cosA = cos(angle);
             float sinA = sin(angle);
 
@@ -114,23 +150,47 @@ half4 main(float2 fragCoord) {
             dvRot.x = dv.x * cosA - dv.y * sinA;
             dvRot.y = dv.x * sinA + dv.y * cosA;
 
-            // Stretch droppar horisontellt
-            dvRot *= float2(15.0, 1.0);
+            // Stretch påverkas av depthScale
+            dvRot *= float2(25.0 * depthScale, 0.8);
 
-            // Mjuk kant
-            float radius = 0.25;
-        float t = length(dvRot) / radius;
-        t = saturate(t);
-        float a = (1.0 - (t*t*(3.0 - 2.0*t))) * 0.5; // alpha
+            float radius = 0.28;
+            float t = length(dvRot) / radius;
+            t = saturate(t);
+            
+            // Alpha baserat på djup
+            float a = (1.0 - (t * t * (3.0 - 2.0 * t))) * (0.5 + depthScale * 0.25);
 
-        // --- Metal-säker färg-blend ---
-        half3 col = half3(0.6, 0.7, 1.0);
-        pCol = pCol * (1.0 - half(a)) + col * half(a);
-    }
-        else { // STJÄRNOR (Nu helt slumpade och skimrande)
-            float shimmer = sin(iTime * 1.5 + h1 * 10.0) * 0.5 + 0.5;
-            // Vi använder pOffset för att placera stjärnan slumpmässigt i cellen
-            if (length(gUv - pOffset) < 0.03) pCol = half3(half(shimmer * h1));
+            half3 col = half3(0.6, 0.7, 1.0);
+            pCol = pCol * (1.0 - half(a)) + col * half(a);
+        }
+
+        else { // STJÄRNOR
+            // Stjärnor påverkas INTE av wind/depth (de är i rymden)
+            float blinkSpeed = 0.8 + h2 * 1.4;
+            float shimmer = sin(iTime * blinkSpeed + h1 * 10.0) * 0.5 + 0.5;
+            
+            float starSize = 0.02 + h3 * 0.025;
+            float dist = length(gUv - pOffset);
+            
+            if (dist < starSize) {
+                float t = dist / starSize;
+                t = saturate(t);
+                float glow = 1.0 - (t * t * (3.0 - 2.0 * t));
+                
+                // Färgvariation
+                float hue = h1;
+                half3 starColor;
+                if (hue < 0.3) {
+                    starColor = half3(1.0, 1.0, 0.95); // Varm vit
+                } else if (hue < 0.6) {
+                    starColor = half3(0.95, 0.95, 1.0); // Kall vit
+                } else {
+                    starColor = half3(1.0, 0.98, 0.9); // Gulaktig
+                }
+                
+                float brightness = shimmer * glow * (0.6 + h2 * 0.4);
+                pCol = starColor * half(brightness);
+            }
         }
     }
 

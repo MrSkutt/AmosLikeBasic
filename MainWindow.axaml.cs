@@ -893,6 +893,7 @@ public partial class MainWindow : Window
                 PauseButton.IsEnabled = false; 
                 StepButton.IsEnabled = false;
                 StatusText.Text = "Status: Idle";
+                Editor.Select(Editor.CaretOffset , 0);
             });
         }
     }
