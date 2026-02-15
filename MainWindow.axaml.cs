@@ -6,7 +6,6 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using AmoslikeBasic;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -16,8 +15,6 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.Media;
 using Avalonia.VisualTree;
-using Avalonia.Interactivity;
-using AvaloniaEdit;
 using AvaloniaEdit.Rendering;
 
 
@@ -31,6 +28,7 @@ public partial class MainWindow : Window
     private bool _isPaused = false;
     private readonly AmosGraphics _gfx = new(); 
     private AudioEngine? _audioEngine = new(); 
+    private bool _isProjectLoading = false;
 
     private readonly TextScreen _textScreen = new(rows: 30, cols: 80);
     private bool _uiReady;
@@ -39,6 +37,7 @@ public partial class MainWindow : Window
     private readonly HashSet<string> _pressedKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConfigService configService;
     private readonly HashSet<int> _breakpoints = new(); // breakpoints list
+    private Dictionary<string, object>? _currentVars;
 
     public MainWindow()
     {
@@ -53,6 +52,8 @@ public partial class MainWindow : Window
         _ = EnsureExampleProjectsExistAsync();
         
         AmosAudioCommands.InitializeAudio();
+        
+        VariableListBox.DoubleTapped += VariableListBox_DoubleTapped;
         
         string userDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
@@ -302,7 +303,8 @@ public partial class MainWindow : Window
         // F5 - RUN / DEBUG
         if (e.Key == Key.F5) 
         { 
-            // Editor.IsEnabled = false;
+            if (_isProjectLoading) { e.Handled = true; return; }
+
             bool debug = (e.KeyModifiers & KeyModifiers.Shift) != 0;
             _ = StartProgramAsync(debug); 
             e.Handled = true; 
@@ -352,6 +354,23 @@ public partial class MainWindow : Window
         _pressedKeys.Add(e.Key.ToString());
     }
 
+    private void VariableListBox_DoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (VariableListBox.SelectedItem is not KeyValuePair<string, string> selected)
+            return;
+
+        var varName = selected.Key;
+
+        if (_currentVars == null || !_currentVars.TryGetValue(varName, out var value))
+            return;
+
+        if (value is not IAmosArray arr)
+            return;
+
+        var viewer = new ArrayViewerWindow(varName, arr);
+        viewer.Show(this);
+    }
+    
     private async Task EnsureExampleProjectsExistAsync()
     {
         try 
@@ -808,14 +827,22 @@ public partial class MainWindow : Window
                     audioEngine: _audioEngine,
                     token: token,
                     onVariablesChanged: (vars) => {
-                        Dispatcher.UIThread.Post(() => {
-                            // NYTT: Filtrera bort interna variabler (som börjar med __)
-                            var userVars = vars
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            _currentVars = new Dictionary<string, object>(
+                                vars, StringComparer.OrdinalIgnoreCase);
+
+                            var displayItems = vars
                                 .Where(kvp => !kvp.Key.StartsWith("__"))
-                                .OrderBy(v => v.Key)
+                                .OrderBy(kvp => kvp.Key)
+                                .Select(kvp => new KeyValuePair<string, string>(
+                                    kvp.Key,
+                                    kvp.Value is IAmosArray arr
+                                        ? $"[Array {string.Join("×", arr.Dimensions.Select(d => d))}]"
+                                        : kvp.Value?.ToString() ?? ""))
                                 .ToList();
-                                
-                            VariableListBox.ItemsSource = userVars;
+
+                            VariableListBox.ItemsSource = displayItems;
                         });
                     },
                     // VIKTIGT: async här för debug-steget
@@ -900,6 +927,8 @@ public partial class MainWindow : Window
 
     private async void RunButton_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (_isProjectLoading) return;
+        
         // Vi kollar om Shift var nedtryckt när vi klickade, eller anropar med true från kod
         bool startPaused = (sender == null && e == null) || 
                            (e is KeyEventArgs ke && (ke.KeyModifiers & KeyModifiers.Shift) != 0);
@@ -1074,6 +1103,10 @@ public partial class MainWindow : Window
         if (_screenWindow?.Console != null) _screenWindow.Console.Text = "";
         LogBox.Text = "New project started.\n";
         _isDirty = false; // Nollställ flaggan
+        
+        LogBox.Clear();
+        _breakpoints.Clear();
+        VariableListBox.ItemsSource = null;
         UpdateTitleBar(); // Uppdatera till "Untitled"
     }
 
@@ -1171,10 +1204,14 @@ public partial class MainWindow : Window
         if (file is null) return;
 
         await OpenProjectFromStorageFileAsync(file);
+        
+        LogBox.Clear();
+        VariableListBox.ItemsSource = null;
     }
     
     public async Task OpenProjectFromStorageFileAsync(IStorageFile file)
     {
+        SetProjectLoading(true);
         try
         {
             await using var stream = await file.OpenReadAsync();
@@ -1190,18 +1227,27 @@ public partial class MainWindow : Window
 
             await AppendConsoleLineAsync($"Opened: {file.Name}");
             
-            // ✅ SPARA SENAST ÖPPNADE FIL
+            // ✅ SAVE LAST OPENED FILE
             configService.Config.LastProjectPath = file.Path.LocalPath;
             configService.Save();
+            
+            // CLEAR BREAKPOINTS
+            _breakpoints.Clear();
+            Editor.TextArea.TextView.Redraw();
         }
         catch (Exception ex)
         {
             await AppendConsoleLineAsync($"ERROR loading: {ex.Message}");
         }
+        finally
+        {
+            SetProjectLoading(false);
+        }
     }
 
     public async Task OpenProjectFromPathAsync(string filePath)
     {
+        SetProjectLoading(true);
         try
         {
             if (!File.Exists(filePath))
@@ -1233,8 +1279,24 @@ public partial class MainWindow : Window
         {
             await AppendConsoleLineAsync($"ERROR loading: {ex.Message}");
         }
+        finally
+        {
+            SetProjectLoading(false);
+        }
     }
     
+    private void SetProjectLoading(bool loading)
+    {
+        _isProjectLoading = loading;
+        Dispatcher.UIThread.Post(() =>
+        {
+            RunButton.IsEnabled = !loading;
+            RunButton.Content = loading ? "[ LOADING... ]" : "[ RUN ]";
+            RunButton.Background = loading 
+                ? new SolidColorBrush(Color.Parse("#666666"))
+                : new SolidColorBrush(Color.Parse("#00CC00"));
+        });
+    }
     
     private void ChangeTheme_OnClick(object? sender, RoutedEventArgs e)
     {

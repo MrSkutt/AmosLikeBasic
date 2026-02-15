@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using System.Linq;
+using System.Net.Security;
+using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using AmoslikeBasic;
 using Avalonia.Interactivity;
@@ -969,15 +971,18 @@ public static class AmosRunner
             }
                 
             if (pc >= lines.Length) break;
-                
-            // Kolla breakpoint och vänta på step (endast EN gång!)
-            await waitForStep(pc);
             
-            var ln = pc + 1; 
             var line = StripComments((lines[pc] ?? "").Trim());
             if (string.IsNullOrWhiteSpace(line) || line.EndsWith(':')) { pc++; continue; }
-            line = StripLeadingLineNumber(line);
+            line = StripLeadingLineNumber(line).Trim();
 
+            // Jump over comments
+            var upperCheck = line.ToUpperInvariant();
+            if (upperCheck == "REM" || upperCheck.StartsWith("REM ")) { pc++; continue; }
+
+            await waitForStep(pc);          // stannar aldrig på REM
+            var ln = pc + 1;
+            
             var commands = SplitMultipleCommands(line);
             bool jumpHappened = false;
 
@@ -1115,6 +1120,19 @@ public static class AmosRunner
 
                             graphics.Clear(Colors.Transparent);
                             graphics.SetDrawingScreen(x);
+                            graphics.Locate(0, 0);
+                            onGraphicsChanged();
+                            break;
+                        case "CLSGA":
+                            var x2 = graphics.GetActiveScreenNumber();
+                            if (!string.IsNullOrWhiteSpace(arg))
+                            {
+                                // Om ett argument skickades med, välj det lagret först
+                                graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
+                            }
+
+                            graphics.ClearAll(Colors.Transparent);
+                            graphics.SetDrawingScreen(x2);
                             graphics.Locate(0, 0);
                             onGraphicsChanged();
                             break;
@@ -2289,7 +2307,26 @@ public static class AmosRunner
                                         graphics)));
                             onGraphicsChanged();
                             break;
-                        
+                        case "IMAGE":
+                        {
+                            if (arg.StartsWith("LOAD "))
+                            {
+                                string loadArg = arg.Substring(5).Trim();
+                                var parts = loadArg.Split(',').Select(p => p.Trim()).ToList();
+                                int imgId = EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics);
+                                string file = ValueToString(EvalValue(parts[1], vars, ln, getInkey, isKeyDown, graphics));
+                                if (parts.Count >= 5)
+                                {
+                                    int fw = EvalInt(parts[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    int fh = EvalInt(parts[3], vars, ln, getInkey, isKeyDown, graphics);
+                                    int fc = EvalInt(parts[4], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.LoadImageBankSheet(imgId, file, fw, fh, fc);
+                                }
+                                else
+                                    graphics.LoadImageBank(imgId, file);
+                            }
+                            break;
+                        }
                         case "SPRITE":
                             var ss = SplitCsvOrSpaces(arg);
                             if (ss.Count == 0) break;
@@ -2320,6 +2357,13 @@ public static class AmosRunner
                                         graphics.LoadSprite(id, path);
                                     }
                                 }
+                                else if (arg.StartsWith("IMAGE "))
+                                {
+                                    // SPRITE IMAGE 1, 2
+                                    int sid2 = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics); 
+                                    int imgId = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpriteImage(sid2, imgId);
+                                }
                                 else if (sub == "ADDFRAME")
                                     graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
                                         Unquote(ss[2]));
@@ -2330,6 +2374,15 @@ public static class AmosRunner
                                     graphics.SpriteHandle(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics));
+                                else if (sub == "MOVE" && ss.Count >= 3)
+                                {
+                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int x1 = graphics.GetSprite(id).X;
+                                    int y1 = graphics.GetSprite(id).Y;
+                                    x1 = x1 + EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    y1 = y1 + EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpritePos(id, x1, y1);
+                                }
                                 else if (sub == "ROTATE")
                                     graphics.SpriteRotate(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
@@ -2522,7 +2575,7 @@ public static class AmosRunner
                                         EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics),
                                         ValueToString(EvalValue(fArgs[4], vars, ln, getInkey, isKeyDown, graphics)));
                                 else if (fSub == "ROTATE" && fArgs.Count >= 3)
-                                    graphics.FontRotate(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        graphics.FontRotate(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics));
                                 else if (fSub == "ZOOM" && fArgs.Count >= 3)
                                 {
@@ -2535,13 +2588,26 @@ public static class AmosRunner
                                 }
                                 else if (fSub == "SET" && fArgs.Count >= 3)
                                 {
-                                    var fArgs2 = SplitArgsRespectQuotes(arg);
-                                    int width = EvalInt(fArgs2[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int height = EvalInt(fArgs2[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    object
-                                        fnt = fArgs2[
-                                            3]; //EvalValue(fArgs2[3], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.ConfigureText(width, height, ValueToString(fnt));
+                                    // Använd SplitTopLevelCsv istället - den behåller citattecken
+                                    var fArgs2 = SplitTopLevelCsv(arg.Substring(4).Trim()); // Ta bort "SET "
+                                        
+                                    if (fArgs2.Count >= 3)
+                                    {
+                                        int width = EvalInt(fArgs2[0], vars, ln, getInkey, isKeyDown, graphics);
+                                        int height = EvalInt(fArgs2[1], vars, ln, getInkey, isKeyDown, graphics);
+                                            
+                                        // EvalValue hanterar både "Courier New" och F$ korrekt
+                                        string fnt = ValueToString(EvalValue(fArgs2[2], vars, ln, getInkey, isKeyDown, graphics));
+                                            
+                                        graphics.ConfigureText(width, height, fnt);
+                                    }
+                                }
+                                else if (fSub == "STYLE" && fArgs.Count >= 2)
+                                {
+                                    var fArgs2 = SplitTopLevelCsv(arg.Substring(4).Trim()); 
+                                    string style = fArgs2[0];
+                                    
+                                    graphics.FontTextStyle(style);
                                 }
                                 else if (fSub == "CLEAR")
                                 {
@@ -2832,6 +2898,7 @@ public static class AmosRunner
                     else
                     {
                         // BREAK (Standard): Rapportera och avsluta
+                        if (ex.Message == "A task was canceled.") {return;}
                         await appendLineAsync($"Runtime Error at line {ln}: {ex.Message}");
                         // Kasta vidare eller returnera för att stoppa helt
                         return;
@@ -3346,7 +3413,7 @@ public static class AmosRunner
                     }
     
                     string[] parts = input.Split(new[] { delimiter }, StringSplitOptions.None);
-                    var strArray = new AmosStringArray(parts.Length - 1);
+                    var strArray = new AmosStringArray(parts.Length);
                     for (int i = 0; i < parts.Length; i++)
                         strArray.Data[i] = parts[i];
     
@@ -3416,7 +3483,31 @@ public static class AmosRunner
     
                     return string.Concat(Enumerable.Repeat(str, count));
                 }
-                        
+
+                if (id.Equals("BOB#X", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetBob(val).X;     
+                }
+                if (id.Equals("BOB#Y", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetBob(val).Y;     
+                }
+                if (id.Equals("SPRITE#X", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).X;     
+                }
+                if (id.Equals("SPRITE#Y", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).Y;     
+                }
                 if (id.Equals("EOF", StringComparison.OrdinalIgnoreCase))
                 {
                     // Syntax: EOF(channel)
@@ -3520,7 +3611,7 @@ public static class AmosRunner
         return 0.0;
     }
     
-    private static string ValueToString(object? v)
+    public static string ValueToString(object? v)
     {
         if (v is double d) 
         {
@@ -3688,7 +3779,7 @@ public static class AmosRunner
             while (_i < _s.Length && (char.IsDigit(_s[_i]) || _s[_i] == '.' || (_i == s && _s[_i] == '-'))) _i++; 
             return double.TryParse(_s[s.._i], CultureInfo.InvariantCulture, out v); 
         }
-        public bool TryReadIdentifier(out string n) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsLetterOrDigit(_s[_i]) || _s[_i] == '$' || _s[_i] == '_')) _i++; n = _s[s.._i]; return n.Length > 0; }
+        public bool TryReadIdentifier(out string n) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsLetterOrDigit(_s[_i]) || _s[_i] == '$' || _s[_i] == '_' || _s[_i] == '#')) _i++; n = _s[s.._i]; return n.Length > 0; }
         public string ReadUntil(char c) { var s = _i; while (_i < _s.Length && _s[_i] != c) _i++; return _s[s.._i]; }
         public bool TryReadString(out string v)
         {
