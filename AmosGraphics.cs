@@ -21,6 +21,8 @@ public sealed class GpuLayer
     
     public Point Offset { get; set; }
     public double Opacity { get; set; } = 1.0;
+    public float FadeTarget { get; set; } = -1f;
+    public float FadeStep   { get; set; } = 0f;
     public bool Visible { get; set; } = true; 
     public float Timer { get; set; } // For animations
     // NYTT: Array för att skicka in t.ex. Y-positioner för 20 bars
@@ -377,10 +379,13 @@ public sealed class AmosGpuView : Control
                         * Matrix.CreateTranslation(centerX + sprite.X, centerY + sprite.Y); // tillbaka till center + top-left
 
 
-                    // Push transform + draw
                     using (fbCtx.PushPostTransform(transform))
                     {
-                        fbCtx.DrawImage(bmp, new Rect(bmp.Size), new Rect(0, 0, sprite.Width, sprite.Height));
+                        // Applicera sprite-alpha (0.0–1.0) som Opacity vid ritning
+                        using (fbCtx.PushOpacity(sprite.Alpha))
+                        {
+                            fbCtx.DrawImage(bmp, new Rect(bmp.Size), new Rect(0, 0, sprite.Width, sprite.Height));
+                        }
                     }
                 }
             }
@@ -432,7 +437,10 @@ public sealed class AmosGraphics
     public string Style { get; private set; } = "Normal";
     private string font = "Courier New";
     public Color PaperColor { get; set; } = Colors.Transparent; // Bakgrundsfärg för text
+    public float Alpha = 255f;
 
+    public float FadeTarget = -1f;
+    public float FadeStep   = 0f;
 
     string RasterShaderCode = Shader.RasterShaderCode;
     
@@ -844,6 +852,11 @@ public sealed class AmosGraphics
         public double ZoomY { get; set; } = 1.0;
         public Color Ink { get; set; }
         public Color TransparentKey { get; set; }
+
+        // --- Alpha & Fade ---
+        public float Alpha { get; set; } = 1.0f;      // 0.0–1.0 (1.0 = helt ogenomskinlig)
+        public float FadeTarget { get; set; } = -1f;   // -1 = ingen aktiv fade
+        public float FadeStep { get; set; } = 0f;      // delta per frame
     }
     public void SpriteImage(int spriteId, int imageBankId)
     {
@@ -1582,16 +1595,19 @@ public sealed class AmosGraphics
             unsafe
             {
                 var p = (byte*)fb.Address;
-                for (var y = y1; y <= y2; y++)
-                {
-                    var r = p + y * fb.RowBytes;
-                    for (var x = x1; x <= x2; x++)
-                    {
+                byte a = Ink.A;
+                byte rb = (byte)(Ink.R * a / 255);
+                byte gb = (byte)(Ink.G * a / 255);
+                byte bb = (byte)(Ink.B * a / 255);
+
+                for (var y = y1; y <= y2; y++) {
+                    var row = p + y * fb.RowBytes;
+                    for (var x = x1; x <= x2; x++) {
                         var i = x * 4;
-                        r[i + 0] = Ink.B;
-                        r[i + 1] = Ink.G;
-                        r[i + 2] = Ink.R;
-                        r[i + 3] = Ink.A;
+                        row[i + 0] = bb;
+                        row[i + 1] = gb;
+                        row[i + 2] = rb;
+                        row[i + 3] = a;
                     }
                 }
             }
@@ -2481,21 +2497,38 @@ public sealed class AmosGraphics
         // Uppdatera bitmappen i det aktuella GPU-lagret istället för i den gamla _screens-listan
         if (_currentScreen < InactiveFrame.Count)
         {
-            var layer = InactiveFrame[_currentScreen];
-            InactiveFrame[_currentScreen] = new GpuLayer 
-            { 
-                Bitmap = CreateEmptyBitmap(pixelW, pixelH),
-                Offset = layer.Offset,
-                Opacity = layer.Opacity,
-                //SkSlCode = layer.SkSlCode
+            var layerI = InactiveFrame[_currentScreen];
+            InactiveFrame[_currentScreen] = new GpuLayer
+            {
+                Bitmap        = CreateEmptyBitmap(pixelW, pixelH),
+                Offset        = layerI.Offset,
+                Opacity       = layerI.Opacity,
+                Visible       = layerI.Visible,
+                Timer         = layerI.Timer,
+                SkSlCode      = layerI.SkSlCode,
+                CachedEffect  = null, // Tvingas kompileras om för nya dimensioner
+                ShaderParams  = (float[])layerI.ShaderParams.Clone(),
+                ShaderHeights = (float[])layerI.ShaderHeights.Clone(),
+                ShaderColors  = (SKColor[])layerI.ShaderColors.Clone(),
+                ShaderColorsTo = (SKColor[])layerI.ShaderColorsTo.Clone(),
+                ShaderValues  = (Vector4[])layerI.ShaderValues.Clone()
             };
-            var layer2 = ActiveFrame[_currentScreen];
-            ActiveFrame[_currentScreen] = new GpuLayer 
-            { 
-                Bitmap = CreateEmptyBitmap(pixelW, pixelH),
-                Offset = layer.Offset,
-                Opacity = layer.Opacity,
-                //SkSlCode = layer2.SkSlCode 
+
+            var layerA = ActiveFrame[_currentScreen];
+            ActiveFrame[_currentScreen] = new GpuLayer
+            {
+                Bitmap        = CreateEmptyBitmap(pixelW, pixelH),
+                Offset        = layerA.Offset,
+                Opacity       = layerA.Opacity,
+                Visible       = layerA.Visible,
+                Timer         = layerA.Timer,
+                SkSlCode      = layerA.SkSlCode,
+                CachedEffect  = null,
+                ShaderParams  = (float[])layerA.ShaderParams.Clone(),
+                ShaderHeights = (float[])layerA.ShaderHeights.Clone(),
+                ShaderColors  = (SKColor[])layerA.ShaderColors.Clone(),
+                ShaderColorsTo = (SKColor[])layerA.ShaderColorsTo.Clone(),
+                ShaderValues  = (Vector4[])layerA.ShaderValues.Clone()
             };
         }
 
@@ -2769,7 +2802,137 @@ public sealed class AmosGraphics
 
     public void SpriteOn(int id) => GetSprite(id).Visible = true;
     public void SpriteOff(int id) => GetSprite(id).Visible = false;
+    
+    /// <summary>Sätter alpha omedelbart (0–255). Avbryter eventuell pågående fade.</summary>
+    public void SpriteAlpha(int id, int alpha255)
+    {
+        var s = GetSprite(id);
+        s.Alpha = Math.Clamp(alpha255 / 255f, 0f, 1f);
+        s.FadeTarget = -1f;
+        s.FadeStep = 0f;
+    }
 
+    /// <summary>Startar en automatisk fade mot targetAlpha255 på 'frames' frames.</summary>
+    public void StartSpriteFade(int id, int targetAlpha255, int frames)
+    {
+        var s = GetSprite(id);
+        float target = Math.Clamp(targetAlpha255 / 255f, 0f, 1f);
+
+        if (frames <= 0 || Math.Abs(target - s.Alpha) < 0.001f)
+        {
+            // Omedelbar sättning om 0 frames eller redan på målet
+            s.Alpha = target;
+            s.FadeTarget = -1f;
+            s.FadeStep = 0f;
+            if (target <= 0f) s.Visible = false;
+            return;
+        }
+
+        s.FadeTarget = target;
+        s.FadeStep = (target - s.Alpha) / frames;
+
+        // Om vi fadar in från osynlig: aktivera spriten direkt
+        if (target > 0f && !s.Visible)
+            s.Visible = true;
+    }
+    /// <summary>Returnerar true om spriten har en pågående fade.</summary>
+    public bool IsSpriteAFading(int id) =>
+        _sprites.TryGetValue(id, out var s) && s.FadeStep != 0f;
+
+    /// <summary>
+    /// Anropas av WAIT VBL en gång per frame.
+    /// Stegar alla aktiva sprite-fades framåt och auto-hide vid fade-out till 0.
+    /// </summary>
+    public void TickSpriteFades()
+    {
+        lock (LockObject)
+        {
+            foreach (var kv in _sprites)
+            {
+                var sp = kv.Value;
+                if (sp.FadeStep == 0f) continue;
+
+                sp.Alpha += sp.FadeStep;
+
+                bool reached = sp.FadeStep > 0f
+                    ? sp.Alpha >= sp.FadeTarget    // fade in
+                    : sp.Alpha <= sp.FadeTarget;   // fade ut
+
+                if (reached)
+                {
+                    sp.Alpha = sp.FadeTarget;
+                    sp.FadeStep = 0f;
+                    sp.FadeTarget = -1f;
+
+                    if (sp.Alpha <= 0f)
+                        sp.Visible = false;        // auto-hide vid fade-out till 0
+                }
+            }
+        }
+        // --- GpuLayers ---
+        foreach (var layer in _frameA.Concat(_frameB))
+        {
+            if (layer.FadeStep == 0f) continue;
+
+            layer.Opacity += layer.FadeStep;
+
+            bool reached = layer.FadeStep > 0f
+                ? layer.Opacity >= layer.FadeTarget
+                : layer.Opacity <= layer.FadeTarget;
+
+            if (reached)
+            {
+                layer.Opacity    = layer.FadeTarget;
+                layer.FadeStep   = 0f;
+                layer.FadeTarget = -1f;
+                // Screen-lager döljs INTE automatiskt — BASIC-koden kör SCREEN OFF om det behövs
+            }
+        }
+    }
+
+    /// <summary>Sätter opacity på ett lager omedelbart (0–255).</summary>
+    public void ScreenAlpha(int layerIdx, int alpha255)
+    {
+        float val = Math.Clamp(alpha255 / 255f, 0f, 1f);
+        lock (LockObject)
+        {
+            if (layerIdx >= 0 && layerIdx < _frameA.Count)
+            { _frameA[layerIdx].Opacity = val; _frameA[layerIdx].FadeStep = 0f; _frameA[layerIdx].FadeTarget = -1f; }
+            if (layerIdx >= 0 && layerIdx < _frameB.Count)
+            { _frameB[layerIdx].Opacity = val; _frameB[layerIdx].FadeStep = 0f; _frameB[layerIdx].FadeTarget = -1f; }
+        }
+    }
+
+    /// <summary>Startar en fade på ett helt lager.</summary>
+    public void StartScreenFade(int layerIdx, int targetAlpha255, int frames)
+    {
+        float target = Math.Clamp(targetAlpha255 / 255f, 0f, 1f);
+        lock (LockObject)
+        {
+            foreach (var frame in new[] { _frameA, _frameB })
+            {
+                if (layerIdx < 0 || layerIdx >= frame.Count) continue;
+                var layer = frame[layerIdx];
+
+                if (frames <= 0 || Math.Abs(target - (float)layer.Opacity) < 0.001f)
+                {
+                    layer.Opacity    = target;
+                    layer.FadeStep   = 0f;
+                    layer.FadeTarget = -1f;
+                    continue;
+                }
+
+                layer.FadeTarget = target;
+                layer.FadeStep   = (target - (float)layer.Opacity) / frames;
+            }
+        }
+    }
+
+    /// <summary>Returnerar true om lagret har en pågående fade.</summary>
+    public bool IsLayerFading(int layerIdx) =>
+        layerIdx >= 0 && layerIdx < _frameA.Count && _frameA[layerIdx].FadeStep != 0f;
+    
+    
     public void SpriteSetPixel(int id, int x, int y, Color c)
     {
         var s = GetSprite(id);
