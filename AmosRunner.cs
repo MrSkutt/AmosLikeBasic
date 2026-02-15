@@ -202,6 +202,43 @@ public static class AmosRunner
 
     private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
     
+    // ✅ NYTT: Hjälpfunktion för att extrahera #X prefix
+    private static (int? tempScreen, string cleanArg) ExtractScreenPrefix(string arg)
+    {
+        if (string.IsNullOrWhiteSpace(arg)) 
+            return (null, arg);
+        
+        arg = arg.Trim();
+        
+        // Kolla om första parametern börjar med #
+        if (arg.StartsWith("#"))
+        {
+            // Hitta var första komma/space är (efter #X)
+            int separatorIdx = -1;
+            for (int i = 1; i < arg.Length; i++)
+            {
+                if (arg[i] == ',' || char.IsWhiteSpace(arg[i]))
+                {
+                    separatorIdx = i;
+                    break;
+                }
+            }
+            
+            if (separatorIdx > 1)
+            {
+                // Extrahera talet efter #
+                string screenNumStr = arg[1..separatorIdx];
+                if (int.TryParse(screenNumStr, out int screenNum))
+                {
+                    // Returnera screen-numret och resten av argumenten (utan #X,)
+                    string cleanArg = arg[(separatorIdx + 1)..].Trim();
+                    return (screenNum, cleanArg);
+                }
+            }
+        }
+        
+        return (null, arg);
+    }
     private sealed class FileChannel
     {
         public int Channel { get; set; }
@@ -1111,18 +1148,35 @@ public static class AmosRunner
                             break;
 
                         case "CLSG":
-                            var x = graphics.GetActiveScreenNumber();
-                            if (!string.IsNullOrWhiteSpace(arg))
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
                             {
-                                // Om ett argument skickades med, välj det lagret först
-                                graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                                graphics.Clear(Colors.Transparent);
+                                graphics.SetDrawingScreen(savedScreen.Value);
                             }
-
-                            graphics.Clear(Colors.Transparent);
-                            graphics.SetDrawingScreen(x);
+                            else if (!string.IsNullOrWhiteSpace(cleanArg))
+                            {
+                                // Gammalt beteende: CLSG 1 (utan #)
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(EvalInt(cleanArg, vars, ln, getInkey, isKeyDown, graphics));
+                                graphics.Clear(Colors.Transparent);
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                            }
+                            else
+                            {
+                                // Ingen parameter: rensa aktivt lager
+                                graphics.Clear(Colors.Transparent);
+                            }
+                                
                             graphics.Locate(0, 0);
                             onGraphicsChanged();
                             break;
+                        }
                         case "CLSGA":
                             var x2 = graphics.GetActiveScreenNumber();
                             if (!string.IsNullOrWhiteSpace(arg))
@@ -1219,7 +1273,16 @@ public static class AmosRunner
 
                         case "PRINTG":
                         {
-                            var printArg = arg.Trim();
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                            
+                            var printArg = cleanArg.Trim();
 
                             // Hantera PRINT AT x,y, "text"
                             if (printArg.StartsWith("AT ", StringComparison.OrdinalIgnoreCase))
@@ -1251,7 +1314,10 @@ public static class AmosRunner
                                 var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
                                 graphics.ConsolePrint(ValueToString(valToPrint), newLine);
                             }
-
+                            
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                            
                             // Trigga uppdatering av fönstret
                             onGraphicsChanged();
                         }
@@ -1588,12 +1654,26 @@ public static class AmosRunner
                             break;
 
                         case "LOCATEG":
-                            var lp = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var lp = SplitCsvOrSpaces(cleanArg);
                             graphics.Locate(
                                 EvalInt(lp[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(lp[1], vars, ln, getInkey, isKeyDown, graphics)
                             );
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
                             break;
+                        }
 
 
                         case "DATA":
@@ -2143,30 +2223,53 @@ public static class AmosRunner
 
                         case "LOAD":
                         {
-                            // Kolla om vi har ett komma, t.ex: LOAD 1, "fil.png"
-                            // Vi använder IndexOf istället för Split för att inte ha sönder filnamn med kommatecken/mellanslag inuti sig.
+                            // Parsa första parametern
                             int commaIndex = arg.IndexOf(',');
-
+    
                             if (commaIndex > -1)
                             {
-                                // === LOAD BOB IMAGE ===
-                                // Ex: LOAD 1, "skepp.png"
-                                string p1 = arg[..commaIndex]; // "1"
-                                string p2 = arg[(commaIndex + 1)..]; // "\"skepp.png\""
-
-                                int index = EvalInt(p1, vars, ln, getInkey, isKeyDown, graphics);
-                                string path = ValueToString(EvalValue(p2, vars, ln, getInkey, isKeyDown, graphics));
-
-                                graphics.LoadBobImage(index, path);
+                                // Vi har ett komma → kolla vad som står FÖRE kommat
+                                string firstParam = arg[..commaIndex].Trim();
+        
+                                // Är det #X-prefix? (börjar med #)
+                                if (firstParam.StartsWith("#"))
+                                {
+                                    // === LOAD #1, "background.png" ===
+                                    var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                                    int? savedScreen = null;
+            
+                                    if (tempScreen.HasValue)
+                                    {
+                                        savedScreen = graphics.GetActiveScreenNumber();
+                                        graphics.SetDrawingScreen(tempScreen.Value);
+                                    }
+            
+                                    // Resten efter #X, är filnamnet
+                                    string path = ValueToString(EvalValue(cleanArg, vars, ln, getInkey, isKeyDown, graphics));
+                                    graphics.LoadBackground(path);
+            
+                                    if (savedScreen.HasValue)
+                                        graphics.SetDrawingScreen(savedScreen.Value);
+                                }
+                                else
+                                {
+                                    // === LOAD 1, "bob.png" (BOB IMAGE) ===
+                                    string p2 = arg[(commaIndex + 1)..];
+            
+                                    int index = EvalInt(firstParam, vars, ln, getInkey, isKeyDown, graphics);
+                                    string path = ValueToString(EvalValue(p2, vars, ln, getInkey, isKeyDown, graphics));
+            
+                                    graphics.LoadBobImage(index, path);
+                                }
                             }
                             else
                             {
-                                // === LOAD BACKGROUND ===
-                                // Ex: LOAD "bakgrund.png" (Gammalt beteende)
-                                string str = ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
-                                graphics.LoadBackground(str);
+                                // Inget komma → enkel background-load till aktivt lager
+                                // === LOAD "background.png" ===
+                                string path = ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
+                                graphics.LoadBackground(path);
                             }
-
+    
                             onGraphicsChanged();
                             break;
                         }
@@ -2240,73 +2343,216 @@ public static class AmosRunner
                             break;
                         
                         case "PLOT":
-                            var pP = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var pP = SplitCsvOrSpaces(cleanArg);
                             graphics.Plot(EvalInt(pP[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(pP[1], vars, ln, getInkey, isKeyDown, graphics));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
+                            
                         case "LINE":
-                            var lL = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var lL = SplitCsvOrSpaces(cleanArg);
                             graphics.Line(EvalInt(lL[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(lL[1], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(lL[2], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(lL[3], vars, ln, getInkey, isKeyDown, graphics));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
+                            
                         case "BOX":
-                            var bB = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var bB = SplitCsvOrSpaces(cleanArg);
                             graphics.Box(EvalInt(bB[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(bB[1], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(bB[2], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(bB[3], vars, ln, getInkey, isKeyDown, graphics));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
+                            
                         case "BAR":
-                            var rR = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var rR = SplitCsvOrSpaces(cleanArg);
                             graphics.Bar(EvalInt(rR[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rR[1], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rR[2], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rR[3], vars, ln, getInkey, isKeyDown, graphics));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
+                            
                         case "CIRCLE":
-                            var rC = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var rC = SplitCsvOrSpaces(cleanArg);
                             graphics.Circle(EvalInt(rC[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rC[1], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rC[2], vars, ln, getInkey, isKeyDown, graphics));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
+                            
                         case "CIRCLEF":
-                            var rF = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var rF = SplitCsvOrSpaces(cleanArg);
                             graphics.CircleF(EvalInt(rF[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rF[1], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rF[2], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rF[3], vars, ln, getInkey, isKeyDown, graphics));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
+                            
                         case "ELLIPSE":
-                            var rE = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var rE = SplitCsvOrSpaces(cleanArg);
                             graphics.Ellipse(EvalInt(rE[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rE[1], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rE[2], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rE[3], vars, ln, getInkey, isKeyDown, graphics));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
+                            
                         case "FILL":
-                            var rI = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var rI = SplitCsvOrSpaces(cleanArg);
                             graphics.Fill(EvalInt(rI[0], vars, ln, getInkey, isKeyDown, graphics),
                                 EvalInt(rI[1], vars, ln, getInkey, isKeyDown, graphics));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
+                            
                         case "TEXT":
-                            var tP = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                                
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                                
+                            var tP = SplitCsvOrSpaces(cleanArg);
                             if (tP.Count >= 3)
                                 graphics.DrawText(EvalInt(tP[0], vars, ln, getInkey, isKeyDown, graphics),
                                     EvalInt(tP[1], vars, ln, getInkey, isKeyDown, graphics),
                                     ValueToString(EvalValue(string.Join(" ", tP.Skip(2)), vars, ln, getInkey, isKeyDown,
                                         graphics)));
+                                
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
+                                    
                             onGraphicsChanged();
                             break;
+                        }
                         case "IMAGE":
                         {
                             if (arg.StartsWith("LOAD "))
@@ -2528,95 +2774,148 @@ public static class AmosRunner
 
                             break;
                         
-                        case "TILE":
-                            var tArgs = SplitCsvOrSpaces(arg);
-                            if (tArgs.Count > 0)
-                            {
-                                var tileSub = tArgs[0].ToUpperInvariant(); // Ändrat namn från sub till tileSub
-                                if (tileSub == "LOAD" && tArgs.Count >= 4)
-                                    graphics.LoadTileBank(Unquote(tArgs[1]),
-                                        EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
-                                else if (tileSub == "MAP" && tArgs.Count >= 3)
-                                    graphics.SetMapSize(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
-                                else if (tileSub == "SET" && tArgs.Count >= 4)
-                                    graphics.SetMapTile(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
-                                else if (tileSub == "DRAW" && tArgs.Count >= 3)
-                                    graphics.DrawMap(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
-                            }
-
-                            break;
-                        
-                        case "FONT":
-                            var fArgs = SplitCsvOrSpaces(arg);
-                            if (fArgs.Count > 0)
-                            {
-                                var fSub = fArgs[0].ToUpperInvariant();
-                                if (fSub == "LOAD" && fArgs.Count >= 5)
-                                    graphics.FontLoad(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        Unquote(fArgs[2]), EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(fArgs[4], vars, ln, getInkey, isKeyDown, graphics));
-                                else if (fSub == "MAP" && fArgs.Count >= 3)
-                                    graphics.FontMap(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        Unquote(string.Join(" ", fArgs.Skip(2))));
-                                else if (fSub == "PRINT" && fArgs.Count >= 4)
-                                    graphics.FontPrint(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics),
-                                        ValueToString(EvalValue(string.Join(" ", fArgs.Skip(4)), vars, ln, getInkey,
-                                            isKeyDown, graphics)));
-                                else if (fSub == "CHAR" && fArgs.Count >= 5)
-                                    graphics.FontChar(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics),
-                                        ValueToString(EvalValue(fArgs[4], vars, ln, getInkey, isKeyDown, graphics)));
-                                else if (fSub == "ROTATE" && fArgs.Count >= 3)
-                                        graphics.FontRotate(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics));
-                                else if (fSub == "ZOOM" && fArgs.Count >= 3)
+                            case "TILE":
+                                var tArgs = SplitCsvOrSpaces(arg);
+                                if (tArgs.Count > 0)
                                 {
-                                    int fid = EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    double fzx = EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics) / 100.0;
-                                    double fzy = (fArgs.Count >= 4)
-                                        ? EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics) / 100.0
-                                        : fzx;
-                                    graphics.FontZoom(fid, fzx, fzy);
-                                }
-                                else if (fSub == "SET" && fArgs.Count >= 3)
-                                {
-                                    // Använd SplitTopLevelCsv istället - den behåller citattecken
-                                    var fArgs2 = SplitTopLevelCsv(arg.Substring(4).Trim()); // Ta bort "SET "
-                                        
-                                    if (fArgs2.Count >= 3)
+                                    var tileSub = tArgs[0].ToUpperInvariant();
+                                    if (tileSub == "LOAD" && tArgs.Count >= 4)
+                                        graphics.LoadTileBank(Unquote(tArgs[1]),
+                                            EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
+                                    else if (tileSub == "MAP" && tArgs.Count >= 3)
+                                        graphics.SetMapSize(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+                                    else if (tileSub == "SET" && tArgs.Count >= 4)
+                                        graphics.SetMapTile(EvalInt(tArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
+                                    else if (tileSub == "DRAW" && tArgs.Count >= 3)
                                     {
-                                        int width = EvalInt(fArgs2[0], vars, ln, getInkey, isKeyDown, graphics);
-                                        int height = EvalInt(fArgs2[1], vars, ln, getInkey, isKeyDown, graphics);
-                                            
-                                        // EvalValue hanterar både "Courier New" och F$ korrekt
-                                        string fnt = ValueToString(EvalValue(fArgs2[2], vars, ln, getInkey, isKeyDown, graphics));
-                                            
-                                        graphics.ConfigureText(width, height, fnt);
+                                        // TILE DRAW kan nu ha #X-prefix: TILE DRAW #1, offsetX, offsetY
+                                        string drawArgs = string.Join(",", tArgs.Skip(1));
+                                        var (tempScreen, cleanArg) = ExtractScreenPrefix(drawArgs);
+                                        int? savedScreen = null;
+                                        
+                                        if (tempScreen.HasValue)
+                                        {
+                                            savedScreen = graphics.GetActiveScreenNumber();
+                                            graphics.SetDrawingScreen(tempScreen.Value);
+                                        }
+                                        
+                                        var coords = SplitCsvOrSpaces(cleanArg);
+                                        graphics.DrawMap(
+                                            EvalInt(coords[0], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(coords[1], vars, ln, getInkey, isKeyDown, graphics)
+                                        );
+                                        
+                                        if (savedScreen.HasValue)
+                                            graphics.SetDrawingScreen(savedScreen.Value);
                                     }
                                 }
-                                else if (fSub == "STYLE" && fArgs.Count >= 2)
-                                {
-                                    var fArgs2 = SplitTopLevelCsv(arg.Substring(4).Trim()); 
-                                    string style = fArgs2[0];
-                                    
-                                    graphics.FontTextStyle(style);
-                                }
-                                else if (fSub == "CLEAR")
-                                {
-                                    graphics.FontClear();
-                                }
-                            }
 
-                            onGraphicsChanged();
-                            break;
+                                break;
+                        
+                            case "FONT":
+                                var fArgs = SplitCsvOrSpaces(arg);
+                                if (fArgs.Count > 0)
+                                {
+                                    var fSub = fArgs[0].ToUpperInvariant();
+                                    if (fSub == "LOAD" && fArgs.Count >= 5)
+                                        graphics.FontLoad(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                            Unquote(fArgs[2]), EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(fArgs[4], vars, ln, getInkey, isKeyDown, graphics));
+                                    else if (fSub == "MAP" && fArgs.Count >= 3)
+                                        graphics.FontMap(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                            Unquote(string.Join(" ", fArgs.Skip(2))));
+                                    else if (fSub == "PRINT" && fArgs.Count >= 4)
+                                    {
+                                        // FONT PRINT kan ha #X: FONT PRINT #1, fontId, x, y, "text"
+                                        string printArgs = string.Join(",", fArgs.Skip(1));
+                                        var (tempScreen, cleanArg) = ExtractScreenPrefix(printArgs);
+                                        int? savedScreen = null;
+                                        
+                                        if (tempScreen.HasValue)
+                                        {
+                                            savedScreen = graphics.GetActiveScreenNumber();
+                                            graphics.SetDrawingScreen(tempScreen.Value);
+                                        }
+                                        
+                                        var parts = SplitCsvOrSpaces(cleanArg);
+                                        graphics.FontPrint(
+                                            EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(parts[2], vars, ln, getInkey, isKeyDown, graphics),
+                                            ValueToString(EvalValue(string.Join(" ", parts.Skip(3)), vars, ln, getInkey, isKeyDown, graphics))
+                                        );
+                                        
+                                        if (savedScreen.HasValue)
+                                            graphics.SetDrawingScreen(savedScreen.Value);
+                                    }
+                                    else if (fSub == "CHAR" && fArgs.Count >= 5)
+                                    {
+                                        // FONT CHAR kan ha #X: FONT CHAR #1, fontId, x, y, "A"
+                                        string charArgs = string.Join(",", fArgs.Skip(1));
+                                        var (tempScreen, cleanArg) = ExtractScreenPrefix(charArgs);
+                                        int? savedScreen = null;
+                                        
+                                        if (tempScreen.HasValue)
+                                        {
+                                            savedScreen = graphics.GetActiveScreenNumber();
+                                            graphics.SetDrawingScreen(tempScreen.Value);
+                                        }
+                                        
+                                        var parts = SplitCsvOrSpaces(cleanArg);
+                                        graphics.FontChar(
+                                            EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(parts[2], vars, ln, getInkey, isKeyDown, graphics),
+                                            ValueToString(EvalValue(parts[3], vars, ln, getInkey, isKeyDown, graphics))
+                                        );
+                                        
+                                        if (savedScreen.HasValue)
+                                            graphics.SetDrawingScreen(savedScreen.Value);
+                                    }
+                                    else if (fSub == "ROTATE" && fArgs.Count >= 3)
+                                        graphics.FontRotate(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                            EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+                                    else if (fSub == "ZOOM" && fArgs.Count >= 3)
+                                    {
+                                        int fid = EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                        double fzx = EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics) / 100.0;
+                                        double fzy = (fArgs.Count >= 4)
+                                            ? EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics) / 100.0
+                                            : fzx;
+                                        graphics.FontZoom(fid, fzx, fzy);
+                                    }
+                                    else if (fSub == "SET" && fArgs.Count >= 3)
+                                    {
+                                        var fArgs2 = SplitTopLevelCsv(arg.Substring(4).Trim());
+                                        
+                                        if (fArgs2.Count >= 3)
+                                        {
+                                            int width = EvalInt(fArgs2[0], vars, ln, getInkey, isKeyDown, graphics);
+                                            int height = EvalInt(fArgs2[1], vars, ln, getInkey, isKeyDown, graphics);
+                                            string fnt = ValueToString(EvalValue(fArgs2[2], vars, ln, getInkey, isKeyDown, graphics));
+                                            
+                                            graphics.ConfigureText(width, height, fnt);
+                                        }
+                                    }
+                                    else if (fSub == "STYLE" && fArgs.Count >= 2)
+                                    {
+                                        var fArgs2 = SplitTopLevelCsv(arg.Substring(4).Trim()); 
+                                        string style = fArgs2[0];
+                                    
+                                        graphics.FontTextStyle(style);
+                                    }
+                                    else if (fSub == "CLEAR")
+                                    {
+                                        graphics.FontClear();
+                                    }
+                                }
+
+                                onGraphicsChanged();
+                                break;
                         
                         case "MAP":
                             var mArgs = SplitCsvOrSpaces(arg);
