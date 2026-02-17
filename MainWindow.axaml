@@ -65,11 +65,11 @@
                 <Button x:Name="StepButton" Classes="amos-button" Content="[ STEP ]" Background="#0066CC" Foreground="White" Click="StepButton_OnClick" IsEnabled="False" Focusable="False"/>
                 <Button x:Name="StopButton" Classes="amos-button" Content="[ STOP ]" Background="#CC0000" Foreground="White" Click="StopButton_OnClick" IsEnabled="False" Focusable="False"/>
                 <Separator Background="#7FB2FF" Width="2"/>
-                <Button Classes="amos-button" Content="LOAD" Click="OpenProject_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
-                <Button Classes="amos-button" Content="SAVE" Click="SaveProject_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button x:Name="LoadButton" Classes="amos-button" Content="LOAD" Click="OpenProject_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button x:Name="SaveButton" Classes="amos-button" Content="SAVE" Click="SaveProject_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Separator Background="#7FB2FF" Width="2"/>
-                <Button Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
-                <Button Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button x:Name="SpriteButton" Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button x:Name="MapButton" Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Separator Background="#7FB2FF" Width="2"/>
                 <Button Classes="amos-button" Content="CLEAR LOGS" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
             </StackPanel>

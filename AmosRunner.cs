@@ -9,7 +9,8 @@ using System.Linq;
 using System.Net.Security;
 using System.Reflection.Metadata.Ecma335;
 using System.Text;
-using AmoslikeBasic;
+
+//using AmoslikeBasic;
 using Avalonia.Interactivity;
 
 namespace AmosLikeBasic;
@@ -332,8 +333,15 @@ public static class AmosRunner
         var procCallStack = new Stack<ProcCallFrame>();
         
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
-        
+
         _lastFrameTime = DateTime.MinValue;
+        
+        GamepadManager.Start();
+        token.Register(() =>
+        {
+            GamepadManager.Stop();
+            ChiptuneSynth.StopMusic();
+        });
         
         // === EXPANDERA INLINE-IF TILL MULTI-RAD ===
         // "IF X THEN CMD1 : CMD2"  →  "IF X THEN\nCMD1\nCMD2\nENDIF"
@@ -1903,6 +1911,7 @@ public static class AmosRunner
                         case "WAIT":
                             if (arg.ToUpperInvariant() == "VBL")
                             {
+ 
                                 // NYTT: Stega sprite-fades innan frame presenteras
                                 graphics.TickSpriteFades();
                                 
@@ -1931,6 +1940,19 @@ public static class AmosRunner
 
                                 // 6. Börja rita på nya inactive frame
                                 graphics.BeginFrame();
+                            }
+                            else if (arg.ToUpperInvariant() == "MUSIC")
+                            {
+                                // Vänta tills alla musikkanaler är klara
+                                while (ChiptuneSynth.IsAnyPlaying())
+                                    await Task.Delay(10, token);
+                            }
+                            else if (arg.ToUpperInvariant().StartsWith("MUSIC "))
+                            {
+                                // WAIT MUSIC 1 — vänta på specifik kanal
+                                int ch = EvalInt(arg[6..], vars, ln, getInkey, isKeyDown, graphics);
+                                while (ChiptuneSynth.IsPlaying(ch))
+                                    await Task.Delay(10, token);
                             }
                             else
                             {
@@ -2108,7 +2130,7 @@ public static class AmosRunner
                             var step = stIdx < 0
                                 ? 1
                                 : EvalInt(rest[(stIdx + 4)..].Trim(), vars, ln, getInkey, isKeyDown, graphics);
-                            setVar(fV, start);
+                            setVar(fV, (double)start);
                             forStack.Push(new ForFrame
                             {
                                 VarName = fV, EndValue = end, StepValue = step, LineAfterForPc = pc + 1,
@@ -2728,12 +2750,12 @@ public static class AmosRunner
                                         graphics.LoadSprite(id, path);
                                     }
                                 }
-                                else if (arg.StartsWith("IMAGE "))
+                                else if (sub == "IMAGE" && ss.Count >= 3)
                                 {
-                                    // SPRITE IMAGE 1, 2
-                                    int sid2 = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics); 
+                                    int sid2 = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     int imgId = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.SpriteImage(sid2, imgId);
+                                    int frameId = ss.Count >= 4 ? EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics) : 1;
+                                    graphics.SpriteImage(sid2, imgId, frameId);
                                 }
                                 else if (sub == "ADDFRAME")
                                     graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
@@ -2781,8 +2803,28 @@ public static class AmosRunner
                                     int frames  = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.StartSpriteFade(id, target, frames);
                                 }
+                                else if (sub == "GROUP")
+                                {
+                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    string group = Unquote(ss[2]);
+                                    graphics.SpriteAddGroup(id, group);
+                                }
+                                else if (sub == "UNGROUP")
+                                {
+                                    int    id    = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    string group = Unquote(ss[2]);
+                                    graphics.SpriteRemoveGroup(id, group);
+                                }
+                                else if (sub == "CLEARGROUP")
+                                {
+                                    string group = Unquote(ss[1]);
+                                    graphics.SpriteClearGroup(group);
+                                }
                                 else if (sub == "ON")
-                                    graphics.SpriteOn(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics));
+                                {
+                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpriteOn(id);
+                                }
                                 else if (sub == "OFF")
                                     graphics.SpriteOff(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics));
                             }
@@ -2825,38 +2867,62 @@ public static class AmosRunner
                             break;
                         
                         case "PLAY":
-                            var playArgs = SplitCsvOrSpaces(arg);
-                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "JUMP")
+                        {
+                            var parts = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                            string sub = parts[0].ToUpperInvariant();
+                            //string rest = parts.Length > 1 ? parts[1].Trim() : "";
+                            var pS = SplitCsvOrSpaces(arg);
+                            //var (_, rest2) = SplitFirstWord(arg);  
+                            
+                            switch (sub)
                             {
-                                ChiptuneSynth.PlayJump();
-                            }
+                                case "JUMP":      ChiptuneSynth.PlayJump();      break;
+                                case "LASER":     ChiptuneSynth.PlayLaser();     break;
+                                case "EXPLOSION": ChiptuneSynth.PlayExplosion(); break;
+                                case "COIN":      ChiptuneSynth.PlayCoin();      break;
+                                case "BLIP":      ChiptuneSynth.PlayBlip();      break;
+                                case "HIT":       ChiptuneSynth.PlayHit();       break;
+                                case "POWERUP":   ChiptuneSynth.PlayPowerUp();   break;
 
-                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "LASER")
-                            {
-                                ChiptuneSynth.PlayLaser();
-                            }
+                                case "WAVE":
+                                {
+                                    int    ch   = EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    string wave = Unquote(pS[2]);
+                                    ChiptuneSynth.SetWave(ch, wave);
+                                    break;
+                                }
 
-                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "EXPLOSION")
-                            {
-                                ChiptuneSynth.PlayExplosion();
-                            }
+                                case "VOLUME":
+                                {
+                                    int    ch  = EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    double vol = EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    ChiptuneSynth.SetVolume(ch, vol);
+                                    break;
+                                }
 
-                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "COIN")
-                            {
-                                ChiptuneSynth.PlayCoin();
-                            }
+                                case "BPM":
+                                {
+                                    int bpm = EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    ChiptuneSynth.SetBpm(bpm);
+                                    break;
+                                }
 
-                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "BLIP")
-                            {
-                                ChiptuneSynth.PlayBlip();
-                            }
+                                case "MUSIC":
+                                {
+                                    var (_, rest2) = SplitFirstWord(arg);
+                                    var ms2       = SplitTopLevelCsv(rest2);
+                                    int    ch     = EvalInt(ms2[0], vars, ln, getInkey, isKeyDown, graphics);
+                                    string seq    = Unquote(ms2[1]);
+                                    ChiptuneSynth.PlayMusic(ch, seq);
+                                    break;
+                                }
 
-                            if (playArgs.Count >= 1 && playArgs[0].ToUpperInvariant() == "HIT")
-                            {
-                                ChiptuneSynth.PlayHit();
+                                case "STOP":
+                                    ChiptuneSynth.StopMusic();
+                                    break;
                             }
-
                             break;
+                        }
                         
                         case "RASTER":
                             int currentLayer = graphics.GetActiveScreenNumber();
@@ -3629,10 +3695,64 @@ public static class AmosRunner
                     double val = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
                     t.TryConsume(')'); return val - 1; 
                 }
-                if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase)) {
-                    int id1 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(',');
-                    int id2 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(')');
+                if (id.Equals("HIT", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    int id1 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(',');
+                    int id2 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(')');
                     return g.SpriteHit(id1, id2) ? 1.0 : 0.0;
+                }
+
+                if (id.Equals("HITBOX", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    int id1 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(',');
+                    int id2 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(')');
+                    return g.SpriteHitBox(id1, id2) ? 1.0 : 0.0;
+                }
+
+                if (id.Equals("HITCIRCLE", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    int id1 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(',');
+                    int id2 = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(')');
+                    return g.SpriteHitCircle(id1, id2) ? 1.0 : 0.0;
+                }
+
+                if (id.Equals("HITGROUP", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    int    id1   = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(',');
+                    string group = ValueToString(ParseExpr(ref t, v, ln, gk, ikd, g));
+                    t.TryConsume(')');
+                    return (double)g.SpriteHitGroup(id1, group);
+                }
+
+                if (id.Equals("HITBOXGROUP", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    int    id1   = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(',');
+                    string group = ValueToString(ParseExpr(ref t, v, ln, gk, ikd, g));
+                    t.TryConsume(')');
+                    return (double)g.SpriteHitBoxGroup(id1, group);
+                }
+
+                if (id.Equals("HITCIRCLEGROUP", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    int    id1   = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
+                    t.TryConsume(',');
+                    string group = ValueToString(ParseExpr(ref t, v, ln, gk, ikd, g));
+                    t.TryConsume(')');
+                    return (double)g.SpriteHitCircleGroup(id1, group);
                 }
                 if (id.Equals("TILE", StringComparison.OrdinalIgnoreCase)) {
                     int layer = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture)); t.TryConsume(',');
@@ -3645,7 +3765,42 @@ public static class AmosRunner
                 if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
                     var k = ValueToString(ParseExpr(ref t, v, ln, gk, ikd, g)); t.TryConsume(')'); return ikd(k) ? 1.0 : 0.0;
                 }
+                if (id.Equals("JOYSTATE", StringComparison.OrdinalIgnoreCase))
+                {
+                    object padObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object btnObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
 
+                    int pad = (int)Math.Round(Convert.ToDouble(padObj, CultureInfo.InvariantCulture));
+                    string btn = ValueToString(btnObj);
+                    return GamepadManager.IsButtonDown(pad, btn) ? 1.0 : 0.0;
+                }
+                if (id.Equals("JOYAXIS", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    object padObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object axisObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+                    int    pad  = (int)Math.Round(Convert.ToDouble(padObj, CultureInfo.InvariantCulture));
+                    string axis = ValueToString(axisObj);
+                    return (double)GamepadManager.GetAxis(pad, axis);
+                }
+                if (id.Equals("PLAYING", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    object chObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+                    int ch = (int)Math.Round(Convert.ToDouble(chObj, CultureInfo.InvariantCulture));
+                    return ChiptuneSynth.IsPlaying(ch) ? 1.0 : 0.0;
+                }
+                if (id.Equals("ANYPLAYING", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    t.TryConsume(')');
+                    return ChiptuneSynth.IsAnyPlaying() ? 1.0 : 0.0;
+                }
                 // --- String functions (AMOS-like) ---
                 if (id.Equals("LEN", StringComparison.OrdinalIgnoreCase))
                 {
@@ -4179,6 +4334,18 @@ public static class AmosRunner
         if (string.IsNullOrWhiteSpace(a)) return new List<string>();
         return a.Split(new[] { ','}, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
     }
+    
+    static (string cmd, string rest) SplitFirstWord(string s)
+    {
+        s = s.Trim();
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] == ' ')
+                return (s[..i].Trim(), s[(i + 1)..].Trim());
+        }
+        return (s, "");
+    }
+    
     private static List<string> SplitArgsRespectQuotes(string input)
     {
         var result = new List<string>();

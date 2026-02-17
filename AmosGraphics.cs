@@ -261,8 +261,10 @@ public sealed class AmosGpuView : Control
                                     drawRect.Left > Graphics.Width || drawRect.Top > Graphics.Height)
                                     continue;
 
-                                fbCtx.DrawImage(layer.Bitmap, new Rect(bmpSize), drawRect);
-
+                                using (fbCtx.PushOpacity(layer.Opacity))
+                                {
+                                    fbCtx.DrawImage(layer.Bitmap, new Rect(bmpSize), drawRect);
+                                }
                             }
                         }
                     }
@@ -816,6 +818,7 @@ public sealed class AmosGraphics
     public sealed class Sprite
     {
         public int ImageBankId { get; set; } = -1;   // -1 = använder egna Frames
+        public HashSet<string> Groups { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         
         public Sprite(int width, int height, WriteableBitmap firstFrame)
         {
@@ -858,13 +861,16 @@ public sealed class AmosGraphics
         public float FadeTarget { get; set; } = -1f;   // -1 = ingen aktiv fade
         public float FadeStep { get; set; } = 0f;      // delta per frame
     }
-    public void SpriteImage(int spriteId, int imageBankId)
+    
+    public void SpriteImage(int spriteId, int imageBankId, int frameId = 0)
     {
         var s = GetSprite(spriteId);
         s.ImageBankId = imageBankId;
+        s.CurrentFrame =  frameId;
     }
     
     private readonly Dictionary<int, Sprite> _sprites = new();
+    private readonly Dictionary<string, HashSet<int>> _groups = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, Font> _fonts = new();
     
     public sealed class QueuedFontText
@@ -884,6 +890,34 @@ public sealed class AmosGraphics
     public List<int> GetBobIds() => _bobs.Keys.OrderBy(k => k).ToList();
     public Bob? GetBob(int id) => _bobs.GetValueOrDefault(id);
     public WriteableBitmap? GetBobImage(int imgId) => _bobImages.GetValueOrDefault(imgId);
+    
+        
+    // ✅ NYTT: Metoder för att rensa allt
+    public void ClearAllSprites()
+    {
+        lock (LockObject)
+        {
+            _sprites.Clear();
+            _groups.Clear();
+        }
+    }
+
+    public void ClearAllBobs()
+    {
+        lock (LockObject)
+        {
+            _bobs.Clear();
+            _bobImages.Clear();
+        }
+    }
+
+    public void ClearAllImageBank()
+    {
+        lock (LockObject)
+        {
+            _imageBank.Clear();
+        }
+    }
     
     private readonly List<WriteableBitmap> _tiles = new();
     private int _tilesInWidth = 0;
@@ -1065,12 +1099,13 @@ public sealed class AmosGraphics
     public sealed record ProjectFile(
         int Version,
         string ProgramText,
-        int ScreenWidth,
-        int ScreenHeight,
-        List<SpriteFile> Sprites,
-        int MapWidth, // Lägg till dessa
-        int MapHeight,
-        List<int> MapData);
+        // NYTT: Valfria fält för bakåtkompatibilitet (markerade som nullable)
+        int? ScreenWidth = null,
+        int? ScreenHeight = null,
+        List<SpriteFile>? Sprites = null,
+        int? MapWidth = null,
+        int? MapHeight = null,
+        List<int>? MapData = null);
 
     public sealed record SpriteFile(
         int Id,
@@ -1087,56 +1122,28 @@ public sealed class AmosGraphics
 
     public ProjectFile ExportProject(string programText)
     {
-        EnsureScreen();
-        // 1. Exportera Sprites
-        var sprites = new List<SpriteFile>();
-        foreach (var (id, s) in _sprites.OrderBy(k => k.Key))
-        {
-            var framesData = new List<string>();
-            foreach (var frameBmp in s.Frames)
-            {
-                using var fb = frameBmp.Lock();
-                var size = fb.RowBytes * s.Height;
-                var bytes = new byte[size];
-                System.Runtime.InteropServices.Marshal.Copy(fb.Address, bytes, 0, size);
-                framesData.Add(Convert.ToBase64String(bytes));
-            }
-
-            sprites.Add(new SpriteFile(id, s.Width, s.Height, s.X, s.Y, s.HandleX, s.HandleY, s.CurrentFrame, s.Visible,
-                s.TransparentKey.ToString(), framesData));
-        }
-
-        // 2. Exportera Banan (NY LOGIK)
-        var mapList = new List<int>();
-        int mw = GetMapWidth();
-        int mh = GetMapHeight();
-
-        for (int y = 0; y < mh; y++)
-        for (int x = 0; x < mw; x++)
-            mapList.Add(GetMapTile(x, y));
-
-        // 3. Skapa ProjectFile med ALLA 8 argument (inklusive de nya för Map)
+        // Spara endast koden i det nya formatet (Version 2)
         return new ProjectFile(
-            Version: 1,
-            ProgramText: programText ?? "",
-            ScreenWidth: Width,
-            ScreenHeight: Height,
-            Sprites: sprites,
-            MapWidth: mw,
-            MapHeight: mh,
-            MapData: mapList);
+            Version: 2,  // ✅ Öka versionen så vi kan skilja nya från gamla
+            ProgramText: programText ?? "");
     }
 
-    public void ImportProject(ProjectFile project)
+public void ImportProject(ProjectFile project)
+{
+    if (project is null) return;
+    
+    // ✅ Hantera både gamla (Version 1) och nya (Version 2) projekt
+    if (project.Version == 1 && project.Sprites != null)
     {
-        if (project is null) return;
-        int screenW = project.ScreenWidth <= 0 ? 640 : project.ScreenWidth;
-        int screenH = project.ScreenHeight <= 0 ? 480 : project.ScreenHeight;
-
-        Screen(project.ScreenWidth <= 0 ? 640 : project.ScreenWidth,
-            project.ScreenHeight <= 0 ? 480 : project.ScreenHeight);
+        // GAMMALT FORMAT: Ladda in sprites och map-data
+        int screenW = project.ScreenWidth ?? 640;
+        int screenH = project.ScreenHeight ?? 480;
+        
+        Screen(screenW, screenH);
+        
+        // Återställ sprites från gammal data
         _sprites.Clear();
-        foreach (var sf in project.Sprites ?? new())
+        foreach (var sf in project.Sprites)
         {
             var firstFrame = CreateEmptyBitmap(sf.Width, sf.Height);
             var s = new Sprite(sf.Width, sf.Height, firstFrame);
@@ -1148,24 +1155,37 @@ public sealed class AmosGraphics
             s.Visible = sf.Visible;
             s.TransparentKey = Color.Parse(sf.TransparentKey);
             s.Frames.Clear();
+            
             foreach (var b64 in sf.FramesBase64)
             {
                 var f = CreateEmptyBitmap(sf.Width, sf.Height);
                 var b = Convert.FromBase64String(b64);
-                using (var fb = f.Lock()) System.Runtime.InteropServices.Marshal.Copy(b, 0, fb.Address, b.Length);
+                using (var fb = f.Lock()) 
+                    System.Runtime.InteropServices.Marshal.Copy(b, 0, fb.Address, b.Length);
                 s.Frames.Add(f);
             }
-
+            
             _sprites[sf.Id] = s;
         }
-
-        SetMapSize(project.MapWidth, project.MapHeight);
-        int idx = 0;
-        for (int y = 0; y < project.MapHeight; y++)
-        for (int x = 0; x < project.MapWidth; x++)
-            if (idx < project.MapData.Count)
-                _map[x, y] = project.MapData[idx++];
+        
+        // Återställ map-data om den finns
+        if (project.MapWidth.HasValue && project.MapHeight.HasValue && project.MapData != null)
+        {
+            SetMapSize(project.MapWidth.Value, project.MapHeight.Value);
+            int idx = 0;
+            for (int y = 0; y < project.MapHeight.Value; y++)
+                for (int x = 0; x < project.MapWidth.Value; x++)
+                    if (idx < project.MapData.Count)
+                        _map[x, y] = project.MapData[idx++];
+        }
     }
+    else
+    {
+        // ✅ NYTT FORMAT (Version 2): Bara återställ standardskärm
+        // Grafik och resurser laddas av BASIC-programmet självt
+        Screen(640, 480);
+    }
+}
     
     
     public void BeginFrame()
@@ -1267,7 +1287,7 @@ public sealed class AmosGraphics
             // Vi måste se till att lagret finns i BÅDA listorna
             while (InactiveFrame.Count <= id)
             {
-                var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) };
+                var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0),Opacity = 0.0  };
                 //layer.SkSlCode = RasterShaderCode; 
                 // Initiera ShaderHeights till 0 så att lagret är transparent som standard
                 for(int i=0; i<22; i++) layer.ShaderHeights[i] = 0;
@@ -1275,7 +1295,7 @@ public sealed class AmosGraphics
             }
             while (ActiveFrame.Count <= id)
             {
-                var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0) };
+                var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0),Opacity = 0.0  };
                 //layer.SkSlCode = RasterShaderCode;
                 for(int i=0; i<22; i++) layer.ShaderHeights[i] = 0;
                 ActiveFrame.Add(layer);
@@ -2874,7 +2894,7 @@ public sealed class AmosGraphics
         {
             if (layer.FadeStep == 0f) continue;
 
-            layer.Opacity += layer.FadeStep;
+            layer.Opacity += layer.FadeStep;   // float -> double, OK
 
             bool reached = layer.FadeStep > 0f
                 ? layer.Opacity >= layer.FadeTarget
@@ -2885,7 +2905,6 @@ public sealed class AmosGraphics
                 layer.Opacity    = layer.FadeTarget;
                 layer.FadeStep   = 0f;
                 layer.FadeTarget = -1f;
-                // Screen-lager döljs INTE automatiskt — BASIC-koden kör SCREEN OFF om det behövs
             }
         }
     }
@@ -3002,60 +3021,183 @@ public sealed class AmosGraphics
     }
     
     
-    public bool SpriteHit(int id1, int id2, int step = 2)
+public bool SpriteHit(int id1, int id2, int step = 2)
+{
+    if (!_sprites.TryGetValue(id1, out var s1) || !_sprites.TryGetValue(id2, out var s2)) return false;
+    if (!s1.Visible || !s2.Visible) return false;
+
+    var bmp1 = s1.GetBitmap(_imageBank);
+    var bmp2 = s2.GetBitmap(_imageBank);
+    if (bmp1 == null || bmp2 == null) return false;
+
+    int x1 = s1.X - s1.HandleX, y1 = s1.Y - s1.HandleY;
+    int x2 = s2.X - s2.HandleX, y2 = s2.Y - s2.HandleY;
+
+    if (!(x1 < x2 + s2.Width && x1 + s1.Width > x2 && y1 < y2 + s2.Height && y1 + s1.Height > y2))
+        return false;
+
+    int overlapLeft   = Math.Max(x1, x2);
+    int overlapTop    = Math.Max(y1, y2);
+    int overlapRight  = Math.Min(x1 + s1.Width, x2 + s2.Width);
+    int overlapBottom = Math.Min(y1 + s1.Height, y2 + s2.Height);
+
+    using var fb1 = bmp1.Lock();
+    using var fb2 = bmp2.Lock();
+
+    unsafe
     {
-        if (!_sprites.TryGetValue(id1, out var s1) || !_sprites.TryGetValue(id2, out var s2)) return false;
-        if (!s1.Visible || !s2.Visible) return false;
-    
-        int x1 = s1.X - s1.HandleX, y1 = s1.Y - s1.HandleY;
-        int x2 = s2.X - s2.HandleX, y2 = s2.Y - s2.HandleY;
-    
-        if (!(x1 < x2 + s2.Width && x1 + s1.Width > x2 && y1 < y2 + s2.Height && y1 + s1.Height > y2))
-            return false;
-    
-        int overlapLeft = Math.Max(x1, x2);
-        int overlapTop = Math.Max(y1, y2);
-        int overlapRight = Math.Min(x1 + s1.Width, x2 + s2.Width);
-        int overlapBottom = Math.Min(y1 + s1.Height, y2 + s2.Height);
-    
-        using var fb1 = s1.Bitmap.Lock();
-        using var fb2 = s2.Bitmap.Lock();
-    
-        unsafe
+        byte* p1 = (byte*)fb1.Address;
+        byte* p2 = (byte*)fb2.Address;
+        var key1 = s1.TransparentKey;
+        var key2 = s2.TransparentKey;
+
+        for (int y = overlapTop; y < overlapBottom; y += step)
         {
-            byte* p1 = (byte*)fb1.Address;
-            byte* p2 = (byte*)fb2.Address;
-            var key1 = s1.TransparentKey;
-            var key2 = s2.TransparentKey;
-        
-            // Kolla bara var N:te pixel
-            for (int y = overlapTop; y < overlapBottom; y += step)
+            for (int x = overlapLeft; x < overlapRight; x += step)
             {
-                for (int x = overlapLeft; x < overlapRight; x += step)
-                {
-                    int localX1 = x - x1;
-                    int localY1 = y - y1;
-                    int localX2 = x - x2;
-                    int localY2 = y - y2;
-                
-                    int idx1 = (localY1 * fb1.RowBytes) + (localX1 * 4);
-                    int idx2 = (localY2 * fb2.RowBytes) + (localX2 * 4);
-                
-                    byte* px1 = p1 + idx1;
-                    byte* px2 = p2 + idx2;
-                
-                    bool solid1 = !(px1[2] == key1.R && px1[1] == key1.G && px1[0] == key1.B);
-                    bool solid2 = !(px2[2] == key2.R && px2[1] == key2.G && px2[0] == key2.B);
-                
-                    if (solid1 && solid2)
-                        return true;
-                }
+                int localX1 = x - x1;
+                int localY1 = y - y1;
+                int localX2 = x - x2;
+                int localY2 = y - y2;
+
+                if (localX1 < 0 || localY1 < 0 || localX1 >= s1.Width || localY1 >= s1.Height) continue;
+                if (localX2 < 0 || localY2 < 0 || localX2 >= s2.Width || localY2 >= s2.Height) continue;
+
+                int idx1 = (localY1 * fb1.RowBytes) + (localX1 * 4);
+                int idx2 = (localY2 * fb2.RowBytes) + (localX2 * 4);
+
+                byte* px1 = p1 + idx1;
+                byte* px2 = p2 + idx2;
+
+                bool solid1 = !(px1[2] == key1.R && px1[1] == key1.G && px1[0] == key1.B);
+                bool solid2 = !(px2[2] == key2.R && px2[1] == key2.G && px2[0] == key2.B);
+
+                if (solid1 && solid2) return true;
             }
         }
-    
-        return false;
+    }
+    return false;
+}
+
+    public void SpriteAddGroup(int id, string group)
+    {
+        if (!_sprites.TryGetValue(id, out var s)) return;
+        s.Groups.Add(group);
+        if (!_groups.TryGetValue(group, out var set))
+        {
+            set = new HashSet<int>();
+            _groups[group] = set;
+        }
+        set.Add(id);
     }
 
+    public void SpriteRemoveGroup(int id, string group)
+    {
+        if (!_sprites.TryGetValue(id, out var s)) return;
+        s.Groups.Remove(group);
+        if (_groups.TryGetValue(group, out var set))
+            set.Remove(id);
+    }
+
+    public void SpriteClearGroup(string group)
+    {
+        if (!_groups.TryGetValue(group, out var set)) return;
+        foreach (int id in set)
+        {
+            if (_sprites.TryGetValue(id, out var s))
+                s.Groups.Remove(group);
+        }
+        set.Clear();
+    }
+    
+    // ── HITBOX — rektangel mot rektangel ────────────────────────
+
+public bool SpriteHitBox(int id1, int id2)
+{
+    if (!_sprites.TryGetValue(id1, out var s1) ||
+        !_sprites.TryGetValue(id2, out var s2)) return false;
+    if (!s1.Visible || !s2.Visible) return false;
+
+    int x1 = s1.X - s1.HandleX, y1 = s1.Y - s1.HandleY;
+    int x2 = s2.X - s2.HandleX, y2 = s2.Y - s2.HandleY;
+
+    return x1 < x2 + s2.Width  && x1 + s1.Width  > x2 &&
+           y1 < y2 + s2.Height && y1 + s1.Height > y2;
+}
+
+// ── HITCIRCLE — cirkel mot cirkel ───────────────────────────
+
+public bool SpriteHitCircle(int id1, int id2)
+{
+    if (!_sprites.TryGetValue(id1, out var s1) ||
+        !_sprites.TryGetValue(id2, out var s2)) return false;
+    if (!s1.Visible || !s2.Visible) return false;
+
+    // Mittpunkt och radie för varje sprite
+    double cx1 = s1.X - s1.HandleX + s1.Width  / 2.0;
+    double cy1 = s1.Y - s1.HandleY + s1.Height / 2.0;
+    double cx2 = s2.X - s2.HandleX + s2.Width  / 2.0;
+    double cy2 = s2.Y - s2.HandleY + s2.Height / 2.0;
+
+    double r1 = Math.Min(s1.Width, s1.Height) / 2.0;
+    double r2 = Math.Min(s2.Width, s2.Height) / 2.0;
+
+    double dx = cx1 - cx2;
+    double dy = cy1 - cy2;
+    return (dx * dx + dy * dy) <= (r1 + r2) * (r1 + r2);
+}
+
+// ── Grupp-kollisioner ────────────────────────────────────────
+
+    public int SpriteHitGroup(int id, string group)
+    {
+        if (!_groups.TryGetValue(group, out var set)) return 0;
+        foreach (int otherId in set)
+        {
+            if (otherId == id) continue;
+            try
+            {
+                if (SpriteHit(id, otherId)) return otherId;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[SpriteHitGroup] fel vid SpriteHit({id},{otherId}): {ex.Message}\n{ex.StackTrace}");
+            }
+        }
+        return 0;
+    }
+
+public int SpriteHitBoxGroup(int id, string group)
+{
+    if (!_groups.TryGetValue(group, out var set)) return 0;
+    
+    foreach (int otherId in set)
+    {
+        if (otherId == id) continue;
+        
+        if (!_sprites.TryGetValue(otherId, out var s2))
+        {
+            System.Diagnostics.Debug.WriteLine($"[HitBoxGroup] sprite {otherId} finns inte i _sprites!");
+            continue;
+        }
+        
+        if (SpriteHitBox(id, otherId))
+            return otherId;
+    }
+    return 0;
+}
+
+public int SpriteHitCircleGroup(int id, string group)
+{
+    if (!_groups.TryGetValue(group, out var set)) return 0;
+    foreach (int otherId in set)
+    {
+        if (otherId == id) continue;
+        if (SpriteHitCircle(id, otherId)) return otherId;
+    }
+    return 0;
+}
     public Sprite GetSprite(int id)
     {
         if (!_sprites.TryGetValue(id, out var s))

@@ -16,6 +16,7 @@ using Avalonia.Threading;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using AvaloniaEdit.Rendering;
+using Un4seen.Bass;
 
 
 namespace AmosLikeBasic;
@@ -51,7 +52,7 @@ public partial class MainWindow : Window
         
         _ = EnsureExampleProjectsExistAsync();
         
-        AmosAudioCommands.InitializeAudio();
+        InitializeAudio();
         
         VariableListBox.DoubleTapped += VariableListBox_DoubleTapped;
         
@@ -124,6 +125,12 @@ public partial class MainWindow : Window
         UpdateTitleBar();
     }
 
+    public static void InitializeAudio()
+    {
+        // Initialize BASS
+        Bass.BASS_Init(-1, 44100, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero);
+    }
+    
     private async void OnCut(object? sender, RoutedEventArgs e)
     {
         string selected = Editor.SelectedText;
@@ -774,6 +781,11 @@ public partial class MainWindow : Window
         foreach(var id in _gfx.GetBobIds()) {
             _gfx.BobOff(id);
         }
+        // ✅ NYTT: Rensa ALLA sprites och bobs helt och hållet
+        _gfx.ClearAllSprites();
+        _gfx.ClearAllBobs();
+        _gfx.ClearAllImageBank();
+        _gfx.FontClear();
         if (_screenWindow.Console != null) _screenWindow.Console.Text = "";
         _screenWindow.ScreenControl.Graphics = _gfx;
         _runCts?.Cancel();
@@ -1291,6 +1303,10 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             RunButton.IsEnabled = !loading;
+            LoadButton.IsEnabled = !loading;
+            SaveButton.IsEnabled = !loading;
+            SpriteButton.IsEnabled = !loading;
+            MapButton.IsEnabled = !loading;
             RunButton.Content = loading ? "[ LOADING... ]" : "[ RUN ]";
             RunButton.Background = loading 
                 ? new SolidColorBrush(Color.Parse("#666666"))
