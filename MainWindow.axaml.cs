@@ -306,30 +306,39 @@ public partial class MainWindow : Window
             e.Handled = true; 
             return; 
         }
+    
+        // SHIFT + F5 STOP
+        if (e.Key == Key.F5 && e.KeyModifiers == KeyModifiers.Shift) 
+        { 
+            StopButton_OnClick(null, new RoutedEventArgs()); 
+            e.Handled = true; 
+            return; 
+        }
+ 
+        // SHIFT + F5 STOP
+        if (e.Key == Key.Escape) 
+        { 
+            StopButton_OnClick(null, new RoutedEventArgs()); 
+            e.Handled = true; 
+            return; 
+        }
         
-        // F5 - RUN / DEBUG
+        // F5 - RUN / Option/Alt + F5 DEBUG
         if (e.Key == Key.F5) 
         { 
             if (_isProjectLoading) { e.Handled = true; return; }
 
-            bool debug = (e.KeyModifiers & KeyModifiers.Shift) != 0;
+            bool debug = (e.KeyModifiers & KeyModifiers.Alt) != 0;
             _ = StartProgramAsync(debug); 
             e.Handled = true; 
             return; 
         }
 
+        
         // F6 - PAUSE / RESUME
         if (e.Key == Key.F6)
         {
             PauseButton_OnClick(null, new RoutedEventArgs());
-            e.Handled = true;
-            return;
-        }
-
-        // F7 - STEP
-        if (e.Key == Key.F7)
-        {
-            if (_isPaused) StepButton_OnClick(null, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
@@ -342,22 +351,23 @@ public partial class MainWindow : Window
             return;
         }
         
-        // F10 - FULLSCREEN
+        // F10 - STEP
         if (e.Key == Key.F10)
+        {
+            if (_isPaused) StepButton_OnClick(null, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+        
+        // F12 - FULLSCREEN
+        if (e.Key == Key.F12)
         {
             var win = (Window?)sender ?? this;
             win.WindowState = win.WindowState == WindowState.FullScreen ? WindowState.Normal : WindowState.FullScreen;
             e.Handled = true;
             return;
         }
-
-        // ESC - STOP
-        if (e.Key == Key.Escape) 
-        { 
-            StopButton_OnClick(null, new RoutedEventArgs()); 
-            e.Handled = true; 
-            return; 
-        }
+        
         _pressedKeys.Add(e.Key.ToString());
     }
 
@@ -782,10 +792,7 @@ public partial class MainWindow : Window
             _gfx.BobOff(id);
         }
         // ✅ NYTT: Rensa ALLA sprites och bobs helt och hållet
-        _gfx.ClearAllSprites();
-        _gfx.ClearAllBobs();
-        _gfx.ClearAllImageBank();
-        _gfx.FontClear();
+        _gfx.ClearAllResources();
         if (_screenWindow.Console != null) _screenWindow.Console.Text = "";
         _screenWindow.ScreenControl.Graphics = _gfx;
         _runCts?.Cancel();
@@ -874,44 +881,46 @@ public partial class MainWindow : Window
                         
                         if (_isPaused)
                         {
-                                Dispatcher.UIThread.Post(() => { 
-                                    StatusText.Text = hitBreakpoint ? "Status: BREAKPOINT" : "Status: PAUSED";
-                                    CurrentLineText.Text = $"Line: {pc + 1}";
+                            Dispatcher.UIThread.Post(() => { 
+                                StatusText.Text = hitBreakpoint ? "Status: BREAKPOINT" : "Status: PAUSED";
+                                CurrentLineText.Text = $"Line: {pc + 1}";
                                     
-                                    if (Editor.Text != null && Editor.Document != null)
+                                if (Editor.Text != null && Editor.Document != null)
+                                {
+                                    try
                                     {
-                                        try
+                                        // FIXAT: Använd Document API istället för manuell beräkning
+                                        if (pc >= 0 && pc < Editor.Document.LineCount)
                                         {
-                                            // FIXAT: Använd Document API istället för manuell beräkning
-                                            if (pc >= 0 && pc < Editor.Document.LineCount)
+                                            // Få raden från dokumentet (1-baserad -> 0-baserad)
+                                            var docLine = Editor.Document.GetLineByNumber(pc + 1);
+                                            int lineStart = docLine.Offset;
+                                            int lineLength = docLine.Length;
+                                                
+                                            // VIKTIGT: Använd Select() istället för att sätta properties direkt
+                                            Editor.CaretOffset = lineStart;
+                                                
+                                            if (lineLength > 0)
                                             {
-                                                // Få raden från dokumentet (1-baserad -> 0-baserad)
-                                                var docLine = Editor.Document.GetLineByNumber(pc + 1);
-                                                int lineStart = docLine.Offset;
-                                                int lineLength = docLine.Length;
-                                                
-                                                // VIKTIGT: Använd Select() istället för att sätta properties direkt
-                                                Editor.CaretOffset = lineStart;
-                                                
-                                                if (lineLength > 0)
-                                                {
-                                                    Editor.Select(lineStart, lineLength);
-                                                }
-                                                
-                                                Editor.Focus();
+                                                Editor.Select(lineStart, lineLength);
                                             }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            // Säkerhetsåtgärd: Om något går fel, sätt bara caret
-                                            System.Diagnostics.Debug.WriteLine($"Error selecting line: {ex.Message}");
-                                            if (pc >= 0 && pc < Editor.Document.LineCount)
-                                            {
-                                                var docLine = Editor.Document.GetLineByNumber(pc + 1);
-                                                Editor.CaretOffset = docLine.Offset;
-                                            }
+                                            
+                                            Editor.ScrollToLine(pc + 1);
+                                            
+                                            Editor.Focus();
                                         }
                                     }
+                                    catch (Exception ex)
+                                    {
+                                        // Säkerhetsåtgärd: Om något går fel, sätt bara caret
+                                        System.Diagnostics.Debug.WriteLine($"Error selecting line: {ex.Message}");
+                                        if (pc >= 0 && pc < Editor.Document.LineCount)
+                                        {
+                                            var docLine = Editor.Document.GetLineByNumber(pc + 1);
+                                            Editor.CaretOffset = docLine.Offset;
+                                        }
+                                    }
+                                }
                             });
                             _stepSignal = new TaskCompletionSource<bool>();
                             await _stepSignal.Task;
@@ -1119,6 +1128,9 @@ public partial class MainWindow : Window
         LogBox.Clear();
         _breakpoints.Clear();
         VariableListBox.ItemsSource = null;
+        _gfx.ClearAllResources();
+        Editor.TextArea.Caret.Offset = 0;
+        Editor.TextArea.Caret.BringCaretToView();
         UpdateTitleBar(); // Uppdatera till "Untitled"
     }
 
@@ -1219,6 +1231,8 @@ public partial class MainWindow : Window
         
         LogBox.Clear();
         VariableListBox.ItemsSource = null;
+        Editor.TextArea.Caret.Offset = 0;
+        Editor.TextArea.Caret.BringCaretToView();
     }
     
     public async Task OpenProjectFromStorageFileAsync(IStorageFile file)
@@ -1331,6 +1345,8 @@ public partial class MainWindow : Window
     {
         var theme = themeName switch
         {
+            "LightClean" => AmosThemes.LightClean,
+            "DarkPro" => AmosThemes.DarkPro,
             "Workbench" => AmosThemes.Workbench,
             "C64" => AmosThemes.C64,
             "StosClassic"  => AmosThemes.StosClassic,
@@ -1356,21 +1372,78 @@ public partial class MainWindow : Window
         await aboutWin.ShowDialog(this);
     }
 
+
     private void ApplyTheme(AmosTheme theme)
     {
-        var amosFont = new FontFamily(theme.font);
+        var font = new FontFamily(theme.Font);
+
+        // Fönster & editor
         this.Background = new SolidColorBrush(theme.WindowBg);
-        ToolbarBorder.Background = new SolidColorBrush(theme.ToolbarBg);
-        Editor.FontFamily = amosFont;
-        Editor.FontSize = 20;
-        LogBox.FontFamily = amosFont;
         Editor.Background = new SolidColorBrush(theme.EditorBg);
         Editor.Foreground = new SolidColorBrush(theme.EditorFg);
+        Editor.FontFamily = font;
+        Editor.FontSize = 20;
+
+        // Toolbar
+        ToolbarBorder.Background = new SolidColorBrush(theme.ToolbarBg);
+        ToolbarBorder.BorderBrush = new SolidColorBrush(theme.SplitterColor);
+
+        // Titelrad
+        AmosTitleBar.Background = new SolidColorBrush(theme.TitleBarBg);
+        FileNameText.Foreground = new SolidColorBrush(theme.TitleBarFg);
+
+        // Statusrad (radnummer)
         CursorPosText.Background = new SolidColorBrush(theme.EditorCursorPosBg);
         CursorPosText.Foreground = new SolidColorBrush(theme.AccentColor);
-        AmosTitleBar.Background = new SolidColorBrush(theme.TitleBarBg);
+
+        // Loggbox
+        LogBox.Background = new SolidColorBrush(theme.LogBg);
         LogBox.Foreground = new SolidColorBrush(theme.AccentColor);
-        ToolbarBorder.BorderBrush = new SolidColorBrush(theme.AccentColor);
+        LogBox.FontFamily = font;
+
+        // Variabelbox
+        VariableWatchPanel.Background = new SolidColorBrush(theme.VarWatchBg);
+        VariableWatchPanel.BorderBrush = new SolidColorBrush(theme.SplitterColor);
+        VariableListBox.Background = new SolidColorBrush(theme.VarWatchBg);
+        VariableListBox.Foreground = new SolidColorBrush(theme.VarWatchFg);
+        StatusText.Foreground = new SolidColorBrush(theme.VarWatchFg);
+        CurrentLineText.Foreground = new SolidColorBrush(theme.VarWatchAccentFg);
+
+        // Toolbar-knappar (de utan explicit färg)
+        foreach (var btn in ToolbarBorder.GetVisualDescendants().OfType<Button>())
+        {
+            if (btn.Background is SolidColorBrush b && 
+                b.Color == Color.Parse("#0A2D8F")) // bara "neutral" knappar
+            {
+                btn.Background = new SolidColorBrush(theme.ButtonBg);
+                btn.Foreground = new SolidColorBrush(theme.ButtonFg);
+            }
+        }
+
+        // Hitta header-bordern i VarWatch
+        if (VariableWatchPanel.Child is DockPanel dp)
+        {
+            var header = dp.Children.OfType<Border>().FirstOrDefault();
+            if (header != null)
+                header.Background = new SolidColorBrush(theme.TopBarBg);
+        }
+
+        // Action-knappar (SPRITES, MAP, LOAD, SAVE)
+        foreach (var btn in ToolbarBorder.GetVisualDescendants().OfType<Button>())
+        {
+            var name = btn.Name ?? "";
+            if (name is "SpriteButton" or "MapButton" or "LoadButton" or "SaveButton"  or "ClearLogs")
+            {
+                btn.Background = new SolidColorBrush(theme.ActionButtonBg);
+                btn.Foreground = new SolidColorBrush(theme.ActionButtonFg);
+            }
+        }
+        
+        // Meny
+        TopMenu.Background = new SolidColorBrush(theme.MenuBg);
+        TopMenu.Foreground = new SolidColorBrush(theme.MenuFg);
+        Application.Current!.Resources["MenuBgBrush"] = new SolidColorBrush(theme.MenuBg);
+        Application.Current!.Resources["MenuFgBrush"] = new SolidColorBrush(theme.MenuFg);
     }
 
     private void ToggleFullscreen_OnClick(object? sender, RoutedEventArgs e)
@@ -1466,85 +1539,85 @@ public partial class MainWindow : Window
     }
 
     // NYTT: Breakpoint-marginal för editorn
-        private class BreakpointMargin : AvaloniaEdit.Editing.AbstractMargin
+    private class BreakpointMargin : AvaloniaEdit.Editing.AbstractMargin
+    {
+        private readonly MainWindow _window;
+            
+        public BreakpointMargin(MainWindow window)
         {
-            private readonly MainWindow _window;
+            _window = window;
+        }
             
-            public BreakpointMargin(MainWindow window)
-            {
-                _window = window;
-            }
-            
-            public override void Render(DrawingContext context)
-            {
-                var textView = TextView;
-                if (textView == null || !textView.VisualLinesValid)
-                    return;
+        public override void Render(DrawingContext context)
+        {
+            var textView = TextView;
+            if (textView == null || !textView.VisualLinesValid)
+                return;
 
-                // Rita bakgrund för marginalen
-                context.FillRectangle(
-                    new SolidColorBrush(Color.FromRgb(30, 30, 30)),
-                    new Rect(0, 0, Bounds.Width, Bounds.Height));
+            // Rita bakgrund för marginalen
+            context.FillRectangle(
+                new SolidColorBrush(Color.FromRgb(30, 30, 30)),
+                new Rect(0, 0, Bounds.Width, Bounds.Height));
 
-                foreach (var line in textView.VisualLines)
-                {
-                    int lineNumber = line.FirstDocumentLine.LineNumber;
+            foreach (var line in textView.VisualLines)
+            {
+                int lineNumber = line.FirstDocumentLine.LineNumber;
                     
-                    if (_window._breakpoints.Contains(lineNumber))
-                    {
-                        // Rita röd cirkel för breakpoint
-                        var y = line.GetTextLineVisualYPosition(line.TextLines[0], VisualYPosition.LineTop) - textView.VerticalOffset;
+                if (_window._breakpoints.Contains(lineNumber))
+                {
+                    // Rita röd cirkel för breakpoint
+                    var y = line.GetTextLineVisualYPosition(line.TextLines[0], VisualYPosition.LineTop) - textView.VerticalOffset;
                         
-                        // Fyllda cirkel
-                        context.DrawEllipse(
-                            Brushes.Red,
-                            new Pen(Brushes.DarkRed, 1),
-                            new Point(Bounds.Width / 2, y + 10),
-                            7, 7);
-                    }
+                    // Fyllda cirkel
+                    context.DrawEllipse(
+                        Brushes.Red,
+                        new Pen(Brushes.DarkRed, 1),
+                        new Point(Bounds.Width / 2, y + 10),
+                        7, 7);
                 }
-            }
-            
-            protected override void OnPointerPressed(PointerPressedEventArgs e)
-            {
-                base.OnPointerPressed(e);
-                
-                var textView = TextView;
-                if (textView == null) return;
-                
-                // ÄNDRAT: Få position relativt till DENNA margin, inte textView
-                var pos = e.GetPosition(this);
-                
-                // Hitta vilken rad som klickades på
-                var line = textView.GetVisualLineFromVisualTop(pos.Y + textView.VerticalOffset);
-                if (line != null)
-                {
-                    int lineNumber = line.FirstDocumentLine.LineNumber;
-                    
-                    // NYTT: Hindra breakpoint på tomma rader
-                    if (_window.IsEmptyOrCommentLine(lineNumber))
-                    {
-                        e.Handled = true;
-                        return; // Gör ingenting
-                    }
-                    
-                    if (_window._breakpoints.Contains(lineNumber))
-                        _window._breakpoints.Remove(lineNumber);
-                    else
-                        _window._breakpoints.Add(lineNumber);
-                    
-                    InvalidateVisual();
-                    
-                    // Uppdatera även textView så att allt ritas om
-                    textView.Redraw();
-                }
-                
-                e.Handled = true;
-            }
-            
-            protected override Size MeasureOverride(Size availableSize)
-            {
-                return new Size(20, 0);
             }
         }
+            
+        protected override void OnPointerPressed(PointerPressedEventArgs e)
+        {
+            base.OnPointerPressed(e);
+                
+            var textView = TextView;
+            if (textView == null) return;
+                
+            // ÄNDRAT: Få position relativt till DENNA margin, inte textView
+            var pos = e.GetPosition(this);
+                
+            // Hitta vilken rad som klickades på
+            var line = textView.GetVisualLineFromVisualTop(pos.Y + textView.VerticalOffset);
+            if (line != null)
+            {
+                int lineNumber = line.FirstDocumentLine.LineNumber;
+                    
+                // NYTT: Hindra breakpoint på tomma rader
+                if (_window.IsEmptyOrCommentLine(lineNumber))
+                {
+                    e.Handled = true;
+                    return; // Gör ingenting
+                }
+                    
+                if (_window._breakpoints.Contains(lineNumber))
+                    _window._breakpoints.Remove(lineNumber);
+                else
+                    _window._breakpoints.Add(lineNumber);
+                    
+                InvalidateVisual();
+                    
+                // Uppdatera även textView så att allt ritas om
+                textView.Redraw();
+            }
+                
+            e.Handled = true;
+        }
+            
+        protected override Size MeasureOverride(Size availableSize)
+        {
+            return new Size(20, 0);
+        }
     }
+}

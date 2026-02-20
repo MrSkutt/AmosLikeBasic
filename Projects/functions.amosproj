@@ -1,0 +1,1 @@
+{"Version":2,"ProgramText":"a = 5 : b = 3\n\nPRINT a \u0026 \u0022 \u002B \u0022 \u0026 b \u0026 \u0022 = \u0022 \u0026 Add(a,b)\n\n\nFUNCTION Add(a, b)\n  c = a \u002B b\n  Return C\nEND FUNCTION\n\n","ScreenWidth":null,"ScreenHeight":null,"Sprites":null,"MapWidth":null,"MapHeight":null,"MapData":null}

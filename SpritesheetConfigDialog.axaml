@@ -1,0 +1,41 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AmosLikeBasic.SpritesheetConfigDialog"
+        Title="Spritesheet Configuration"
+        Width="350" Height="250"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+    
+        <TextBlock Grid.Row="0" Text="Configure Spritesheet Import" 
+                   FontSize="16" FontWeight="Bold" Foreground="#7FB2FF" Margin="0,0,0,20"/>
+
+        <!-- Frame Width -->
+        <Grid Grid.Row="1" ColumnDefinitions="120,*" Margin="0,0,0,10">
+            <TextBlock Grid.Column="0" Text="Frame Width:" VerticalAlignment="Center"/>
+            <NumericUpDown Grid.Column="1" Name="FrameWidthUpDown" 
+                           Minimum="1" Maximum="512" Value="32" Increment="1"/>
+        </Grid>
+
+        <!-- Frame Height -->
+        <Grid Grid.Row="2" ColumnDefinitions="120,*" Margin="0,0,0,10">
+            <TextBlock Grid.Column="0" Text="Frame Height:" VerticalAlignment="Center"/>
+            <NumericUpDown Grid.Column="1" Name="FrameHeightUpDown" 
+                           Minimum="1" Maximum="512" Value="32" Increment="1"/>
+        </Grid>
+
+        <!-- Frame Count -->
+        <Grid Grid.Row="3" ColumnDefinitions="120,*" Margin="0,0,0,10">
+            <TextBlock Grid.Column="0" Text="Frame Count:" VerticalAlignment="Center"/>
+            <NumericUpDown Grid.Column="1" Name="FrameCountUpDown" 
+                           Minimum="1" Maximum="256" Value="8" Increment="1"/>
+        </Grid>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+            <Button Content="OK" Width="80" Click="OkButton_OnClick" IsDefault="True"/>
+            <Button Content="Cancel" Width="80" Click="CancelButton_OnClick"/>
+        </StackPanel>
+
+    </Grid>
+</Window>

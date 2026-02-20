@@ -8,10 +8,17 @@
         Title="AMOS Professional IDE"
         Background="#00134D"
         Width="1280" Height="1024" >
+    <Window.Styles>
+        <Style Selector="MenuItem">
+            <Setter Property="Background" Value="{DynamicResource MenuBgBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource MenuFgBrush}"/>
+        </Style>
+    </Window.Styles>
     <DockPanel>
-
+        
         <!-- Top Menu -->
         <Menu Name="TopMenu" DockPanel.Dock="Top" Focusable="False">
+
             <MenuItem Header="_Project">
                 <MenuItem Header="New" Click="NewProject_OnClick"/>
                 <MenuItem Header="Open..." Click="OpenProject_OnClick"/>
@@ -30,6 +37,8 @@
                 <MenuItem Header="Reset Layout"/>
             </MenuItem>
             <MenuItem Header="Themes">
+                <MenuItem Header="Light Clean" Click="ChangeTheme_OnClick" Tag="LightClean"/>
+                <MenuItem Header="Dark Pro" Click="ChangeTheme_OnClick" Tag="DarkPro"/>
                 <MenuItem Header="Classic AMOS" Click="ChangeTheme_OnClick" Tag="Classic"/>
                 <MenuItem Header="Workbench" Click="ChangeTheme_OnClick" Tag="Workbench"/>
                 <MenuItem Header="C64" Click="ChangeTheme_OnClick" Tag="C64"/>
@@ -71,7 +80,7 @@
                 <Button x:Name="SpriteButton" Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Button x:Name="MapButton" Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Separator Background="#7FB2FF" Width="2"/>
-                <Button Classes="amos-button" Content="CLEAR LOGS" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button x:Name="ClearLogs" Classes="amos-button" Content="CLEAR LOGS" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
             </StackPanel>
         </Border>
     

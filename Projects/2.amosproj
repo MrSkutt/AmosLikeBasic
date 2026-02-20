@@ -1,0 +1,1 @@
+{"Version":2,"ProgramText":"RASTER CLEAR\nSCREEN SELECT 1\nRASTER 1, 0, 0, 480, \u0022Red, Orange, Yellow, Green, Blue, Indigo, Violet, Red\u0022\nSCREEN SELECT 0\n\nDOUBLE BUFFER\n\nMainLoop:\n  WAIT VBL\nGOTO MainLoop","ScreenWidth":null,"ScreenHeight":null,"Sprites":null,"MapWidth":null,"MapHeight":null,"MapData":null}

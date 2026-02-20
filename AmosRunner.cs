@@ -2744,9 +2744,40 @@ public static class AmosRunner
                                         int count = EvalInt(ss[5], vars, ln, getInkey, isKeyDown, graphics);
                                         graphics.LoadSpriteSheet(id, path, fw, fh, count);
                                     }
+                                    else if (ss.Count == 5) // "LOAD", id, path, w, h = 5 delar (frameCount från filnamn)
+                                    {
+                                        int fw = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
+                                        int fh = EvalInt(ss[4], vars, ln, getInkey, isKeyDown, graphics);
+                                        graphics.LoadSpriteSheetAuto(id, path, fw, fh, null);
+                                    }
+                                    else if (ss.Count == 4) // "LOAD", id, path, count = 4 delar (width/height från filnamn)
+                                    {
+                                        int count = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
+                                        graphics.LoadSpriteSheetAuto(id, path, null, null, count);
+                                    }
+                                    else if (ss.Count == 3) // "LOAD", id, path = 3 delar
+                                    {
+                                        // Kolla om filnamnet innehåller _W, _H eller _B/_F (dvs. är det ett spritesheet?)
+                                        string fileName = System.IO.Path.GetFileNameWithoutExtension(path);
+                                        bool isSpriteSheet = fileName.Contains("_W", System.StringComparison.OrdinalIgnoreCase) ||
+                                                             fileName.Contains("_H", System.StringComparison.OrdinalIgnoreCase) ||
+                                                             fileName.Contains("_B", System.StringComparison.OrdinalIgnoreCase) ||
+                                                             fileName.Contains("_F", System.StringComparison.OrdinalIgnoreCase);
+        
+                                        if (isSpriteSheet)
+                                        {
+                                            // Auto-parse allt från filnamnet
+                                            graphics.LoadSpriteSheetAuto(id, path);
+                                        }
+                                        else
+                                        {
+                                            // Vanlig single-frame sprite
+                                            graphics.LoadSprite(id, path);
+                                        }
+                                    }
                                     else
                                     {
-                                        // Vanlig laddning av en bild
+                                        // Fallback: Vanlig laddning av en bild
                                         graphics.LoadSprite(id, path);
                                     }
                                 }
@@ -2925,47 +2956,110 @@ public static class AmosRunner
                         }
                         
                         case "RASTER":
+                        {
                             int currentLayer = graphics.GetActiveScreenNumber();
 
-                            if (arg.ToUpperInvariant().StartsWith("STR("))
+                            // RASTER MOVE id, newY
+                            if (arg.StartsWith("MOVE ", StringComparison.OrdinalIgnoreCase))
                             {
-                                int openParen = arg.IndexOf('(');
+                                var moveParts = SplitCsvOrSpaces(arg.Substring(5).Trim());
+                                int barId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
+                                float newY = (float)EvalDouble(moveParts[1], vars, ln, getInkey, isKeyDown, graphics);
+                                graphics.MoveRasterBar(currentLayer, barId, newY);
+                                break;
+                            }
+
+                            // RASTER DEL id
+                            if (arg.StartsWith("DEL ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                int barId = (int)Math.Round(EvalDouble(arg.Substring(4).Trim(), vars, ln, getInkey, isKeyDown, graphics));
+                                graphics.DeleteRasterBar(currentLayer, barId);
+                                break;
+                            }
+
+                            // RASTER CLEAR
+                            if (arg.Equals("CLEAR", StringComparison.OrdinalIgnoreCase))
+                            {
+                                graphics.ClearAllRasterBars(currentLayer);
+                                break;
+                            }
+
+                            // RASTER INFO
+                            if (arg.Equals("INFO", StringComparison.OrdinalIgnoreCase))
+                            {
+                                Console.WriteLine(graphics.GetRasterBarDebugInfo());
+                                break;
+                            }
+                            
+                            if (arg.StartsWith("WRAP ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var moveParts = SplitCsvOrSpaces(arg.Substring(5).Trim());
+                                int barId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
+                                bool Wrap = EvalDouble(moveParts[1], vars, ln, getInkey, isKeyDown, graphics) != 0.0;
+                                graphics.SetRasterWrap(currentLayer, barId, Wrap);
+                                break;
+                            }
+                            if (arg.StartsWith("MODE ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var moveParts = SplitCsvOrSpaces(arg.Substring(5).Trim());
+                                int barId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
+                                bool RM = EvalDouble(moveParts[1], vars, ln, getInkey, isKeyDown, graphics) != 0.0;
+                                graphics.SetRasterMode(barId, RM);
+                                break;
+                            }
+                            if (arg.StartsWith("GFXMODE ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var moveParts = SplitCsvOrSpaces(arg.Substring(5).Trim());
+                                int barId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
+                                bool RM = EvalDouble(moveParts[1], vars, ln, getInkey, isKeyDown, graphics) != 0.0;
+                                graphics.SetRasterGfxMode(barId, RM);
+                                break;
+                            }                           
+                            
+                            // RASTER STR(n) = "color1,color2"  →  SetShaderColors (legacy)
+                            if (arg.StartsWith("STR(", StringComparison.OrdinalIgnoreCase))
+                            {
+                                int openParen  = arg.IndexOf('(');
                                 int closeParen = arg.IndexOf(')');
-                                // Hämta innehållet inuti parentesen (t.ex. "I" eller "5")
                                 string inner = arg.Substring(openParen + 1, closeParen - openParen - 1);
-                                // Utvärdera uttrycket ordentligt så att variabler som 'I' fungerar
                                 var val = EvalValue(inner, vars, ln, getInkey, isKeyDown, graphics);
                                 int rbNum = Convert.ToInt32(val);
 
                                 int eqIdx2 = arg.IndexOf('=');
                                 if (eqIdx2 > 0)
                                 {
-                                    string colorStr = ValueToString(EvalValue(arg[(eqIdx2 + 1)..].Trim(), vars, ln,
-                                        getInkey, isKeyDown, graphics));
-                                    var parts = colorStr.Split(',').Select(c => c.Trim()).ToList();
-                                    var c1 = ParseColor(parts[0]);
-                                    var c2 = parts.Count > 1 ? ParseColor(parts[1]) : c1;
+                                    string colorStr = ValueToString(EvalValue(arg[(eqIdx2 + 1)..].Trim(), vars, ln, getInkey, isKeyDown, graphics));
+                                    var colorParts = colorStr.Split(',').Select(c => c.Trim()).ToList();
+                                    var c1 = ParseColor(colorParts[0]);
+                                    var c2 = colorParts.Count > 1 ? ParseColor(colorParts[1]) : c1;
                                     graphics.SetShaderColors(currentLayer, rbNum, c1, c2);
                                 }
+                                break;
                             }
-                            else
-                            {
-                                var rbArgs = SplitCsvOrSpaces(arg.Trim());
-                                if (rbArgs.Count >= 4)
-                                {
-                                    // Använd EvalDouble på varje argument så att variabler slås upp korrekt
-                                    var val = EvalValue(rbArgs[0], vars, ln, getInkey, isKeyDown, graphics);
-                                    int rbNum = Convert.ToInt32(val);
-                                    int rbOff = (int)Math.Round(EvalDouble(rbArgs[2], vars, ln, getInkey, isKeyDown,
-                                        graphics));
-                                    int rbH = (int)Math.Round(EvalDouble(rbArgs[3], vars, ln, getInkey, isKeyDown,
-                                        graphics));
 
-                                    graphics.SetShaderParams(currentLayer, rbNum, (float)rbOff, (float)rbH);
+                            // RASTER id, x, y, height [, "colors"]
+                            var rbArgs = SplitCsvOrSpaces(arg.Trim());
+                            if (rbArgs.Count >= 4)
+                            {
+                                int rbNum = Convert.ToInt32(EvalValue(rbArgs[0], vars, ln, getInkey, isKeyDown, graphics));
+                                float x      = (float)EvalDouble(rbArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                float rbOff  = (float)EvalDouble(rbArgs[2], vars, ln, getInkey, isKeyDown, graphics);
+                                float rbH    = (float)EvalDouble(rbArgs[3], vars, ln, getInkey, isKeyDown, graphics);
+                                
+                                if (rbArgs.Count >= 5)
+                                {
+                                    // Color string provided → use SetRasterBar (new API)
+                                    string colorPart = string.Join(",", rbArgs.Skip(4)).Trim().Trim('"');
+                                    graphics.SetRasterBar(currentLayer, rbNum, x, rbOff, rbH, colorPart);
+                                }
+                                else
+                                {
+                                    // No colors → legacy SetShaderParams
+                                    graphics.SetShaderParams(currentLayer, rbNum, rbOff, rbH);
                                 }
                             }
-
                             break;
+                        }
                         
                         case "PARTICLE":
                             var rainArgs = SplitCsvOrSpaces(arg);
@@ -3146,9 +3240,6 @@ public static class AmosRunner
                                                     graphics.SetMapTile(z, y, dto.Data[idx++]);
                                                 }
                                             }
-
-                                            // Rita ut banan på det stora lagret direkt efter laddning
-                                            graphics.DrawMap(0, 0);
                                         }
                                     }
                                     catch (Exception ex)
@@ -4091,6 +4182,30 @@ public static class AmosRunner
                     t.TryConsume(')');
                     return (double)g.GetBob(val).Y;     
                 }
+                if (id.Equals("BOB#ZOOMX", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetBob(val).ZoomX;      
+                }
+                if (id.Equals("BOB#ZOOMY", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetBob(val).ZoomY;      
+                } 
+                if (id.Equals("BOB#ANGLE", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetBob(val).Angle;      
+                } 
+                if (id.Equals("BOB#VISIBLE", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return g.GetSprite(val).Visible ? 1.0 : 0.0; 
+                } 
                 if (id.Equals("SPRITE#X", StringComparison.OrdinalIgnoreCase))
                 {
                     int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
@@ -4103,6 +4218,54 @@ public static class AmosRunner
                     t.TryConsume(')');
                     return (double)g.GetSprite(val).Y;     
                 }
+                if (id.Equals("SPRITE#FRAME", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).CurrentFrame;     
+                }
+                if (id.Equals("SPRITE#FRAMECOUNT", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).Frames.Count;      
+                }                
+                if (id.Equals("SPRITE#WIDTH", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).Width;      
+                }  
+                if (id.Equals("SPRITE#HEIGHT", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).Height;      
+                } 
+                if (id.Equals("SPRITE#ZOOMX", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).ZoomX;      
+                }
+                if (id.Equals("SPRITE#ZOOMY", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).ZoomY;      
+                } 
+                if (id.Equals("SPRITE#ANGLE", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return (double)g.GetSprite(val).Angle;      
+                } 
+                if (id.Equals("SPRITE#VISIBLE", StringComparison.OrdinalIgnoreCase))
+                {
+                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
+                    t.TryConsume(')');
+                    return g.GetSprite(val).Visible ? 1.0 : 0.0; 
+                } 
                 // FADING(id) — returnerar 1.0 om sprite har pågående fade, annars 0.0
                 if (id.Equals("FADING", StringComparison.OrdinalIgnoreCase))
                 {
@@ -4395,6 +4558,26 @@ public static class AmosRunner
         public bool TryReadInt(out int v) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsDigit(_s[_i]) || (_i == s && _s[_i] == '-'))) _i++; return int.TryParse(_s[s.._i], out v); }
         public bool TryReadDouble(out double v) { 
             SkipWs(); 
+            
+            // ✅ NYTT: Kolla om det är TRUE/FALSE/ON/OFF
+            var bookmark = _i;
+            if (TryReadIdentifier(out string possibleKeyword))
+            {
+                var upper = possibleKeyword.ToUpperInvariant();
+                if (upper == "TRUE" || upper == "ON")
+                {
+                    v = 1.0;
+                    return true;
+                }
+                if (upper == "FALSE" || upper == "OFF")
+                {
+                    v = 0.0;
+                    return true;
+                }
+                // Om det inte var ett keyword, backa och fortsätt med normal parsing
+                _i = bookmark;
+            }
+            
             var s = _i; 
             while (_i < _s.Length && (char.IsDigit(_s[_i]) || _s[_i] == '.' || (_i == s && _s[_i] == '-'))) _i++; 
             return double.TryParse(_s[s.._i], CultureInfo.InvariantCulture, out v); 
