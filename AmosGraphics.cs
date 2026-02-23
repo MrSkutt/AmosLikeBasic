@@ -18,6 +18,7 @@ namespace AmosLikeBasic;
 public sealed class GpuLayer
 {
     public WriteableBitmap Bitmap { get; init; } = null!;
+    public WriteableBitmap? CompositeBitmap { get; set; }
     
     public Point Offset { get; set; }
     public double Opacity { get; set; } = 1.0;
@@ -84,7 +85,8 @@ public class ShaderDrawOperation : ICustomDrawOperation
         {
             try
             {
-                using var fb = _layer.Bitmap.Lock();
+                var bitmapToUse = _layer.CompositeBitmap ?? _layer.Bitmap;
+                using var fb = bitmapToUse.Lock();
                 var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
                     SKColorType.Bgra8888, SKAlphaType.Premul);
                 using var skBitmap = new SKBitmap();
@@ -186,17 +188,18 @@ public class ShaderDrawOperation : ICustomDrawOperation
 
 public sealed class AmosGpuView : Control
 {
-    private ScreenWindow? _screenWindow; 
+    private ScreenWindow? _screenWindow;
 
     public AmosGraphics Graphics { get; set; } = null!;
     private RenderTargetBitmap? _framebuffer;
-
+    string RasterShaderCode = Shader.RasterShaderCode;
+    
     protected override Size MeasureOverride(Size availableSize)
     {
         if (Graphics != null && Graphics.Width > 0) return new Size(Graphics.Width, Graphics.Height);
         return new Size(640, 480);
     }
-    
+
     private void EnsureFramebuffer(int w, int h)
     {
         if (_framebuffer != null &&
@@ -208,203 +211,204 @@ public sealed class AmosGpuView : Control
             new PixelSize(w, h),
             new Vector(96, 96)); // upplösning 96 DPI
     }
-    
+
     public override void Render(DrawingContext ctx)
     {
         if (Graphics == null) return;
-        
-        // 1. Se till att framebuffer finns
+
         EnsureFramebuffer(Graphics.Width, Graphics.Height);
-        
+
         using (var fbCtx = _framebuffer!.CreateDrawingContext())
         {
-            // ✅ Ta lock och kopiera alla listor vi ska iterera över
             List<GpuLayer> layersCopy;
             List<int> bobIdsCopy;
             List<AmosGraphics.QueuedFontText> fontTextsCopy;
             List<int> spriteIdsCopy;
-        
+
             lock (Graphics.LockObject)
             {
                 var amosRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
                 fbCtx.DrawRectangle(Brushes.Transparent, null, amosRect);
-            
-                // ✅ Skapa säkra kopior av alla listor
+
                 layersCopy = new List<GpuLayer>(Graphics.ActiveFrame);
                 bobIdsCopy = Graphics.GetBobIds();
                 fontTextsCopy = Graphics.GetQueuedTexts().ToList();
                 spriteIdsCopy = Graphics.GetSpriteIds();
             }
-            
-            lock (Graphics.LockObject)
+
+            // RITA GPU-LAGER MED SHADER
+            foreach (var layer in layersCopy)
             {
-                var amosRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
-                fbCtx.DrawRectangle(Brushes.Transparent, null, amosRect);
-                
-                // RITA GPU-LAGER
-                // ✅ Nu kan vi iterera utan lock (använder kopior)
-                // RITA GPU-LAGER
-                foreach (var layer in layersCopy)
+                if (layer.Bitmap == null) continue;
+                if (!layer.Visible) continue;
+                var bmpSize = layer.Bitmap.Size;
+                var offset = layer.Offset;
+
+                int w = (int)bmpSize.Width;
+                int h = (int)bmpSize.Height;
+
+                // Skapa CompositeBitmap om den saknas
+                if (layer.CompositeBitmap == null ||
+                    layer.CompositeBitmap.PixelSize != layer.Bitmap.PixelSize)
                 {
-                    if (layer.Bitmap == null) continue;
-                    if (!layer.Visible) continue;
-            
-                    var bmpSize = layer.Bitmap.Size;
-                    var offset = layer.Offset;
+                    layer.CompositeBitmap = new WriteableBitmap(
+                        layer.Bitmap.PixelSize,
+                        new Vector(96, 96),
+                        PixelFormat.Bgra8888,
+                        AlphaFormat.Premul);
+                }
+                layer.SkSlCode = RasterShaderCode;
+                // Skapa en RenderTargetBitmap och rita allt dit via Avalonia
+                var compositeRtb = new RenderTargetBitmap(
+                    layer.Bitmap.PixelSize,
+                    new Vector(96, 96));
 
-                    int w = (int)bmpSize.Width;
-                    int h = (int)bmpSize.Height;
+                using (var compCtx = compositeRtb.CreateDrawingContext())
+                {
+                    var bmpSize2 = layer.Bitmap.Size;
 
-                    if (!string.IsNullOrEmpty(layer.SkSlCode))
+                    // 1. Rita layer.Bitmap (bakgrund, tiles, PLOT/LINE)
+                    compCtx.DrawImage(layer.Bitmap, new Rect(bmpSize2), new Rect(bmpSize2));
+
+                    int layerIndex = layersCopy.IndexOf(layer);
+
+                    // 2. Rita BOBs
+                    foreach (var bobId in bobIdsCopy)
                     {
-                        var screenRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
-                        var drawOp = new ShaderDrawOperation(screenRect, layer, screenRect);
-                        ctx.Custom(drawOp);
+                        var bob = Graphics.GetBob(bobId);
+                        if (bob == null || !bob.Visible) continue;
+                        var img = Graphics.GetBobImage(bob.ImageIndex);
+                        if (bob.Layer != -1 && bob.Layer != layerIndex) continue;
+                        if (img == null) continue;
+
+                        double cX = img.Size.Width / 2.0;
+                        double cY = img.Size.Height / 2.0;
+                        double angleRad = bob.Angle * Math.PI / 180.0;
+
+                        var transform =
+                            Matrix.CreateTranslation(-cX, -cY)
+                            * Matrix.CreateScale(bob.ZoomX, bob.ZoomY)
+                            * Matrix.CreateRotation(angleRad)
+                            * Matrix.CreateTranslation(cX + bob.X, cY + bob.Y);
+
+                        using (compCtx.PushPostTransform(transform))
+                            compCtx.DrawImage(img, new Rect(img.Size),
+                                new Rect(0, 0, img.Size.Width, img.Size.Height));
                     }
-                    else
+
+                    // 3. Rita font-texter
+                    foreach (var qt in fontTextsCopy)
                     {
-                        for (int dx = -w; dx <= w; dx += w)
+                        var f = Graphics.GetFont(qt.FontId);
+                        if (f == null) continue;
+                        if (qt.Layer != -1 && qt.Layer != layerIndex) continue;
+
+                        double totalW = qt.Text.Length * f.CharWidth;
+                        double cX = totalW / 2.0;
+                        double cY = f.CharHeight / 2.0;
+                        double angleRad = qt.Angle * Math.PI / 180.0;
+
+                        for (int i = 0; i < qt.Text.Length; i++)
                         {
-                            for (int dy = -h; dy <= h; dy += h)
+                            char c = qt.Text[i];
+                            if (c == ' ') continue;
+                            var charBmp = Graphics.GetFontChar(f, c);
+                            if (charBmp == null) continue;
+
+                            var transform =
+                                Matrix.CreateTranslation(i * f.CharWidth, 0)
+                                * Matrix.CreateTranslation(-cX, -cY)
+                                * Matrix.CreateScale(qt.ZoomX, qt.ZoomY)
+                                * Matrix.CreateRotation(angleRad)
+                                * Matrix.CreateTranslation(cX + qt.X, cY + qt.Y);
+
+                            using (compCtx.PushPostTransform(transform))
+                                compCtx.DrawImage(charBmp, new Rect(charBmp.Size),
+                                    new Rect(0, 0, f.CharWidth, f.CharHeight));
+                        }
+                    }
+
+                    // 4. Rita sprites
+                    foreach (var id in spriteIdsCopy)
+                    {
+                        var sprite = Graphics.GetSprite(id);
+                        if (!sprite.Visible) continue;
+                        if (sprite.Layer != -1 && sprite.Layer != layerIndex) continue;
+
+                        var bmp = sprite.GetBitmap(Graphics.GetImageBank());
+
+                        double cX = bmp.Size.Width / 2.0;
+                        double cY = bmp.Size.Height / 2.0;
+                        double angleRad = sprite.Angle * Math.PI / 180.0;
+
+                        var transform =
+                            Matrix.CreateTranslation(-cX, -cY)
+                            * Matrix.CreateScale(sprite.ZoomX, sprite.ZoomY)
+                            * Matrix.CreateRotation(angleRad)
+                            * Matrix.CreateTranslation(cX + sprite.X, cY + sprite.Y);
+
+                        using (compCtx.PushPostTransform(transform))
+                        using (compCtx.PushOpacity(sprite.Alpha))
+                            compCtx.DrawImage(bmp, new Rect(bmp.Size),
+                                new Rect(0, 0, sprite.Width, sprite.Height));
+                    }
+                }
+
+                // Kopiera RenderTargetBitmap → CompositeBitmap
+                var pixels = new byte[
+                    layer.CompositeBitmap.PixelSize.Width *
+                    layer.CompositeBitmap.PixelSize.Height * 4];
+
+                unsafe
+                {
+                    fixed (byte* p = pixels)
+                    {
+                        compositeRtb.CopyPixels(
+                            new PixelRect(layer.CompositeBitmap.PixelSize),
+                            (nint)p,
+                            pixels.Length,
+                            layer.CompositeBitmap.PixelSize.Width * 4);
+        
+                        // ✅ APPLICERA OPACITY PÅ VARJE PIXEL (endast om opacity < 1.0)
+                        float opacity = (float)layer.Opacity;
+                        if (opacity < 0.999f) // Optimera - skippa om nästan helt synlig
+                        {
+                            int pixelCount = layer.CompositeBitmap.PixelSize.Width * 
+                                             layer.CompositeBitmap.PixelSize.Height;
+            
+                            for (int i = 0; i < pixelCount; i++)
                             {
-                                var drawRect = new Rect(offset.X + dx, offset.Y + dy, w, h);
-
-                                if (drawRect.Right < 0 || drawRect.Bottom < 0 ||
-                                    drawRect.Left > Graphics.Width || drawRect.Top > Graphics.Height)
-                                    continue;
-
-                                using (fbCtx.PushOpacity(layer.Opacity))
-                                {
-                                    fbCtx.DrawImage(layer.Bitmap, new Rect(bmpSize), drawRect);
-                                }
+                                int idx = i * 4;
+                                // BGRA format: [B][G][R][A]
+                
+                                // FADE BÅDE FÄRG OCH ALPHA för mjuk övergång från svart
+                                byte b = p[idx + 0];
+                                byte g = p[idx + 1];
+                                byte r = p[idx + 2];
+                                byte a = p[idx + 3];
+                
+                                // Dämpa RGB proportionellt (fade mot svart)
+                                p[idx + 0] = (byte)(b * opacity);
+                                p[idx + 1] = (byte)(g * opacity);
+                                p[idx + 2] = (byte)(r * opacity);
+                                p[idx + 3] = (byte)(a * opacity);
                             }
                         }
+                        // Om opacity >= 0.999, gör INGENTING - använd pixlarna som de är
                     }
                 }
 
-                // Print out BOBs
-                foreach (var bobId in Graphics.GetBobIds())
-                {
-                    var bob = Graphics.GetBob(bobId);
-                    if (bob == null || !bob.Visible) continue;
-
-                    var img = Graphics.GetBobImage(bob.ImageIndex);
-                    if (img == null) continue;
-
-                    double totalUnscaledW = img.Size.Width;
-                    double totalUnscaledH = img.Size.Height;
-                    
-                    // Pivot = center av texten
-                    double centerX = totalUnscaledW / 2.0;
-                    double centerY = totalUnscaledH / 2.0;
-
-                    double angleRad = bob.Angle * Math.PI / 180.0;
-                    
-                    double bobLocalX = 0;
-                    double bobLocalY = 0;
-                    
-                    // Transformkedja: rotation och zoom runt center
-                    var transform =
-                        Matrix.CreateTranslation(bobLocalX, bobLocalY) // glyph lokalt
-                        * Matrix.CreateTranslation(-centerX, -centerY)   // flytta center till origo
-                        * Matrix.CreateScale(bob.ZoomX, bob.ZoomY)         // zoom
-                        * Matrix.CreateRotation(angleRad)                // rotation
-                        * Matrix.CreateTranslation(centerX + bob.X, centerY + bob.Y); // tillbaka till center + top-left
-
-                    using (fbCtx.PushPostTransform(transform))
-                    {
-                        fbCtx.DrawImage(img, new Rect(img.Size), new Rect(0,0, img.Size.Width, img.Size.Height));
-                    }
-                }
-          
-                // Print out Graphics text
-                foreach (var qt in Graphics.GetQueuedTexts().ToList())
-                {
-                    var f = Graphics.GetFont(qt.FontId);
-                    if (f == null)
-                        continue;
-
-                    double totalUnscaledW = qt.Text.Length * f.CharWidth;
-                    double totalUnscaledH = f.CharHeight;
-
-                    // Pivot = center av texten
-                    double centerX = totalUnscaledW / 2.0;
-                    double centerY = totalUnscaledH / 2.0;
-
-                    double angleRad = qt.Angle * Math.PI / 180.0;
-
-                    for (int i = 0; i < qt.Text.Length; i++)
-                    {
-                        char c = qt.Text[i];
-                        if (c == ' ') continue;
-
-                        var charBmp = Graphics.GetFontChar(f, c);
-                        if (charBmp == null) continue;
-
-                        // Bokstavens lokala position i ordets koordinater
-                        double charLocalX = i * f.CharWidth;
-                        double charLocalY = 0;
-
-                        // Transformkedja: rotation och zoom runt center
-                        var transform =
-                            Matrix.CreateTranslation(charLocalX, charLocalY) // glyph lokalt
-                            * Matrix.CreateTranslation(-centerX, -centerY)   // flytta center till origo
-                            * Matrix.CreateScale(qt.ZoomX, qt.ZoomY)         // zoom
-                            * Matrix.CreateRotation(angleRad)                // rotation
-                            * Matrix.CreateTranslation(centerX + qt.X, centerY + qt.Y); // tillbaka till center + top-left
-
-                        using (fbCtx.PushPostTransform(transform))
-                        {
-                            fbCtx.DrawImage(
-                                charBmp,
-                                new Rect(charBmp.Size),
-                                new Rect(0, 0, f.CharWidth, f.CharHeight));
-                        }
-                    }
-                }
-
+                using (var fb = layer.CompositeBitmap.Lock())
+                    System.Runtime.InteropServices.Marshal.Copy(
+                        pixels, 0, fb.Address, pixels.Length);
                 
-                // WRITE SPRITES
-                foreach (var id in Graphics.GetSpriteIds())
-                {
-                    var sprite = Graphics.GetSprite(id);
-                    if (!sprite.Visible) continue;
-
-                    var bmp = sprite.GetBitmap(Graphics.GetImageBank());
-                    
-                    double totalUnscaledW = bmp.Size.Width;
-                    double totalUnscaledH = bmp.Size.Height;
-                    
-                    // Pivot = center av texten
-                    double centerX = totalUnscaledW / 2.0;
-                    double centerY = totalUnscaledH / 2.0;
-
-                    double angleRad = sprite.Angle * Math.PI / 180.0;
-                    
-                    double bobLocalX = 0;
-                    double bobLocalY = 0;
-
-                    // Transformkedja: rotation och zoom runt center
-                    var transform =
-                        Matrix.CreateTranslation(bobLocalX, bobLocalY) // glyph lokalt
-                        * Matrix.CreateTranslation(-centerX, -centerY)   // flytta center till origo
-                        * Matrix.CreateScale(sprite.ZoomX, sprite.ZoomY)         // zoom
-                        * Matrix.CreateRotation(angleRad)                // rotation
-                        * Matrix.CreateTranslation(centerX + sprite.X, centerY + sprite.Y); // tillbaka till center + top-left
-
-
-                    using (fbCtx.PushPostTransform(transform))
-                    {
-                        // Applicera sprite-alpha (0.0–1.0) som Opacity vid ritning
-                        using (fbCtx.PushOpacity(sprite.Alpha))
-                        {
-                            fbCtx.DrawImage(bmp, new Rect(bmp.Size), new Rect(0, 0, sprite.Width, sprite.Height));
-                        }
-                    }
-                }
+                var screenRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
+                var drawOp = new ShaderDrawOperation(screenRect, layer, screenRect);
+                ctx.Custom(drawOp); // Opacity redan applicerad på pixlarna
             }
         }
-        // 3. Rita sedan framebuffer till skärmen
+
+        // Rita framebuffer till skärmen
         ctx.DrawImage(
             _framebuffer!,
             new Rect(_framebuffer.Size),
@@ -416,10 +420,10 @@ public sealed class AmosGpuView : Control
 public sealed class AmosGraphics
 {
     public Action<string>? OnError { get; set; }
-    
+
     // NYTT: Bildbank för BOBs (Resurser)
     private readonly Dictionary<int, WriteableBitmap> _bobImages = new();
-        
+
     // NYTT: Lista över aktiva BOBs (Objekt på skärmen)
     private readonly Dictionary<int, Bob> _bobs = new();
 
@@ -427,13 +431,13 @@ public sealed class AmosGraphics
     private readonly List<GpuLayer> _frameB = new();
     private bool _isAActive = true;
     private bool _doubleBufferMode = false;
-    
+
     public List<GpuLayer> ActiveFrame => _isAActive ? _frameA : _frameB;
     public List<GpuLayer> InactiveFrame => _isAActive ? _frameB : _frameA;
-    
+
     private List<GpuLayer> DrawingFrame => _doubleBufferMode ? InactiveFrame : ActiveFrame;
     public Dictionary<int, ImageBankEntry> GetImageBank() => _imageBank;
-    
+
     private readonly System.Diagnostics.Stopwatch _vblTimer = new();
     public double LastCpuUsagePercent { get; private set; } = 0;
     public readonly object LockObject = new(); // Korrekt namn för låset
@@ -445,7 +449,7 @@ public sealed class AmosGraphics
     public int CursorY { get; set; } = 0;
     public int TextRows { get; private set; } = 30; // Anpassa efter fontstorlek
     public int TextCols { get; private set; } = 80;
-    public int CharWidth { get; private set; } = 8;  // T.ex. 8x16 font
+    public int CharWidth { get; private set; } = 8; // T.ex. 8x16 font
     public int CharHeight { get; private set; } = 16;
     public string Style { get; private set; } = "Normal";
     private string font = "Courier New";
@@ -453,16 +457,16 @@ public sealed class AmosGraphics
     public float Alpha = 255f;
 
     public float FadeTarget = -1f;
-    public float FadeStep   = 0f;
+    public float FadeStep = 0f;
 
     string RasterShaderCode = Shader.RasterShaderCode;
-    
+
     public void ClearFrames()
     {
         ActiveFrame.Clear();
         InactiveFrame.Clear();
     }
-    
+
     // Sätt font-storlek (anropa i början)
     public void ConfigureText(int w, int h, string text)
     {
@@ -538,16 +542,16 @@ public sealed class AmosGraphics
         Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
         {
             EnsureScreen();
-            
+
             bool isItalic = Style?.Contains("Italic", StringComparison.OrdinalIgnoreCase) == true;
-            bool isBold   = Style?.Contains("Bold", StringComparison.OrdinalIgnoreCase) == true;
+            bool isBold = Style?.Contains("Bold", StringComparison.OrdinalIgnoreCase) == true;
 
             var fontStyle = isItalic ? FontStyle.Italic : FontStyle.Normal;
             var fontWeight = isBold ? FontWeight.Bold : FontWeight.Normal;
 
             var typeface = new Typeface(font, fontStyle, fontWeight);
 
-            
+
             // Skapa en bitmap som rymmer hela texten
             var ps = new PixelSize(s.Length * currentW, currentH);
             if (ps.Width == 0 || ps.Height == 0) return;
@@ -557,9 +561,9 @@ public sealed class AmosGraphics
             {
                 // Se till att RTB är tömd
                 ctx.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ps.Width, ps.Height));
-                        
+
                 // Rita varje tecken i sin exakta "box"
-                for(int i=0; i<s.Length; i++)
+                for (int i = 0; i < s.Length; i++)
                 {
                     string charStr = s[i].ToString();
                     var ft = new FormattedText(
@@ -567,8 +571,8 @@ public sealed class AmosGraphics
                         CultureInfo.CurrentCulture,
                         FlowDirection.LeftToRight,
                         typeface,
-                        currentH, 
-                        new SolidColorBrush(currentInk) 
+                        currentH,
+                        new SolidColorBrush(currentInk)
                     );
 
                     // Tvinga positionen: i * CharWidth
@@ -598,21 +602,21 @@ public sealed class AmosGraphics
                             int ty = py + r;
                             if (ty < 0 || ty >= Height) continue;
                             var dr = dp + ty * dst.RowBytes;
-                                
+
                             for (int c = 0; c < ps.Width; c++)
                             {
                                 int tx = px + c;
                                 if (tx < 0 || tx >= Width) continue;
-                                
+
                                 int si = (r * ps.Width + c) * 4;
                                 int di = tx * 4;
-                                
+
                                 byte alpha = b[si + 3];
                                 if (alpha > 0)
                                 {
-                                    dr[di + 0] = b[si + 2]; // B
-                                    dr[di + 1] = b[si + 1]; // G
-                                    dr[di + 2] = b[si + 0]; // R
+                                    dr[di + 0] = b[si + 0]; // B -> B (ingen konvertering!)
+                                    dr[di + 1] = b[si + 1]; // G -> G
+                                    dr[di + 2] = b[si + 2]; // R -> R
                                     dr[di + 3] = 255;       // A
                                 }
                             }
@@ -620,7 +624,7 @@ public sealed class AmosGraphics
                     }
             }
         }, Avalonia.Threading.DispatcherPriority.Render).Wait(); // Vänta på att ritningen är klar
-            
+
         // Flytta cursorn framåt
         CursorX += s.Length;
     }
@@ -673,26 +677,26 @@ public sealed class AmosGraphics
                 byte* ptr = (byte*)fb.Address;
                 int rowBytes = fb.RowBytes;
                 int totalHeight = bmp.PixelSize.Height;
-                    
+
                 // 1. Flytta minnet uppåt
                 // Destination: start (rad 0)
                 // Källa: rad 'pixels'
                 // Antal bytes: (totalHeight - pixels) * rowBytes
                 int bytesToMove = (totalHeight - pixels) * rowBytes;
-                    
+
                 if (bytesToMove > 0)
                 {
                     Buffer.MemoryCopy(
-                        ptr + pixels * rowBytes,      // Source
-                        ptr,                       // Dest
-                        bytesToMove,                        // DestSize
-                        bytesToMove                         // SourceSize
+                        ptr + pixels * rowBytes, // Source
+                        ptr, // Dest
+                        bytesToMove, // DestSize
+                        bytesToMove // SourceSize
                     );
                 }
 
                 // 2. Rensa botten-remsan med PAPER-färgen (eller svart/transparent)
                 Color clearCol = PaperColor; // Eller Colors.Transparent om du vill
-                    
+
                 byte a = clearCol.A;
                 byte r = (byte)(clearCol.R * a / 255);
                 byte g = (byte)(clearCol.G * a / 255);
@@ -713,7 +717,7 @@ public sealed class AmosGraphics
             }
         }
     }
-    
+
     internal sealed class Rainbow
     {
         public int PaletteIndex; // I en modern motor använder vi detta som ett ID eller färg-filter
@@ -721,11 +725,12 @@ public sealed class AmosGraphics
         public int Height;
         public List<Color> Colors { get; } = new();
     }
+
     private readonly Dictionary<int, Rainbow> _rainbows = new();
     internal IEnumerable<Rainbow> GetRainbows() => _rainbows.Values;
-    
+
     public List<WriteableBitmap> GetTileBitmaps() => _tiles;
-    
+
     internal sealed class Font
     {
         public List<WriteableBitmap> CharBitmaps { get; } = new();
@@ -738,8 +743,9 @@ public sealed class AmosGraphics
         public double BaseZoomY { get; set; } = 1.0;
         public bool BaseZoomInitialized;
         public string CharMap { get; set; } = "";
+        public int Layer { get; set; } = -1; // -1 = alla lager
     }
-    
+
     // NY: Delad bildbank (som _bobImages men med stöd för frames)
     public sealed class ImageBankEntry
     {
@@ -749,7 +755,7 @@ public sealed class AmosGraphics
     }
 
     private readonly Dictionary<int, ImageBankEntry> _imageBank = new();
-    
+
     public void LoadImageBank(int id, string fileName)
     {
         try
@@ -763,13 +769,20 @@ public sealed class AmosGraphics
             using (var fb = bmp.Lock())
             {
                 b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
-                unsafe { FixupImageColors(fb.Address.ToPointer(), w * h); }
+                unsafe
+                {
+                    FixupImageColors(fb.Address.ToPointer(), w * h);
+                }
             }
+
             entry.Frames.Add(bmp);
-        
+
             lock (LockObject) _imageBank[id] = entry;
         }
-        catch (Exception ex) { OnError?.Invoke($"[IMAGE LOAD] {ex.Message}"); }
+        catch (Exception ex)
+        {
+            OnError?.Invoke($"[IMAGE LOAD] {ex.Message}");
+        }
     }
 
     public void LoadImageBankSheet(int id, string fileName, int frameW, int frameH, int count)
@@ -793,16 +806,23 @@ public sealed class AmosGraphics
                 {
                     b.CopyPixels(new PixelRect(col * frameW, row * frameH, frameW, frameH),
                         fb.Address, fb.RowBytes * frameH, fb.RowBytes);
-                    unsafe { FixupImageColors(fb.Address.ToPointer(), frameW * frameH); }
+                    unsafe
+                    {
+                        FixupImageColors(fb.Address.ToPointer(), frameW * frameH);
+                    }
                 }
+
                 entry.Frames.Add(frame);
             }
 
             lock (LockObject) _imageBank[id] = entry;
         }
-        catch (Exception ex) { OnError?.Invoke($"[IMAGE LOAD SHEET] {ex.Message}"); }
+        catch (Exception ex)
+        {
+            OnError?.Invoke($"[IMAGE LOAD SHEET] {ex.Message}");
+        }
     }
-    
+
     private class RasterBarAllocation
     {
         public int BasicBarId { get; set; }
@@ -811,15 +831,36 @@ public sealed class AmosGraphics
         public float StartY { get; set; }
         public float TotalHeight { get; set; }
         public List<Color> Colors { get; set; } = new();
-        public bool Wrap { get; set; } = false; 
+        public bool Wrap { get; set; } = false;
     }
 
-    private readonly Dictionary<int, RasterBarAllocation> _rasterBars = new();
-    private int _totalShaderSlotsUsed = 1; // Slot 0 är reserverad för bakgrund
-    
+    private readonly Dictionary<int, Dictionary<int, RasterBarAllocation>> _rasterBars = new();
+    private readonly Dictionary<int, int> _totalShaderSlotsUsed = new();
+
     private const int MAX_RASTER_SLOTS = 50;
-    private const int WRAP_OFFSET = 25; // Wrap-kopior börjar på slot 25
-    
+    private const int WRAP_OFFSET = 25;
+
+    private Dictionary<int, RasterBarAllocation> GetLayerBars(int layerIdx)
+    {
+        if (!_rasterBars.TryGetValue(layerIdx, out var bars))
+        {
+            bars = new Dictionary<int, RasterBarAllocation>();
+            _rasterBars[layerIdx] = bars;
+        }
+
+        return bars;
+    }
+
+    private int GetLayerSlotsUsed(int layerIdx)
+    {
+        return _totalShaderSlotsUsed.TryGetValue(layerIdx, out var n) ? n : 1;
+    }
+
+    private void SetLayerSlotsUsed(int layerIdx, int value)
+    {
+        _totalShaderSlotsUsed[layerIdx] = value;
+    }
+
     public void SetRasterBar(int layerIdx, int basicBarId, float x, float y, float height, string colorString)
     {
         if (basicBarId < 1 || basicBarId > 100)
@@ -828,7 +869,9 @@ public sealed class AmosGraphics
             return;
         }
 
-        // Parse färger
+        var bars = GetLayerBars(layerIdx);
+        int slotsUsed = GetLayerSlotsUsed(layerIdx);
+
         var colorNames = colorString.Split(',')
             .Select(c => c.Trim())
             .Where(c => !string.IsNullOrEmpty(c))
@@ -860,33 +903,27 @@ public sealed class AmosGraphics
             }
         }
 
-        // Beräkna hur många shader-slots vi behöver
         int neededSlots = Math.Max(1, colors.Count - 1);
-    
-        // Om baren redan finns, frigör dess gamla slots
-        if (_rasterBars.TryGetValue(basicBarId, out var existing))
+
+        RasterBarAllocation? existing = null;
+        if (bars.TryGetValue(basicBarId, out existing))
         {
-            _totalShaderSlotsUsed -= existing.ShaderSlotCount;
+            slotsUsed -= existing.ShaderSlotCount;
             ClearBarShaderSlots(layerIdx, existing);
         }
 
-        // Kolla om vi har plats
-        if (_totalShaderSlotsUsed + neededSlots > WRAP_OFFSET)
+        if (slotsUsed + neededSlots > WRAP_OFFSET)
         {
-            int available = WRAP_OFFSET - _totalShaderSlotsUsed;
+            int available = WRAP_OFFSET - slotsUsed;
             OnError?.Invoke($"[RASTER] Not enough shader slots! Need {neededSlots}, only {available} available. " +
-                            $"(Total used: {_totalShaderSlotsUsed}/20)");
-        
-            // Återställ om vi hade en befintlig bar
+                            $"(Total used: {slotsUsed}/25)");
             if (existing != null)
-                _totalShaderSlotsUsed += existing.ShaderSlotCount;
-        
+                SetLayerSlotsUsed(layerIdx, slotsUsed + existing.ShaderSlotCount);
             return;
         }
 
-        // Allokera shader-slots
-        int firstSlot = _totalShaderSlotsUsed;
-        _totalShaderSlotsUsed += neededSlots;
+        int firstSlot = slotsUsed;
+        SetLayerSlotsUsed(layerIdx, slotsUsed + neededSlots);
 
         var allocation = new RasterBarAllocation
         {
@@ -898,13 +935,12 @@ public sealed class AmosGraphics
             Colors = colors
         };
 
-        _rasterBars[basicBarId] = allocation;
-
-        // Applicera till shadern
+        bars[basicBarId] = allocation;
         ApplyRasterBarToShader(layerIdx, allocation);
     }
-    
-    public void SetRasterBarWrapped(int layerIdx, int basicBarId, float x, float y, float height, string colorString, bool wrap = true)
+
+    public void SetRasterBarWrapped(int layerIdx, int basicBarId, float x, float y,
+        float height, string colorString, bool wrap = true)
     {
         if (basicBarId < 1 || basicBarId > 100)
         {
@@ -912,7 +948,9 @@ public sealed class AmosGraphics
             return;
         }
 
-        // Parse färger
+        var bars = GetLayerBars(layerIdx);
+        int slotsUsed = GetLayerSlotsUsed(layerIdx);
+
         var colorNames = colorString.Split(',')
             .Select(c => c.Trim())
             .Where(c => !string.IsNullOrEmpty(c))
@@ -944,33 +982,27 @@ public sealed class AmosGraphics
             }
         }
 
-        // Beräkna hur många shader-slots vi behöver
         int neededSlots = Math.Max(1, colors.Count - 1);
-    
-        // Om baren redan finns, frigör dess gamla slots
-        if (_rasterBars.TryGetValue(basicBarId, out var existing))
+
+        RasterBarAllocation? existing = null;
+        if (bars.TryGetValue(basicBarId, out existing))
         {
-            _totalShaderSlotsUsed -= existing.ShaderSlotCount;
+            slotsUsed -= existing.ShaderSlotCount;
             ClearBarShaderSlots(layerIdx, existing);
         }
 
-        // Kolla om vi har plats
-        if (_totalShaderSlotsUsed + neededSlots > 20)
+        if (slotsUsed + neededSlots > WRAP_OFFSET)
         {
-            int available = 20 - _totalShaderSlotsUsed;
+            int available = WRAP_OFFSET - slotsUsed;
             OnError?.Invoke($"[RASTER] Not enough shader slots! Need {neededSlots}, only {available} available. " +
-                            $"(Total used: {_totalShaderSlotsUsed}/20)");
-        
-            // Återställ om vi hade en befintlig bar
+                            $"(Total used: {slotsUsed}/25)");
             if (existing != null)
-                _totalShaderSlotsUsed += existing.ShaderSlotCount;
-        
+                SetLayerSlotsUsed(layerIdx, slotsUsed + existing.ShaderSlotCount);
             return;
         }
 
-        // Allokera shader-slots
-        int firstSlot = _totalShaderSlotsUsed;
-        _totalShaderSlotsUsed += neededSlots;
+        int firstSlot = slotsUsed;
+        SetLayerSlotsUsed(layerIdx, slotsUsed + neededSlots);
 
         var allocation = new RasterBarAllocation
         {
@@ -979,153 +1011,120 @@ public sealed class AmosGraphics
             ShaderSlotCount = neededSlots,
             StartY = y,
             TotalHeight = height,
-            Colors = colors
+            Colors = colors,
+            Wrap = wrap
         };
 
-        _rasterBars[basicBarId] = allocation;
-
-        // Applicera till shadern
+        bars[basicBarId] = allocation;
         ApplyRasterBarToShader(layerIdx, allocation);
+
         if (wrap)
         {
-            // Om baren går utanför skärmen, duplicera den på andra sidan
             if (y < 0)
-            {
                 SetRasterBar(layerIdx, basicBarId + 1000, x, y + Height, height, colorString);
-            }
             else if (y + height > Height)
-            {
                 SetRasterBar(layerIdx, basicBarId + 1000, x, y - Height, height, colorString);
-            }
         }
     }
 
     public void SetRasterWrap(int layerIdx, int basicBarId, bool enabled)
     {
-        if (!_rasterBars.TryGetValue(basicBarId, out var bar))
+        var bars = GetLayerBars(layerIdx);
+        if (!bars.TryGetValue(basicBarId, out var bar))
         {
             OnError?.Invoke($"[RASTER WRAP] Bar {basicBarId} does not exist!");
             return;
         }
 
         bar.Wrap = enabled;
-    
-        // Uppdatera shadern direkt
         ApplyRasterBarToShader(layerIdx, bar);
     }
-    
-    
-    /// <summary>
-    /// Applicerar en BASIC bar till shadern (delar upp i segment vid behov)
-    /// </summary>
+
     private void ApplyRasterBarToShader(int layerIdx, RasterBarAllocation bar)
     {
         if (bar.Colors.Count == 1)
         {
-            // En färg = solid bar
-            int slot = bar.FirstShaderSlot;
-            SetShaderParams(layerIdx, slot, bar.StartY, bar.TotalHeight);
-            SetShaderColors(layerIdx, slot, bar.Colors[0], bar.Colors[0]);
+            SetShaderParams(layerIdx, bar.FirstShaderSlot, bar.StartY, bar.TotalHeight);
+            SetShaderColors(layerIdx, bar.FirstShaderSlot, bar.Colors[0], bar.Colors[0]);
         }
         else
         {
-            // Flera färger = dela upp i segment
             int segments = bar.Colors.Count - 1;
             float segmentHeight = bar.TotalHeight / segments;
-
             for (int i = 0; i < segments; i++)
             {
                 int slot = bar.FirstShaderSlot + i;
-                float y = bar.StartY + (i * segmentHeight);
-            
-                // ✅ Om wrap är aktivt, låt shadern hantera wrapping genom att inte clampa Y
-                // (Shadern använder mod-operator för att wrappa automatiskt)
-                SetShaderParams(layerIdx, slot, y, segmentHeight);
+                float segY = bar.StartY + (i * segmentHeight);
+                SetShaderParams(layerIdx, slot, segY, segmentHeight);
                 SetShaderColors(layerIdx, slot, bar.Colors[i], bar.Colors[i + 1]);
             }
         }
     }
 
-    /// <summary>
-    /// Uppdaterar Y-positionen för en befintlig bar (för animationer)
-    /// </summary>
-public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
-{
-    if (!_rasterBars.TryGetValue(basicBarId, out var bar))
+    public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
     {
-        OnError?.Invoke($"[RASTER] Bar {basicBarId} does not exist!");
-        return;
-    }
-
-    bar.StartY = newY;
-    
-    // ✅ Applicera huvudbaren
-    ApplyRasterBarToShader(layerIdx, bar);
-    
-    // ✅ Om wrap är aktivt, rita även en wrap-kopia
-    if (bar.Wrap)
-    {
-        // Beräkna var wrap-kopian ska vara
-        float wrappedY = newY > 0 ? newY - Height : newY + Height;
-
-        // ✅ VIKTIGT: Applicera på BÅDA frames i double buffer-läge
-        if (bar.Colors.Count == 1)
+        var bars = GetLayerBars(layerIdx);
+        if (!bars.TryGetValue(basicBarId, out var bar))
         {
-            int wrapSlot = bar.FirstShaderSlot + WRAP_OFFSET;
-            
-            // ✅ Använd SetShaderParams/SetShaderColors istället för att sätta direkt
-            SetShaderParams(layerIdx, wrapSlot, wrappedY, bar.TotalHeight);
-            SetShaderColors(layerIdx, wrapSlot, bar.Colors[0], bar.Colors[0]);
+            OnError?.Invoke($"[RASTER] Bar {basicBarId} does not exist!");
+            return;
+        }
+
+        bar.StartY = newY;
+        ApplyRasterBarToShader(layerIdx, bar);
+
+        if (bar.Wrap)
+        {
+            float wrappedY = newY > 0 ? newY - Height : newY + Height;
+            if (bar.Colors.Count == 1)
+            {
+                int wrapSlot = bar.FirstShaderSlot + WRAP_OFFSET;
+                SetShaderParams(layerIdx, wrapSlot, wrappedY, bar.TotalHeight);
+                SetShaderColors(layerIdx, wrapSlot, bar.Colors[0], bar.Colors[0]);
+            }
+            else
+            {
+                int segments = bar.Colors.Count - 1;
+                float segmentHeight = bar.TotalHeight / segments;
+                for (int i = 0; i < segments; i++)
+                {
+                    int wrapSlot = bar.FirstShaderSlot + i + WRAP_OFFSET;
+                    float segY = wrappedY + (i * segmentHeight);
+                    SetShaderParams(layerIdx, wrapSlot, segY, segmentHeight);
+                    SetShaderColors(layerIdx, wrapSlot, bar.Colors[i], bar.Colors[i + 1]);
+                }
+            }
         }
         else
         {
-            int segments = bar.Colors.Count - 1;
-            float segmentHeight = bar.TotalHeight / segments;
-
-            for (int i = 0; i < segments; i++)
+            lock (LockObject)
             {
-                int wrapSlot = bar.FirstShaderSlot + i + WRAP_OFFSET;
-                float y = wrappedY + (i * segmentHeight);
-                
-                // ✅ Använd SetShaderParams/SetShaderColors
-                SetShaderParams(layerIdx, wrapSlot, y, segmentHeight);
-                SetShaderColors(layerIdx, wrapSlot, bar.Colors[i], bar.Colors[i + 1]);
-            }
-        }
-    }
-    else
-    {
-        // ✅ NYTT: Om wrap stängdes av, rensa wrap-slots
-        lock (LockObject)
-        {
-            int wrapStart = bar.FirstShaderSlot + WRAP_OFFSET;
-            int wrapEnd = wrapStart + bar.ShaderSlotCount;
-            
-            for (int slot = wrapStart; slot < wrapEnd; slot++)
-            {
-                if (_doubleBufferMode)
+                int wrapStart = bar.FirstShaderSlot + WRAP_OFFSET;
+                int wrapEnd = wrapStart + bar.ShaderSlotCount;
+                for (int slot = wrapStart; slot < wrapEnd; slot++)
                 {
-                    if (layerIdx >= 0 && layerIdx < _frameA.Count)
-                        _frameA[layerIdx].ShaderHeights[slot] = 0;
-                    if (layerIdx >= 0 && layerIdx < _frameB.Count)
-                        _frameB[layerIdx].ShaderHeights[slot] = 0;
-                }
-                else
-                {
-                    if (layerIdx >= 0 && layerIdx < DrawingFrame.Count)
-                        DrawingFrame[layerIdx].ShaderHeights[slot] = 0;
+                    if (_doubleBufferMode)
+                    {
+                        if (layerIdx >= 0 && layerIdx < _frameA.Count)
+                            _frameA[layerIdx].ShaderHeights[slot] = 0;
+                        if (layerIdx >= 0 && layerIdx < _frameB.Count)
+                            _frameB[layerIdx].ShaderHeights[slot] = 0;
+                    }
+                    else
+                    {
+                        if (layerIdx >= 0 && layerIdx < DrawingFrame.Count)
+                            DrawingFrame[layerIdx].ShaderHeights[slot] = 0;
+                    }
                 }
             }
         }
     }
-}
 
     public void SetRasterGfxMode(int layerIdx, bool onGraphics)
     {
         lock (LockObject)
         {
             float modeValue = onGraphics ? 1f : 0f;
-        
             if (_doubleBufferMode)
             {
                 if (layerIdx >= 0 && layerIdx < _frameA.Count)
@@ -1133,7 +1132,7 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
                     var v = _frameA[layerIdx].ShaderValues[0];
                     _frameA[layerIdx].ShaderValues[0] = new Vector4(v.X, v.Y, modeValue, v.W);
                 }
-            
+
                 if (layerIdx >= 0 && layerIdx < _frameB.Count)
                 {
                     var v = _frameB[layerIdx].ShaderValues[0];
@@ -1152,11 +1151,6 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
         }
     }
 
-    /// <summary>
-    /// Aktiverar eller stänger av shader-rendering för ett lager
-    /// Syntax: RASTER MODE layerIdx, 1  (aktivera shader)
-    ///         RASTER MODE layerIdx, 0  (stäng av shader)
-    /// </summary>
     public void SetRasterMode(int layerIdx, bool enabled)
     {
         lock (LockObject)
@@ -1165,7 +1159,6 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             {
                 if (layerIdx >= 0 && layerIdx < _frameA.Count)
                     _frameA[layerIdx].SkSlCode = enabled ? RasterShaderCode : null;
-            
                 if (layerIdx >= 0 && layerIdx < _frameB.Count)
                     _frameB[layerIdx].SkSlCode = enabled ? RasterShaderCode : null;
             }
@@ -1176,38 +1169,43 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
                     frame[layerIdx].SkSlCode = enabled ? RasterShaderCode : null;
             }
         }
+
+        SetRasterBar(layerIdx, 1, 0, 0, 480, "Black,Black");
     }
-    
-    /// <summary>
-    /// Tar bort en BASIC bar och frigör dess shader-slots
-    /// </summary>
+
     public void DeleteRasterBar(int layerIdx, int basicBarId)
     {
-        if (!_rasterBars.TryGetValue(basicBarId, out var bar))
-            return;
+        var bars = GetLayerBars(layerIdx);
+        if (!bars.TryGetValue(basicBarId, out var bar)) return;
 
         ClearBarShaderSlots(layerIdx, bar);
-        _rasterBars.Remove(basicBarId);
-        _totalShaderSlotsUsed -= bar.ShaderSlotCount;
+        bars.Remove(basicBarId);
+        SetLayerSlotsUsed(layerIdx, GetLayerSlotsUsed(layerIdx) - bar.ShaderSlotCount);
     }
 
-    /// <summary>
-    /// Rensar alla raster bars
-    /// </summary>
-    public void ClearAllRasterBars(int layerIdx)
+    public void ClearAllRasterBars(int layerIdx = -1)
     {
-        foreach (var bar in _rasterBars.Values)
+        if (layerIdx == -1)
         {
-            ClearBarShaderSlots(layerIdx, bar);
+            foreach (var kvp in _rasterBars)
+            foreach (var bar in kvp.Value.Values)
+                ClearBarShaderSlots(kvp.Key, bar);
+            _rasterBars.Clear();
+            _totalShaderSlotsUsed.Clear();
         }
-    
-        _rasterBars.Clear();
-        _totalShaderSlotsUsed = 1; // Reset (slot 0 är reserverad)
+        else
+        {
+            if (_rasterBars.TryGetValue(layerIdx, out var bars))
+            {
+                foreach (var bar in bars.Values)
+                    ClearBarShaderSlots(layerIdx, bar);
+                bars.Clear();
+            }
+
+            _totalShaderSlotsUsed.Remove(layerIdx);
+        }
     }
 
-    /// <summary>
-    /// Nollställer shader-slots för en bar
-    /// </summary>
     private void ClearBarShaderSlots(int layerIdx, RasterBarAllocation bar)
     {
         lock (LockObject)
@@ -1215,7 +1213,6 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             for (int i = 0; i < bar.ShaderSlotCount; i++)
             {
                 int slot = bar.FirstShaderSlot + i;
-            
                 if (_doubleBufferMode)
                 {
                     if (layerIdx >= 0 && layerIdx < _frameA.Count)
@@ -1232,23 +1229,28 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
         }
     }
 
-    /// <summary>
-    /// Debug-info: visar shader-slot-användning
-    /// </summary>
     public string GetRasterBarDebugInfo()
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Shader Slots Used: {_totalShaderSlotsUsed}/25");
-        sb.AppendLine($"Active BASIC Bars: {_rasterBars.Count}");
-    
-        foreach (var bar in _rasterBars.Values.OrderBy(b => b.BasicBarId))
+        foreach (var kvp in _rasterBars)
         {
-            sb.AppendLine($"  Bar {bar.BasicBarId}: Slots {bar.FirstShaderSlot}-{bar.FirstShaderSlot + bar.ShaderSlotCount - 1} " +
-                          $"({bar.Colors.Count} colors)");
+            int idx = kvp.Key;
+            var bars = kvp.Value;
+            int slotsUsed = GetLayerSlotsUsed(idx);
+            sb.AppendLine($"Layer {idx}: Slots Used: {slotsUsed}/25, Bars: {bars.Count}");
+            foreach (var bar in bars.Values.OrderBy(b => b.BasicBarId))
+            {
+                sb.AppendLine($"  Bar {bar.BasicBarId}: Slots {bar.FirstShaderSlot}-" +
+                              $"{bar.FirstShaderSlot + bar.ShaderSlotCount - 1} " +
+                              $"({bar.Colors.Count} colors)");
+            }
         }
-    
+
         return sb.ToString();
     }
+
+
+
     // Class for BOB
     public sealed class Bob
     {
@@ -1261,22 +1263,25 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
         public int HandleY { get; set; }
         public int ImageIndex { get; set; }
         public bool Visible { get; set; } = true;
+        public int Layer { get; set; } = -1; // -1 = alla lager
     }
-    
+
     internal Font? GetFont(int id) => _fonts.GetValueOrDefault(id);
+    public int Layer { get; set; } = -1; // -1 = alla lager
+
     internal WriteableBitmap? GetFontChar(Font f, char c)
     {
         string map = string.IsNullOrEmpty(f.CharMap) ? "" : f.CharMap;
         int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
         return (charIdx >= 0 && charIdx < f.CharBitmaps.Count) ? f.CharBitmaps[charIdx] : null;
     }
-    
-    
+
+
     public sealed class Sprite
     {
-        public int ImageBankId { get; set; } = -1;   // -1 = använder egna Frames
+        public int ImageBankId { get; set; } = -1; // -1 = använder egna Frames
         public HashSet<string> Groups { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        
+
         public Sprite(int width, int height, WriteableBitmap firstFrame)
         {
             Width = width;
@@ -1286,7 +1291,7 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             TransparentKey = Colors.Magenta;
             Visible = false;
         }
-        
+
         public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
         {
             if (ImageBankId >= 0 && imageBank.TryGetValue(ImageBankId, out var entry))
@@ -1294,9 +1299,10 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
                 int fi = Math.Clamp(CurrentFrame, 0, entry.Frames.Count - 1);
                 return entry.Frames[fi];
             }
+
             return Frames[Math.Clamp(CurrentFrame, 0, Frames.Count - 1)];
         }
-        
+
         public int Width { get; }
         public int Height { get; }
         public List<WriteableBitmap> Frames { get; } = new();
@@ -1312,24 +1318,25 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
         public double ZoomY { get; set; } = 1.0;
         public Color Ink { get; set; }
         public Color TransparentKey { get; set; }
+        public int Layer { get; set; } = -1; // -1 = alla lager
 
         // --- Alpha & Fade ---
-        public float Alpha { get; set; } = 1.0f;      // 0.0–1.0 (1.0 = helt ogenomskinlig)
-        public float FadeTarget { get; set; } = -1f;   // -1 = ingen aktiv fade
-        public float FadeStep { get; set; } = 0f;      // delta per frame
+        public float Alpha { get; set; } = 1.0f; // 0.0–1.0 (1.0 = helt ogenomskinlig)
+        public float FadeTarget { get; set; } = -1f; // -1 = ingen aktiv fade
+        public float FadeStep { get; set; } = 0f; // delta per frame
     }
-    
+
     public void SpriteImage(int spriteId, int imageBankId, int frameId = 0)
     {
         var s = GetSprite(spriteId);
         s.ImageBankId = imageBankId;
-        s.CurrentFrame =  frameId;
+        s.CurrentFrame = frameId;
     }
-    
+
     private readonly Dictionary<int, Sprite> _sprites = new();
     private readonly Dictionary<string, HashSet<int>> _groups = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, Font> _fonts = new();
-    
+
     public sealed class QueuedFontText
     {
         public int FontId { get; set; }
@@ -1339,8 +1346,11 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
         public double Angle { get; set; }
         public double ZoomX { get; set; }
         public double ZoomY { get; set; }
+        public int Layer { get; set; } = -1; // -1 = alla lager
     }
-    public readonly List<QueuedFontText> _fontTexts = new(); 
+
+    public readonly List<QueuedFontText> _fontTexts = new();
+
     public IEnumerable<QueuedFontText> GetQueuedTexts()
     {
         lock (LockObject)
@@ -1348,7 +1358,7 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             return _fontTexts.ToList(); // ✅ Returnera kopia
         }
     }
-    
+
     // NYTT: Metoder för att hämta data till rendern
     public List<int> GetBobIds()
     {
@@ -1357,10 +1367,11 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             return _bobs.Keys.OrderBy(k => k).ToList();
         }
     }
+
     public Bob? GetBob(int id) => _bobs.GetValueOrDefault(id);
     public WriteableBitmap? GetBobImage(int imgId) => _bobImages.GetValueOrDefault(imgId);
-    
-        
+
+
     // ✅ NYTT: Metoder för att rensa allt
     public void ClearAllResources()
     {
@@ -1381,7 +1392,7 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             ClearAllRasterBars(0);
         }
     }
-    
+
     public void ClearAllSprites()
     {
         lock (LockObject)
@@ -1407,7 +1418,7 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             _imageBank.Clear();
         }
     }
-    
+
     public void ClearAllTiles()
     {
         lock (LockObject)
@@ -1428,7 +1439,7 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             _map = new int[0, 0];
         }
     }
-    
+
     public void ClearAllFonts()
     {
         lock (LockObject)
@@ -1437,7 +1448,7 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             _fontTexts.Clear();
         }
     }
-    
+
     private readonly List<WriteableBitmap> _tiles = new();
     private int _tilesInWidth = 0;
     private int[,] _map = new int[0, 0];
@@ -1452,21 +1463,21 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
     public WriteableBitmap GetActiveScreen()
     {
         EnsureScreen();
-        
+
         // Vi säkerställer att _currentScreen pekar på ett existerande lager
-        int index = (_currentScreen >= 0 && _currentScreen < DrawingFrame.Count) 
-            ? _currentScreen 
+        int index = (_currentScreen >= 0 && _currentScreen < DrawingFrame.Count)
+            ? _currentScreen
             : 0;
 
         // Info.txt: "Alla ritaroperationer sker alltid på den inaktiva framen"
         return DrawingFrame[index].Bitmap;
     }
-    
+
     public int GetActiveScreenNumber()
     {
         return _currentScreen;
     }
-    
+
     public void SetScreenVisible(int layerIdx, bool visible)
     {
         lock (LockObject)
@@ -1476,10 +1487,11 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             if (layerIdx >= 0 && layerIdx < _frameB.Count) _frameB[layerIdx].Visible = visible;
         }
     }
-    
+
     public void SetShadervalues(int layerIdx, int slot, float nr, float value)
     {
-        lock (LockObject) {
+        lock (LockObject)
+        {
             // VIKTIGT: Sätt på BÅDA frames i double buffer-läge
             if (_doubleBufferMode)
             {
@@ -1491,7 +1503,7 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
                         layerA.ShaderValues[slot] = new Vector4(nr, value, 0f, 0f);
                     layerA.SkSlCode = RasterShaderCode;
                 }
-            
+
                 if (layerIdx >= 0 && layerIdx < _frameB.Count)
                 {
                     var layerB = _frameB[layerIdx];
@@ -1514,172 +1526,180 @@ public void MoveRasterBar(int layerIdx, int basicBarId, float newY)
             }
         }
     }
-    
 
 
-public void SetShaderParams(int layerIdx, int slot, float y, float height)
-{
-    lock (LockObject) {
-        if (_doubleBufferMode)
-        {
-            if (layerIdx >= 0 && layerIdx < _frameA.Count)
-            {
-                var layerA = _frameA[layerIdx];
-                
-                // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
-                EnsureShaderArraySize(layerA);
-                
-                if (slot >= 0 && slot < layerA.ShaderParams.Length)
-                {
-                    layerA.ShaderParams[slot] = y;
-                    layerA.ShaderHeights[slot] = height;
-                }
-                if (string.IsNullOrEmpty(layerA.SkSlCode))
-                    layerA.SkSlCode = RasterShaderCode;
-            }
-    
-            if (layerIdx >= 0 && layerIdx < _frameB.Count)
-            {
-                var layerB = _frameB[layerIdx];
-                
-                // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
-                EnsureShaderArraySize(layerB);
-                
-                if (slot >= 0 && slot < layerB.ShaderParams.Length)
-                {
-                    layerB.ShaderParams[slot] = y;
-                    layerB.ShaderHeights[slot] = height;
-                }
-                if (string.IsNullOrEmpty(layerB.SkSlCode))
-                    layerB.SkSlCode = RasterShaderCode;
-            }
-        }
-        else
-        {
-            var frame = DrawingFrame;
-            if (layerIdx >= 0 && layerIdx < frame.Count)
-            {
-                var layer = frame[layerIdx];
-                
-                // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
-                EnsureShaderArraySize(layer);
-                
-                if (slot >= 0 && slot < layer.ShaderParams.Length)
-                {
-                    layer.ShaderParams[slot] = y;
-                    layer.ShaderHeights[slot] = height;
-                }
-                if (string.IsNullOrEmpty(layer.SkSlCode))
-                    layer.SkSlCode = RasterShaderCode;
-            }
-        }
-    }
-}
 
-public void SetShaderColors(int layerIdx, int slot, Color c1, Color c2)
-{
-    lock (LockObject) {
-        if (_doubleBufferMode)
+    public void SetShaderParams(int layerIdx, int slot, float y, float height)
+    {
+        lock (LockObject)
         {
-            if (layerIdx >= 0 && layerIdx < _frameA.Count)
+            if (_doubleBufferMode)
             {
-                var layerA = _frameA[layerIdx];
-                
-                // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
-                EnsureShaderArraySize(layerA);
-                
-                if (slot >= 0 && slot < layerA.ShaderColors.Length)
+                if (layerIdx >= 0 && layerIdx < _frameA.Count)
                 {
-                    layerA.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
-                    layerA.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
-            
-                    if (slot == 0 && layerA.ShaderHeights[0] <= 0)
-                        layerA.ShaderHeights[0] = (float)Height;
+                    var layerA = _frameA[layerIdx];
+
+                    // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
+                    EnsureShaderArraySize(layerA);
+
+                    if (slot >= 0 && slot < layerA.ShaderParams.Length)
+                    {
+                        layerA.ShaderParams[slot] = y;
+                        layerA.ShaderHeights[slot] = height;
+                    }
+
+                    if (string.IsNullOrEmpty(layerA.SkSlCode))
+                        layerA.SkSlCode = RasterShaderCode;
                 }
-                if (string.IsNullOrEmpty(layerA.SkSlCode))
-                    layerA.SkSlCode = RasterShaderCode;
+
+                if (layerIdx >= 0 && layerIdx < _frameB.Count)
+                {
+                    var layerB = _frameB[layerIdx];
+
+                    // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
+                    EnsureShaderArraySize(layerB);
+
+                    if (slot >= 0 && slot < layerB.ShaderParams.Length)
+                    {
+                        layerB.ShaderParams[slot] = y;
+                        layerB.ShaderHeights[slot] = height;
+                    }
+
+                    if (string.IsNullOrEmpty(layerB.SkSlCode))
+                        layerB.SkSlCode = RasterShaderCode;
+                }
             }
-    
-            if (layerIdx >= 0 && layerIdx < _frameB.Count)
+            else
             {
-                var layerB = _frameB[layerIdx];
-                
-                // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
-                EnsureShaderArraySize(layerB);
-                
-                if (slot >= 0 && slot < layerB.ShaderColors.Length)
+                var frame = DrawingFrame;
+                if (layerIdx >= 0 && layerIdx < frame.Count)
                 {
-                    layerB.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
-                    layerB.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
-            
-                    if (slot == 0 && layerB.ShaderHeights[0] <= 0)
-                        layerB.ShaderHeights[0] = (float)Height;
+                    var layer = frame[layerIdx];
+
+                    // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
+                    EnsureShaderArraySize(layer);
+
+                    if (slot >= 0 && slot < layer.ShaderParams.Length)
+                    {
+                        layer.ShaderParams[slot] = y;
+                        layer.ShaderHeights[slot] = height;
+                    }
+
+                    if (string.IsNullOrEmpty(layer.SkSlCode))
+                        layer.SkSlCode = RasterShaderCode;
                 }
-                if (string.IsNullOrEmpty(layerB.SkSlCode))
-                    layerB.SkSlCode = RasterShaderCode;
-            }
-        }
-        else
-        {
-            var frame = DrawingFrame;
-            if (layerIdx >= 0 && layerIdx < frame.Count)
-            {
-                var layer = frame[layerIdx];
-                
-                // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
-                EnsureShaderArraySize(layer);
-                
-                if (slot >= 0 && slot < layer.ShaderColors.Length)
-                {
-                    layer.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
-                    layer.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
-            
-                    if (slot == 0 && layer.ShaderHeights[0] <= 0)
-                        layer.ShaderHeights[0] = (float)Height;
-                }
-                if (string.IsNullOrEmpty(layer.SkSlCode))
-                    layer.SkSlCode = RasterShaderCode;
             }
         }
     }
-}
 
-/// <summary>
-/// ✅ HJÄLPMETOD: Uppgraderar gamla 22-slots arrayer till 50 slots
-/// </summary>
-private void EnsureShaderArraySize(GpuLayer layer)
-{
-    const int REQUIRED_SIZE = 50;
-    
-    if (layer.ShaderParams == null || layer.ShaderParams.Length < REQUIRED_SIZE)
+    public void SetShaderColors(int layerIdx, int slot, Color c1, Color c2)
     {
-        var oldParams = layer.ShaderParams ?? new float[0];
-        layer.ShaderParams = new float[REQUIRED_SIZE];
-        Array.Copy(oldParams, layer.ShaderParams, Math.Min(oldParams.Length, REQUIRED_SIZE));
+        lock (LockObject)
+        {
+            if (_doubleBufferMode)
+            {
+                if (layerIdx >= 0 && layerIdx < _frameA.Count)
+                {
+                    var layerA = _frameA[layerIdx];
+
+                    // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
+                    EnsureShaderArraySize(layerA);
+
+                    if (slot >= 0 && slot < layerA.ShaderColors.Length)
+                    {
+                        layerA.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
+                        layerA.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
+
+                        if (slot == 0 && layerA.ShaderHeights[0] <= 0)
+                            layerA.ShaderHeights[0] = (float)Height;
+                    }
+
+                    if (string.IsNullOrEmpty(layerA.SkSlCode))
+                        layerA.SkSlCode = RasterShaderCode;
+                }
+
+                if (layerIdx >= 0 && layerIdx < _frameB.Count)
+                {
+                    var layerB = _frameB[layerIdx];
+
+                    // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
+                    EnsureShaderArraySize(layerB);
+
+                    if (slot >= 0 && slot < layerB.ShaderColors.Length)
+                    {
+                        layerB.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
+                        layerB.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
+
+                        if (slot == 0 && layerB.ShaderHeights[0] <= 0)
+                            layerB.ShaderHeights[0] = (float)Height;
+                    }
+
+                    if (string.IsNullOrEmpty(layerB.SkSlCode))
+                        layerB.SkSlCode = RasterShaderCode;
+                }
+            }
+            else
+            {
+                var frame = DrawingFrame;
+                if (layerIdx >= 0 && layerIdx < frame.Count)
+                {
+                    var layer = frame[layerIdx];
+
+                    // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
+                    EnsureShaderArraySize(layer);
+
+                    if (slot >= 0 && slot < layer.ShaderColors.Length)
+                    {
+                        layer.ShaderColors[slot] = new SKColor(c1.R, c1.G, c1.B, 255);
+                        layer.ShaderColorsTo[slot] = new SKColor(c2.R, c2.G, c2.B, 255);
+
+                        if (slot == 0 && layer.ShaderHeights[0] <= 0)
+                            layer.ShaderHeights[0] = (float)Height;
+                    }
+
+                    if (string.IsNullOrEmpty(layer.SkSlCode))
+                        layer.SkSlCode = RasterShaderCode;
+                }
+            }
+        }
     }
-    
-    if (layer.ShaderHeights == null || layer.ShaderHeights.Length < REQUIRED_SIZE)
+
+    /// <summary>
+    /// ✅ HJÄLPMETOD: Uppgraderar gamla 22-slots arrayer till 50 slots
+    /// </summary>
+    private void EnsureShaderArraySize(GpuLayer layer)
     {
-        var oldHeights = layer.ShaderHeights ?? new float[0];
-        layer.ShaderHeights = new float[REQUIRED_SIZE];
-        Array.Copy(oldHeights, layer.ShaderHeights, Math.Min(oldHeights.Length, REQUIRED_SIZE));
+        const int REQUIRED_SIZE = 50;
+
+        if (layer.ShaderParams == null || layer.ShaderParams.Length < REQUIRED_SIZE)
+        {
+            var oldParams = layer.ShaderParams ?? new float[0];
+            layer.ShaderParams = new float[REQUIRED_SIZE];
+            Array.Copy(oldParams, layer.ShaderParams, Math.Min(oldParams.Length, REQUIRED_SIZE));
+        }
+
+        if (layer.ShaderHeights == null || layer.ShaderHeights.Length < REQUIRED_SIZE)
+        {
+            var oldHeights = layer.ShaderHeights ?? new float[0];
+            layer.ShaderHeights = new float[REQUIRED_SIZE];
+            Array.Copy(oldHeights, layer.ShaderHeights, Math.Min(oldHeights.Length, REQUIRED_SIZE));
+        }
+
+        if (layer.ShaderColors == null || layer.ShaderColors.Length < REQUIRED_SIZE)
+        {
+            var oldColors = layer.ShaderColors ?? new SKColor[0];
+            layer.ShaderColors = new SKColor[REQUIRED_SIZE];
+            Array.Copy(oldColors, layer.ShaderColors, Math.Min(oldColors.Length, REQUIRED_SIZE));
+        }
+
+        if (layer.ShaderColorsTo == null || layer.ShaderColorsTo.Length < REQUIRED_SIZE)
+        {
+            var oldColorsTo = layer.ShaderColorsTo ?? new SKColor[0];
+            layer.ShaderColorsTo = new SKColor[REQUIRED_SIZE];
+            Array.Copy(oldColorsTo, layer.ShaderColorsTo, Math.Min(oldColorsTo.Length, REQUIRED_SIZE));
+        }
     }
-    
-    if (layer.ShaderColors == null || layer.ShaderColors.Length < REQUIRED_SIZE)
-    {
-        var oldColors = layer.ShaderColors ?? new SKColor[0];
-        layer.ShaderColors = new SKColor[REQUIRED_SIZE];
-        Array.Copy(oldColors, layer.ShaderColors, Math.Min(oldColors.Length, REQUIRED_SIZE));
-    }
-    
-    if (layer.ShaderColorsTo == null || layer.ShaderColorsTo.Length < REQUIRED_SIZE)
-    {
-        var oldColorsTo = layer.ShaderColorsTo ?? new SKColor[0];
-        layer.ShaderColorsTo = new SKColor[REQUIRED_SIZE];
-        Array.Copy(oldColorsTo, layer.ShaderColorsTo, Math.Min(oldColorsTo.Length, REQUIRED_SIZE));
-    }
-}
-    
+
     // ---------------- Project Export/Import ----------------
 
     public sealed record ProjectFile(
@@ -1710,23 +1730,23 @@ private void EnsureShaderArraySize(GpuLayer layer)
     {
         // Spara endast koden i det nya formatet (Version 2)
         return new ProjectFile(
-            Version: 2,  // ✅ Öka versionen så vi kan skilja nya från gamla
+            Version: 2, // ✅ Öka versionen så vi kan skilja nya från gamla
             ProgramText: programText ?? "");
     }
 
     public void ImportProject(ProjectFile project)
     {
         if (project is null) return;
-    
+
         // ✅ Hantera både gamla (Version 1) och nya (Version 2) projekt
         if (project.Version == 1 && project.Sprites != null)
         {
             // GAMMALT FORMAT: Ladda in sprites och map-data
             int screenW = project.ScreenWidth ?? 640;
             int screenH = project.ScreenHeight ?? 480;
-        
+
             Screen(screenW, screenH);
-        
+
             // Återställ sprites från gammal data
             _sprites.Clear();
             foreach (var sf in project.Sprites)
@@ -1741,19 +1761,19 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 s.Visible = sf.Visible;
                 s.TransparentKey = Color.Parse(sf.TransparentKey);
                 s.Frames.Clear();
-            
+
                 foreach (var b64 in sf.FramesBase64)
                 {
                     var f = CreateEmptyBitmap(sf.Width, sf.Height);
                     var b = Convert.FromBase64String(b64);
-                    using (var fb = f.Lock()) 
+                    using (var fb = f.Lock())
                         System.Runtime.InteropServices.Marshal.Copy(b, 0, fb.Address, b.Length);
                     s.Frames.Add(f);
                 }
-            
+
                 _sprites[sf.Id] = s;
             }
-        
+
             // Återställ map-data om den finns
             if (project.MapWidth.HasValue && project.MapHeight.HasValue && project.MapData != null)
             {
@@ -1772,8 +1792,8 @@ private void EnsureShaderArraySize(GpuLayer layer)
             Screen(640, 480);
         }
     }
-    
-    
+
+
     public void BeginFrame()
     {
         _vblTimer.Restart();
@@ -1796,6 +1816,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
             rb = new Rainbow();
             _rainbows[num] = rb;
         }
+
         rb.PaletteIndex = paletteIdx;
         rb.Offset = offset;
         rb.Height = height;
@@ -1817,7 +1838,11 @@ private void EnsureShaderArraySize(GpuLayer layer)
         if (!_rainbows.TryGetValue(num, out var rb)) return;
 
         rb.Colors.Clear();
-        if (steps <= 1) { rb.Colors.Add(start); return; }
+        if (steps <= 1)
+        {
+            rb.Colors.Add(start);
+            return;
+        }
 
         for (int i = 0; i < steps; i++)
         {
@@ -1830,7 +1855,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
     }
 
     public void DelRainbow(int num) => _rainbows.Remove(num);
-    
+
     // ---------------- Screen & Core ----------------
 
     public void Screen(int w, int h)
@@ -1838,34 +1863,47 @@ private void EnsureShaderArraySize(GpuLayer layer)
         lock (LockObject)
         {
             _doubleBufferMode = false;
-            
+
             ClearAll(Colors.Transparent);
-            Width = w; Height = h;
-            _frameA.Clear(); _frameB.Clear();
-            
-            var lA = new GpuLayer { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0) }; //, SkSlCode = RasterShaderCode };
-            var lB = new GpuLayer { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0) }; //, SkSlCode = RasterShaderCode };
-            
-            for(int i=0; i<22; i++) { lA.ShaderHeights[i] = 0; lB.ShaderHeights[i] = 0; }
-            
+            Width = w;
+            Height = h;
+            _frameA.Clear();
+            _frameB.Clear();
+
+            var lA = new GpuLayer
+                { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0), SkSlCode = RasterShaderCode };
+            var lB = new GpuLayer
+                { Bitmap = CreateEmptyBitmap(w, h), Offset = new Point(0, 0), SkSlCode = RasterShaderCode };
+
+            for (int i = 0; i < 22; i++)
+            {
+                lA.ShaderHeights[i] = 0;
+                lB.ShaderHeights[i] = 0;
+            }
+
             // Tvinga fram korrekt storlek på alla arrayer
-            lA.ShaderParams = new float[24]; lA.ShaderHeights = new float[24];
-            lA.ShaderColors = new SKColor[24]; lA.ShaderColorsTo = new SKColor[24];
-            lB.ShaderParams = new float[24]; lB.ShaderHeights = new float[24];
-            lB.ShaderColors = new SKColor[24]; lB.ShaderColorsTo = new SKColor[24];
-            
+            lA.ShaderParams = new float[24];
+            lA.ShaderHeights = new float[24];
+            lA.ShaderColors = new SKColor[24];
+            lA.ShaderColorsTo = new SKColor[24];
+            lB.ShaderParams = new float[24];
+            lB.ShaderHeights = new float[24];
+            lB.ShaderColors = new SKColor[24];
+            lB.ShaderColorsTo = new SKColor[24];
+
             _frameA.Add(lA);
             _frameB.Add(lB);
             _currentScreen = 0;
         }
-        
+
         // Tvinga UI-tråden att uppdatera storleken på vyn
-        Avalonia.Threading.Dispatcher.UIThread.Post(() => {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
             // Detta tvingar Viewbox att räkna om skalningen
             // Vi gör det via ett anrop till InvalidateMeasure i MainWindow
         }, Avalonia.Threading.DispatcherPriority.Render);
     }
-    
+
     public void SetDrawingScreen(int id)
     {
         lock (LockObject)
@@ -1873,19 +1911,29 @@ private void EnsureShaderArraySize(GpuLayer layer)
             // Vi måste se till att lagret finns i BÅDA listorna
             while (InactiveFrame.Count <= id)
             {
-                var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0),Opacity = 0.0  };
+                var layer = new GpuLayer
+                {
+                    Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480),
+                    Offset = new Point(0, 0), Opacity = 1.0
+                };
                 //layer.SkSlCode = RasterShaderCode; 
                 // Initiera ShaderHeights till 0 så att lagret är transparent som standard
-                for(int i=0; i<22; i++) layer.ShaderHeights[i] = 0;
+                for (int i = 0; i < 22; i++) layer.ShaderHeights[i] = 0;
                 InactiveFrame.Add(layer);
             }
+
             while (ActiveFrame.Count <= id)
             {
-                var layer = new GpuLayer { Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480), Offset = new Point(0, 0),Opacity = 0.0  };
+                var layer = new GpuLayer
+                {
+                    Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480),
+                    Offset = new Point(0, 0), Opacity = 1.0
+                };
                 //layer.SkSlCode = RasterShaderCode;
-                for(int i=0; i<22; i++) layer.ShaderHeights[i] = 0;
+                for (int i = 0; i < 22; i++) layer.ShaderHeights[i] = 0;
                 ActiveFrame.Add(layer);
             }
+
             _currentScreen = id;
         }
     }
@@ -1901,28 +1949,29 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 _frameA.Clear();
                 _frameB.Clear();
 
-                _frameA.Add(new GpuLayer 
-                { 
+                _frameA.Add(new GpuLayer
+                {
                     Bitmap = CreateEmptyBitmap(640, 480),
                     Offset = new Point(0, 0)
                 });
 
-                _frameB.Add(new GpuLayer 
-                { 
+                _frameB.Add(new GpuLayer
+                {
                     Bitmap = CreateEmptyBitmap(640, 480),
                     Offset = new Point(0, 0)
                 });
             }
         }
     }
-    
+
     private WriteableBitmap CreateEmptyBitmap(int w, int h, Color? background = null, GpuLayer? targetLayer = null)
     {
         // Om vi skickar med ett targetLayer, sätt shadern där direkt
-        if (targetLayer != null) {
+        if (targetLayer != null)
+        {
             // targetLayer.SkSlCode = RasterShaderCode;
         }
-        
+
         var bmp = new WriteableBitmap(
             new PixelSize(w, h),
             new Vector(96, 96),
@@ -1931,7 +1980,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
 
         // Om ingen bakgrund anges: helt transparent
         Color bg = background ?? Colors.Transparent;
-        
+
         using (var fb = bmp.Lock())
         {
             unsafe
@@ -1950,18 +1999,19 @@ private void EnsureShaderArraySize(GpuLayer layer)
                     p[i] = val;
             }
         }
+
         return bmp;
     }
 
 
-    
+
     public void Clear(Color color)
     {
         EnsureScreen();
         // Rensa bara den nuvarande aktiva skärmen/lagret
         ClearBitmap(GetActiveScreen(), color);
     }
-    
+
     public void ClearAll(Color color)
     {
         EnsureScreen();
@@ -1970,12 +2020,13 @@ private void EnsureShaderArraySize(GpuLayer layer)
         {
             ClearBitmap(lay.Bitmap, color);
         }
+
         foreach (var lay in InactiveFrame)
         {
             ClearBitmap(lay.Bitmap, color);
         }
-        
-        lock (LockObject) 
+
+        lock (LockObject)
         {
             // 2. Nollställ shader-parametrarna för lagret vi just rensade
             // Vi gör detta för BÅDE Active och Inactive frame så att ingen gammal data hänger kvar
@@ -1988,6 +2039,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
                     // Nollställ väder/scroll-parametrar
                     for (int i = 0; i < layer.ShaderValues.Length; i++) layer.ShaderValues[i] = Vector4.Zero;
                 }
+
                 foreach (var layer in InactiveFrame)
                 {
                     for (int i = 0; i < 22; i++) layer.ShaderHeights[i] = 0;
@@ -2006,7 +2058,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
         }
     }
 
-    private void ClearBitmap(WriteableBitmap bmp, Color c)
+    internal void ClearBitmap(WriteableBitmap bmp, Color c)
     {
         using var fb = bmp.Lock();
         unsafe
@@ -2028,47 +2080,15 @@ private void EnsureShaderArraySize(GpuLayer layer)
         }
     }
 
-    
-    private void ClearBitmap2(WriteableBitmap bmp, Color c)
-    {
-        using var fb = bmp.Lock();
-        unsafe
-        {
-            int rowPixels = bmp.PixelSize.Width;
-            
-            var p = (byte*)fb.Address;
-
-            byte a = c.A;
-            byte r = (byte)(c.R * a / 255);
-            byte g = (byte)(c.G * a / 255);
-            byte b = (byte)(c.B * a / 255);
-
-            for (var i = 0; i < rowPixels; i += 4)
-            {
-                p[i + 0] = b;
-                p[i + 1] = g;
-                p[i + 2] = r;
-                p[i + 3] = a;
-            }
-            
-            // Kopiera raden till resten av bitmapen
-            for (int y = 1; y < bmp.PixelSize.Height; y++)
-            {
-                Buffer.MemoryCopy(p, p + y * rowPixels, rowPixels * sizeof(uint), rowPixels * sizeof(uint));
-            }
-        }
-    }
-    
-
     public void SwapBuffers()
     {
         if (!_doubleBufferMode) return;
-    
+
         lock (LockObject)
         {
             _isAActive = !_isAActive;
             // Nu byter vi bara pekare, ingen kopiering här!
-            
+
             if (_doubleBufferMode)
             {
                 // Kopiera shader-parametrar från ny active → ny inactive
@@ -2078,17 +2098,17 @@ private void EnsureShaderArraySize(GpuLayer layer)
                     var src = ActiveFrame[i];
                     var dst = InactiveFrame[i];
 
-                    dst.ShaderParams      = (float[])src.ShaderParams.Clone();
-                    dst.ShaderHeights     = (float[])src.ShaderHeights.Clone();
-                    dst.ShaderColors      = (SKColor[])src.ShaderColors.Clone();
-                    dst.ShaderColorsTo    = (SKColor[])src.ShaderColorsTo.Clone();
-                    dst.ShaderValues      = (Vector4[])src.ShaderValues.Clone();
+                    dst.ShaderParams = (float[])src.ShaderParams.Clone();
+                    dst.ShaderHeights = (float[])src.ShaderHeights.Clone();
+                    dst.ShaderColors = (SKColor[])src.ShaderColors.Clone();
+                    dst.ShaderColorsTo = (SKColor[])src.ShaderColorsTo.Clone();
+                    dst.ShaderValues = (Vector4[])src.ShaderValues.Clone();
                     // Timer hanteras redan via += 0.016f i WAIT VBL, kopiera inte blindt
                 }
             }
         }
     }
-    
+
     public void DoubleBuffer()
     {
         lock (LockObject)
@@ -2104,7 +2124,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 {
                     var sourceBmp = ActiveFrame[i].Bitmap;
                     var destBmp = InactiveFrame[i].Bitmap;
-                    
+
                     if (sourceBmp != null && destBmp != null)
                     {
                         using var src = sourceBmp.Lock();
@@ -2114,13 +2134,13 @@ private void EnsureShaderArraySize(GpuLayer layer)
                             long size = (long)src.RowBytes * sourceBmp.PixelSize.Height;
                             // Använd explicit MemoryCopy för att undvika partial copies
                             System.Buffer.MemoryCopy(
-                                (void*)src.Address, 
-                                (void*)dst.Address, 
-                                size, 
+                                (void*)src.Address,
+                                (void*)dst.Address,
+                                size,
                                 size);
                         }
                     }
-                
+
                     // Kopiera även shader-parametrar
                     InactiveFrame[i].ShaderParams = (float[])ActiveFrame[i].ShaderParams.Clone();
                     InactiveFrame[i].ShaderHeights = (float[])ActiveFrame[i].ShaderHeights.Clone();
@@ -2132,17 +2152,37 @@ private void EnsureShaderArraySize(GpuLayer layer)
             }
         }
     }
-    
+
 
     public void Scroll(int sid, float x, float y)
     {
-        // ÄNDRAT: Använd DrawingFrame via SetShadervalues
-        if (sid >= 0 && sid < DrawingFrame.Count) 
-            //InactiveFrame[sid].ShaderValues[0] = new Vector4(x, y,0f,0f);
-            SetShadervalues(sid,0,x,y);
-        //InactiveFrame[sid].Offset = new Point(-x, -y);
+        lock (LockObject)
+        {
+            if (_doubleBufferMode)
+            {
+                if (sid >= 0 && sid < _frameA.Count)
+                {
+                    var v = _frameA[sid].ShaderValues[0];
+                    _frameA[sid].ShaderValues[0] = new Vector4(x, y, v.Z, v.W);
+                }
+
+                if (sid >= 0 && sid < _frameB.Count)
+                {
+                    var v = _frameB[sid].ShaderValues[0];
+                    _frameB[sid].ShaderValues[0] = new Vector4(x, y, v.Z, v.W);
+                }
+            }
+            else
+            {
+                if (sid >= 0 && sid < DrawingFrame.Count)
+                {
+                    var v = DrawingFrame[sid].ShaderValues[0];
+                    DrawingFrame[sid].ShaderValues[0] = new Vector4(x, y, v.Z, v.W);
+                }
+            }
+        }
     }
-    
+
     // ---------------- Drawing ----------------
     public void Plot(int x, int y) => Plot(x, y, Ink);
 
@@ -2153,11 +2193,16 @@ private void EnsureShaderArraySize(GpuLayer layer)
             var bmp = GetActiveScreen();
             if ((uint)x >= (uint)bmp.PixelSize.Width || (uint)y >= (uint)bmp.PixelSize.Height) return;
             using var fb = bmp.Lock();
-            unsafe {
+            unsafe
+            {
                 uint* p = (uint*)fb.Address;
-                uint val = (uint)((c.A << 24) | (c.R << 16) | (c.G << 8) | c.B);
-                if ((val & 0x00FFFFFF) == 0) p[y * (fb.RowBytes / 4) + x] = 0;
-                else p[y * (fb.RowBytes / 4) + x] = val | 0xFF000000;
+                // BGRA format: [B][G][R][A] i minnet
+                uint val = (uint)((c.A << 24) | (c.B << 16) | (c.G << 8) | c.R);
+            
+                if ((val & 0xFF00FFFF) == 0)  // Kontrollera om BGR = 0
+                    p[y * (fb.RowBytes / 4) + x] = 0;
+                else 
+                    p[y * (fb.RowBytes / 4) + x] = val;
             }
         }
     }
@@ -2225,20 +2270,22 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 byte gb = (byte)(Ink.G * a / 255);
                 byte bb = (byte)(Ink.B * a / 255);
 
-                for (var y = y1; y <= y2; y++) {
+                for (var y = y1; y <= y2; y++)
+                {
                     var row = p + y * fb.RowBytes;
-                    for (var x = x1; x <= x2; x++) {
+                    for (var x = x1; x <= x2; x++)
+                    {
                         var i = x * 4;
-                        row[i + 0] = bb;
+                        row[i + 0] = rb;
                         row[i + 1] = gb;
-                        row[i + 2] = rb;
-                        row[i + 3] = a;
+                        row[i + 2] = bb;
+                        row[i + 3] = a; 
                     }
                 }
             }
         }
     }
-    
+
     public void Circle(int x1, int y1, int r)
     {
         lock (LockObject)
@@ -2246,12 +2293,12 @@ private void EnsureShaderArraySize(GpuLayer layer)
             EnsureScreen();
             var bmp = GetActiveScreen();
             using var fb = bmp.Lock();
-                
+
             int w = bmp.PixelSize.Width;
             int h = bmp.PixelSize.Height;
-                
+
             // Konvertera Ink till uint (BGRA)
-            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+            uint cVal = (uint)((Ink.A << 24) | (Ink.B << 16) | (Ink.G << 8) | Ink.R);
 
             unsafe
             {
@@ -2293,7 +2340,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
             }
         }
     }
-    
+
     public void Ellipse(int x1, int y1, int r1, int r2)
     {
         lock (LockObject)
@@ -2304,7 +2351,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
 
             int w = bmp.PixelSize.Width;
             int h = bmp.PixelSize.Height;
-            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+            uint cVal = (uint)((Ink.A << 24) | (Ink.B << 16) | (Ink.G << 8) | Ink.R);
 
             unsafe
             {
@@ -2373,7 +2420,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
             }
         }
     }
-    
+
     public void CircleF(int x1, int y1, int r1, int r2)
     {
         lock (LockObject)
@@ -2384,7 +2431,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
 
             int w = bmp.PixelSize.Width;
             int h = bmp.PixelSize.Height;
-            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+            uint cVal = (uint)((Ink.A << 24) | (Ink.B << 16) | (Ink.G << 8) | Ink.R);
 
             unsafe
             {
@@ -2420,7 +2467,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
             }
         }
     }
-    
+
     public void Fill(int x1, int y1)
     {
         lock (LockObject)
@@ -2430,20 +2477,20 @@ private void EnsureShaderArraySize(GpuLayer layer)
             using var fb = bmp.Lock();
             int w = bmp.PixelSize.Width;
             int h = bmp.PixelSize.Height;
-                
+
             if (x1 < 0 || x1 >= w || y1 < 0 || y1 >= h) return;
 
-            uint fillColor = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
+            // FIX: Skapa färg i BGRA-format
+            uint fillColor = (uint)((Ink.A << 24) | (Ink.B << 16) | (Ink.G << 8) | Ink.R);
 
             unsafe
             {
                 uint* ptr = (uint*)fb.Address;
                 int stride = fb.RowBytes / 4;
 
-                // Hämta färgen som vi ska ersätta (Target Color)
+                // Nu är både targetColor och fillColor i samma format (BGRA)
                 uint targetColor = ptr[y1 * stride + x1];
 
-                // Om vi redan har rätt färg, gör inget
                 if (targetColor == fillColor) return;
 
                 // Scanline Flood Fill Algorithm (Stack-baserad)
@@ -2454,13 +2501,14 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 {
                     var (cx, cy) = stack.Pop();
                     int offset = cy * stride + cx;
-                        
+
                     // Flytta vänster så långt det går
                     int lx = cx;
                     while (lx >= 0 && ptr[cy * stride + lx] == targetColor)
                     {
                         lx--;
                     }
+
                     lx++; // Gå tillbaka ett steg till sista giltiga pixel
 
                     // Flytta höger och fyll, samt scanna raderna ovanför och under
@@ -2509,7 +2557,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
             }
         }
     }
-    
+
 
     public void DrawText(int x, int y, string t)
     {
@@ -2565,7 +2613,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
         try
         {
             string fullPath = ResourceLoader.GetPath(file);
-        
+
             using var b = new Bitmap(fullPath);
             var font = new Font { CharWidth = tw, CharHeight = th };
             int cols = (int)b.Size.Width / tw;
@@ -2634,79 +2682,64 @@ private void EnsureShaderArraySize(GpuLayer layer)
             OnError?.Invoke($"[FONT LOAD] Error loading '{file}': {ex.Message}");
         }
     }
-    
-    public void FontRotate(int id, double angle) { if (_fonts.TryGetValue(id, out var f)) f.Angle = angle; }
+
+    public void FontRotate(int id, double angle)
+    {
+        if (_fonts.TryGetValue(id, out var f)) f.Angle = angle;
+    }
+
     public void FontZoom(int id, double zx, double zy)
     {
         if (!_fonts.TryGetValue(id, out var f))
             return;
-        
+
         if (!f.BaseZoomInitialized)
         {
             f.BaseZoomX = zx;
             f.BaseZoomY = zy;
             f.BaseZoomInitialized = true;
         }
-            
+
         f.ZoomX = zx;
         f.ZoomY = zy;
     }
-    
-    public void FontMap(int id, string map) { if (_fonts.TryGetValue(id, out var f)) f.CharMap = map; }
 
-    public unsafe void FontPrint(int id, int x, int y, string text)
+    public void FontMap(int id, string map)
+    {
+        if (_fonts.TryGetValue(id, out var f)) f.CharMap = map;
+    }
+
+    public void FontPrint(int id, int x, int y, string text)
     {
         if (!_fonts.TryGetValue(id, out var f)) return;
-            
+
         double totalUnscaledW = text.Length * f.CharWidth;
         double totalUnscaledH = f.CharHeight;
-
         double centerX = totalUnscaledW / 2.0;
         double centerY = totalUnscaledH / 2.0;
-            
-        // --- Kompensation för att flytta texten utan att påverka rotation/zoom ---
         double compensateX = centerX * (f.BaseZoomX - 1.0);
         double compensateY = centerY * (f.BaseZoomY - 1.0);
 
         x = x + (int)compensateX;
         y = y + (int)compensateY;
-            
+
         lock (LockObject)
         {
-
-            if (_currentScreen == 0)
+            _fontTexts.Add(new QueuedFontText
             {
-                _fontTexts.Add(new QueuedFontText
-                {
-                    FontId = id,
-                    X = x,
-                    Y = y,
-                    Text = text,
-                    Angle = f.Angle,
-                    ZoomX = f.ZoomX,
-                    ZoomY = f.ZoomY
-                });
-            }
-            else
-            {
-                var target = GetActiveScreen();
-                using var dst = target.Lock();
-                byte* dp = (byte*)dst.Address;
-                int rb = dst.RowBytes;
-                var qt = new QueuedFontText { Angle = f.Angle, ZoomX = f.ZoomX, ZoomY = f.ZoomY };
-                int curX = x;
-
-                foreach (var c in text)
-                {
-                    if (c == ' ') { curX += (int)(f.CharWidth * f.ZoomX); continue; }
-                    RenderFontCharInternal(dp, rb, f, curX, y, c, qt);
-                    curX += (int)(f.CharWidth * f.ZoomX);
-                }
-            }
+                FontId = id,
+                X = x,
+                Y = y,
+                Text = text,
+                Angle = f.Angle,
+                ZoomX = f.ZoomX,
+                ZoomY = f.ZoomY,
+                Layer = _currentScreen // ← ärv aktivt lager automatiskt
+            });
         }
     }
 
-    
+
     public void FontClear()
     {
         lock (LockObject)
@@ -2715,206 +2748,56 @@ private void EnsureShaderArraySize(GpuLayer layer)
         }
     }
 
-    private unsafe void RenderFontTextInternal(byte* dp, int rb, QueuedFontText qt)
-    {
-        if (!_fonts.TryGetValue(qt.FontId, out var f)) return;
-        int curX = qt.X;
-        foreach (var c in qt.Text) 
-
-        {            
-            if (c == ' ')
-            { 
-                curX += (int)(f.CharWidth * qt.ZoomX);
-                continue;
-            }   
-            RenderFontCharInternal(dp, rb, f, curX, qt.Y, c, qt); 
-            curX += (int)(f.CharWidth * qt.ZoomX);
-        }
-    }
-
-    private unsafe void RenderFontCharInternal(byte* dp, int rb, Font f, int x, int y, char c, QueuedFontText qt)
-    {
-        string map = string.IsNullOrEmpty(f.CharMap) ? "" : f.CharMap;
-        int charIdx = !string.IsNullOrEmpty(map) ? map.IndexOf(char.ToUpper(c)) : c - 32;
-        if (charIdx < 0 || charIdx >= f.CharBitmaps.Count) return;
-
-        var charBmp = f.CharBitmaps[charIdx];
-        using var src = charBmp.Lock();
-        byte* sp = (byte*)src.Address;
-        int srb = src.RowBytes;
-
-        float zoomX = (float)qt.ZoomX;
-        float zoomY = (float)qt.ZoomY;
-
-        float cx = f.CharWidth / 2f;
-        float cy = f.CharHeight / 2f;
-
-        // För rotation
-        double angleRad = qt.Angle * Math.PI / 180.0;
-        double cosA = Math.Cos(angleRad);
-        double sinA = Math.Sin(angleRad);
-
-        int w = (int)(f.CharWidth * Math.Abs(zoomX));
-        int h = (int)(f.CharHeight * Math.Abs(zoomY));
-
-        for (int py = 0; py < h; py++)
-        {
-            for (int px = 0; px < w; px++)
-            {
-                // Koordinater i "tecknets lokala centrum"
-                float nx = (px / Math.Abs(zoomX)) - cx;
-                float ny = (py / Math.Abs(zoomY)) - cy;
-
-                // Spegling vid negativ zoom
-                if (zoomX < 0) nx = -nx;
-                if (zoomY < 0) ny = -ny;
-
-                // Rotation
-                double rx = nx * cosA - ny * sinA;
-                double ry = nx * sinA + ny * cosA;
-
-                // Åter till tecknets pixelkoordinater
-                int srcX = (int)(cx + rx);
-                int srcY = (int)(cy + ry);
-
-                if (srcX < 0 || srcX >= f.CharWidth || srcY < 0 || srcY >= f.CharHeight) continue;
-
-                byte* srcPx = sp + srcY * srb + srcX * 4;
-                if (srcPx[3] == 0) continue;
-
-                int di = (x + px) * 4;
-                byte* dr = dp + (y + py) * rb;
-                dr[di + 0] = srcPx[0];
-                dr[di + 1] = srcPx[1];
-                dr[di + 2] = srcPx[2];
-                dr[di + 3] = 255;
-            }
-        }
-    }
-
-    
     public void FontChar(int id, int x, int y, string c)
     {
         if (!_fonts.TryGetValue(id, out var f) || string.IsNullOrEmpty(c)) return;
-            
-        // Justering: Ditt ark verkar börja på 'A' (ASCII 65). 
-        // Om vi vill ha siffror och tecken som i din bild behöver vi mappa rätt.
-        int charIdx = -1;
-        if (!string.IsNullOrEmpty(f.CharMap))
-        {
-            // Om vi har en karta, använd den
-            charIdx = f.CharMap.IndexOf(char.ToUpper(c[0]));
-        }
-        else
-        {
-            // Annars kör vi standard ASCII-offset (börjar på space)
-            charIdx = c[0] - 32;
-        }
-            
-        if (charIdx < 0 || charIdx >= f.CharBitmaps.Count) return;
 
-        var charBmp = f.CharBitmaps[charIdx];
-        var target = GetActiveScreen();
-            
-        // Vi använder en förenklad RenderSprite-logik här för att stödja Zoom/Rotate
-        using var dst = target.Lock();
-        using var src = charBmp.Lock();
-        unsafe
+        lock (LockObject)
         {
-            byte* dp = (byte*)dst.Address;
-            byte* sp = (byte*)src.Address;
-            int rb = dst.RowBytes;
-            int srb = src.RowBytes;
-                
-            double angleRad = f.Angle * Math.PI / 180.0;
-            double cosA = Math.Cos(angleRad), sinA = Math.Sin(angleRad);
-            double invZx = 1.0 / f.ZoomX, invZy = 1.0 / f.ZoomY;
-            int hx = f.CharWidth / 2, hy = f.CharHeight / 2;
-
-            double radius = Math.Sqrt(f.CharWidth * f.CharWidth + f.CharHeight * f.CharHeight) * Math.Max(f.ZoomX, f.ZoomY);
-            int minX = Math.Max(0, (int)(x - radius)), maxX = Math.Min(target.PixelSize.Width - 1, (int)(x + radius));
-            int minY = Math.Max(0, (int)(y - radius)), maxY = Math.Min(target.PixelSize.Height - 1, (int)(y + radius));
-
-            for (int py = minY; py <= maxY; py++)
+            _fontTexts.Add(new QueuedFontText
             {
-                byte* rowPtr = dp + py * rb;
-                double dy = py - y;
-                for (int px = minX; px <= maxX; px++)
-                {
-                    double dx = px - x;
-                    double lx = (dx * cosA + dy * sinA) * invZx + hx;
-                    double ly = (dy * cosA - dx * sinA) * invZy + hy;
-                    int ilx = (int)lx, ily = (int)ly;
-
-                    if (ilx >= 0 && ilx < f.CharWidth && ily >= 0 && ily < f.CharHeight)
-                    {
-                        byte* srcPx = sp + ily * srb + ilx * 4;
-                        if (srcPx[3] == 0 || (srcPx[0] == 0 && srcPx[1] == 0 && srcPx[2] == 0)) continue; 
-                        int di = px * 4;
-                        rowPtr[di + 0] = srcPx[0];
-                        rowPtr[di + 1] = srcPx[1];
-                        rowPtr[di + 2] = srcPx[2];
-                        rowPtr[di + 3] = 255;
-                    }
-                }
-            }
+                FontId = id,
+                X = x,
+                Y = y,
+                Text = c[0].ToString(), // Enskilt tecken som sträng
+                Angle = f.Angle,
+                ZoomX = f.ZoomX,
+                ZoomY = f.ZoomY,
+                Layer = _currentScreen
+            });
         }
     }
-    
+
     // -------------------------------------------------------------------------------
     //  HJÄLPMETOD FÖR FÄRGKORRIGERING (MAC vs PC)
     // -------------------------------------------------------------------------------
     private unsafe void FixupImageColors(void* address, int pixelCount)
     {
         uint* p = (uint*)address;
-
-        if (OperatingSystem.IsMacOS())
+    
+        for (int i = 0; i < pixelCount; i++)
         {
-            // ===== MAC LOGIK (Från din fungerande LoadBackground) =====
-            for (int i = 0; i < pixelCount; i++)
+            uint pixel = p[i];
+        
+            // Plocka ut färgkanaler (BGRA format i WriteableBitmap)
+            uint b = (pixel >> 16) & 0xFF;
+            uint g = (pixel >> 8) & 0xFF;
+            uint r = pixel & 0xFF;
+        
+            // Gör svart (0,0,0) transparent
+            if (r == 0 && g == 0 && b == 0)
             {
-                uint pixel = p[i];
-
-                uint a = (pixel >> 24) & 0xFF;
-                uint r = (pixel >> 16) & 0xFF;
-                uint g = (pixel >> 8) & 0xFF;
-                uint b = pixel & 0xFF;
-
-                // Om helt svart (0,0,0), gör transparent om så önskas
-                if (r == 0 && g == 0 && b == 0)
-                    p[i] = 0;
-                else
-                    // RGBA -> BGRA (Skia på Mac vill ofta ha BGRA)
-                    p[i] = (a << 24) | (r << 0) | (g << 8) | (b << 16);
-            }
-        }
-        else 
-        {
-            // ===== WINDOWS LOGIK (Från din fungerande LoadBackground) =====
-            // Fallback för Windows (och Linux om det beter sig likadant)
-            for (int i = 0; i < pixelCount; i++)
-            {
-                uint pixel = p[i];
-
-                uint a = (pixel >> 24) & 0xFF;
-                uint b = (pixel >> 16) & 0xFF; // OBS: Windows-logiken du hade tolkade input lite annorlunda
-                uint g = (pixel >> 8) & 0xFF;
-                uint r = pixel & 0xFF;
-
-                if (r == 0 && g == 0 && b == 0)
-                    p[i] = 0;
-                else
-                    p[i] = (a << 24) | (b << 16) | (g << 8) | (r << 0);
+                p[i] = 0;
             }
         }
     }
-        
+
     public void LoadBackground(string f)
     {
         try
         {
             string fullPath = ResourceLoader.GetPath(f);
-            
+
             using var b = new Bitmap(fullPath);
             lock (LockObject)
             {
@@ -2924,13 +2807,6 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 {
                     b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address,
                         fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
-                        
-                    // ANVÄND HJÄLPMETODEN
-                    unsafe
-                    {
-                        int count = layer.Bitmap.PixelSize.Width * layer.Bitmap.PixelSize.Height;
-                        FixupImageColors(fb.Address.ToPointer(), count);
-                    }
                 }
             }
         }
@@ -2951,22 +2827,22 @@ private void EnsureShaderArraySize(GpuLayer layer)
             using var b = new Bitmap(fullPath);
             int w = (int)b.Size.Width;
             int h = (int)b.Size.Height;
-            
+
             // Skapa en bitmap kompatibel med motorn
             var targetBmp = CreateEmptyBitmap(w, h);
-            
+
             using (var fb = targetBmp.Lock())
             {
                 // Kopiera pixlar
                 b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
-                
+
                 // Fixa färgordning med central metod
                 unsafe
                 {
                     FixupImageColors(fb.Address.ToPointer(), w * h);
                 }
             }
-            
+
             lock (LockObject)
             {
                 _bobImages[index] = targetBmp;
@@ -2978,8 +2854,20 @@ private void EnsureShaderArraySize(GpuLayer layer)
         }
     }
 
+    public void BobLayer(int id, int layerIdx)
+    {
+        var b = GetBob(id);
+        if (b != null) b.Layer = layerIdx;
+    }
+
+    public void SpriteLayer(int id, int layerIdx)
+    {
+        var s = GetSprite(id);
+        s.Layer = layerIdx;
+    }
+
     // Motsvarar: BOB 1, X, Y, BILD_NR
-    public void SetBob(int bobId, int x, int y, int imageIndex)
+    public void SetBob(int bobId, int x, int y, int imageIndex, int layer = -1)
     {
         lock (LockObject)
         {
@@ -2988,10 +2876,14 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 bob = new Bob();
                 _bobs[bobId] = bob;
             }
+
             bob.X = x;
             bob.Y = y;
             bob.ImageIndex = imageIndex;
-            bob.Visible = true; // Sätts automatiskt på vid uppdatering, likt AMOS
+            bob.Visible = true;
+            // Sätt bara layer om det inte redan är explicit satt via BOB LAYER
+            if (bob.Layer == -1 || layer != -1)
+                bob.Layer = layer;
         }
     }
 
@@ -3004,7 +2896,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
     {
         if (_bobs.TryGetValue(id, out var b)) b.Visible = false;
     }
-        
+
     public void BobHandle(int id, int hx, int hy)
     {
         var s = GetBob(id);
@@ -3027,40 +2919,48 @@ private void EnsureShaderArraySize(GpuLayer layer)
         s.ZoomX = zx;
         s.ZoomY = zy;
     }
-    
-    
+
+
     // ---------------- Tiles ----------------
     public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
 
-    public void LoadTileBank(string f, int tw, int th) {
-        try {
+    public void LoadTileBank(string f, int tw, int th)
+    {
+        try
+        {
             string fullPath = ResourceLoader.GetPath(f);
-            
-            using var b = new Bitmap(fullPath); 
-            _tileWidth = tw; 
-            _tileHeight = th; 
+
+            using var b = new Bitmap(fullPath);
+            _tileWidth = tw;
+            _tileHeight = th;
             _tiles.Clear();
-            
+
             // Uppdatera klassvariabeln för att undvika division med noll i paletten
             _tilesInWidth = (int)b.Size.Width / tw;
-            
-            int cs = _tilesInWidth; 
+
+            int cs = _tilesInWidth;
             int rs = (int)b.Size.Height / th;
 
-            for (int y = 0; y < rs; y++) {
-                for (int x = 0; x < cs; x++) {
+            for (int y = 0; y < rs; y++)
+            {
+                for (int x = 0; x < cs; x++)
+                {
                     var t = CreateEmptyBitmap(tw, th);
-                    using (var fb = t.Lock()) {
+                    using (var fb = t.Lock())
+                    {
                         b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th, fb.RowBytes);
-                        unsafe {
+                        unsafe
+                        {
                             FixupImageColors(fb.Address.ToPointer(), tw * th);
                         }
                     }
+
                     _tiles.Add(t);
                 }
             }
         }
-        catch (Exception ex) {
+        catch (Exception ex)
+        {
             OnError?.Invoke($"[TILE LOAD] Error loading '{f}': {ex.Message}");
         }
     }
@@ -3109,7 +3009,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
     {
         newW = Math.Max(1, newW);
         newH = Math.Max(1, newH);
-        
+
         var oldMap = _map;
         _map = new int[newW, newH];
         for (int y = 0; y < newH; y++)
@@ -3125,35 +3025,35 @@ private void EnsureShaderArraySize(GpuLayer layer)
             var layerI = InactiveFrame[_currentScreen];
             InactiveFrame[_currentScreen] = new GpuLayer
             {
-                Bitmap        = CreateEmptyBitmap(pixelW, pixelH),
-                Offset        = layerI.Offset,
-                Opacity       = layerI.Opacity,
-                Visible       = layerI.Visible,
-                Timer         = layerI.Timer,
-                SkSlCode      = layerI.SkSlCode,
-                CachedEffect  = null, // Tvingas kompileras om för nya dimensioner
-                ShaderParams  = (float[])layerI.ShaderParams.Clone(),
+                Bitmap = CreateEmptyBitmap(pixelW, pixelH),
+                Offset = layerI.Offset,
+                Opacity = layerI.Opacity,
+                Visible = layerI.Visible,
+                Timer = layerI.Timer,
+                SkSlCode = layerI.SkSlCode,
+                CachedEffect = null, // Tvingas kompileras om för nya dimensioner
+                ShaderParams = (float[])layerI.ShaderParams.Clone(),
                 ShaderHeights = (float[])layerI.ShaderHeights.Clone(),
-                ShaderColors  = (SKColor[])layerI.ShaderColors.Clone(),
+                ShaderColors = (SKColor[])layerI.ShaderColors.Clone(),
                 ShaderColorsTo = (SKColor[])layerI.ShaderColorsTo.Clone(),
-                ShaderValues  = (Vector4[])layerI.ShaderValues.Clone()
+                ShaderValues = (Vector4[])layerI.ShaderValues.Clone()
             };
 
             var layerA = ActiveFrame[_currentScreen];
             ActiveFrame[_currentScreen] = new GpuLayer
             {
-                Bitmap        = CreateEmptyBitmap(pixelW, pixelH),
-                Offset        = layerA.Offset,
-                Opacity       = layerA.Opacity,
-                Visible       = layerA.Visible,
-                Timer         = layerA.Timer,
-                SkSlCode      = layerA.SkSlCode,
-                CachedEffect  = null,
-                ShaderParams  = (float[])layerA.ShaderParams.Clone(),
+                Bitmap = CreateEmptyBitmap(pixelW, pixelH),
+                Offset = layerA.Offset,
+                Opacity = layerA.Opacity,
+                Visible = layerA.Visible,
+                Timer = layerA.Timer,
+                SkSlCode = layerA.SkSlCode,
+                CachedEffect = null,
+                ShaderParams = (float[])layerA.ShaderParams.Clone(),
                 ShaderHeights = (float[])layerA.ShaderHeights.Clone(),
-                ShaderColors  = (SKColor[])layerA.ShaderColors.Clone(),
+                ShaderColors = (SKColor[])layerA.ShaderColors.Clone(),
                 ShaderColorsTo = (SKColor[])layerA.ShaderColorsTo.Clone(),
-                ShaderValues  = (Vector4[])layerA.ShaderValues.Clone()
+                ShaderValues = (Vector4[])layerA.ShaderValues.Clone()
             };
         }
 
@@ -3220,14 +3120,14 @@ private void EnsureShaderArraySize(GpuLayer layer)
 
     private void DrawTileToBackbuffer(WriteableBitmap t, int dx, int dy)
     {
-        if (t == null) return;  // ✅ LÄGG TILL NULL-CHECK
-    
+        if (t == null) return; // ✅ LÄGG TILL NULL-CHECK
+
         var target = GetActiveScreen();
-        if (target == null) return;  // ✅ EXTRA SÄKERHET
-    
+        if (target == null) return; // ✅ EXTRA SÄKERHET
+
         using var dst = target.Lock();
         using var src = t.Lock();
-    
+
         unsafe
         {
             var dp = (byte*)dst.Address;
@@ -3278,7 +3178,8 @@ private void EnsureShaderArraySize(GpuLayer layer)
     public void CreateSprite(int id, int w, int h)
     {
         var f = CreateEmptyBitmap(w, h);
-        _sprites[id] = new Sprite(w, h, f);
+        var sprite = new Sprite(w, h, f);
+        _sprites[id] = sprite;
         SpriteClear(id, Colors.Magenta);
     }
 
@@ -3291,6 +3192,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
     }
 
     public WriteableBitmap GetSpriteBitmap(int id) => GetSprite(id).Bitmap;
+
     public List<int> GetSpriteIds()
     {
         lock (LockObject)
@@ -3311,7 +3213,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
             using (var fb = s.Bitmap.Lock())
             {
                 b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
-                    
+
                 unsafe
                 {
                     // Fixa färger först
@@ -3324,6 +3226,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
                     s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
                 }
             }
+            //_sprites[id].Layer = layer;
         }
         catch (Exception ex)
         {
@@ -3336,7 +3239,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
         try
         {
             string fullPath = ResourceLoader.GetPath(fileName);
-                
+
             using var sourceInfo = new Bitmap(fullPath);
             int sheetW = (int)sourceInfo.Size.Width;
             int sheetH = (int)sourceInfo.Size.Height;
@@ -3344,14 +3247,14 @@ private void EnsureShaderArraySize(GpuLayer layer)
 
             CreateSprite(id, frameW, frameH);
             var s = GetSprite(id);
-                
-            s.Frames.Clear(); 
+
+            s.Frames.Clear();
 
             for (int i = 0; i < count; i++)
             {
                 int col = i % cols;
                 int row = i / cols;
-                    
+
                 int srcX = col * frameW;
                 int srcY = row * frameH;
 
@@ -3360,23 +3263,26 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 var f = CreateEmptyBitmap(frameW, frameH);
                 using (var fb = f.Lock())
                 {
-                    sourceInfo.CopyPixels(new PixelRect(srcX, srcY, frameW, frameH), fb.Address, fb.RowBytes * frameH, fb.RowBytes);
-                        
+                    sourceInfo.CopyPixels(new PixelRect(srcX, srcY, frameW, frameH), fb.Address, fb.RowBytes * frameH,
+                        fb.RowBytes);
+
                     unsafe
                     {
                         FixupImageColors(fb.Address.ToPointer(), frameW * frameH);
 
-                        if (i == 0) 
+                        if (i == 0)
                         {
                             var p = (byte*)fb.Address;
                             s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
                         }
                     }
                 }
+
                 s.Frames.Add(f);
             }
-                
+
             s.CurrentFrame = 0;
+            //_sprites[id].Layer = layer;
         }
         catch (Exception ex)
         {
@@ -3385,13 +3291,14 @@ private void EnsureShaderArraySize(GpuLayer layer)
     }
 
     // NY metod med smart filnamns-parsing
-    public void LoadSpriteSheetAuto(int id, string fileName, int? width = null, int? height = null, int? frameCount = null)
+    public void LoadSpriteSheetAuto(int id, string fileName, int? width = null, int? height = null,
+        int? frameCount = null)
     {
         try
         {
             // Parse från filnamnet om parametrar saknas
             string fileNameOnly = System.IO.Path.GetFileNameWithoutExtension(fileName);
-                
+
             int w = width ?? ParseSpriteSheetParam(fileNameOnly, "W", 32);
             int h = height ?? ParseSpriteSheetParam(fileNameOnly, "H", 32);
             int count = frameCount ?? ParseSpriteSheetParam(fileNameOnly, "[BF]", 8);
@@ -3408,13 +3315,13 @@ private void EnsureShaderArraySize(GpuLayer layer)
     private int ParseSpriteSheetParam(string fileName, string prefix, int defaultValue)
     {
         var match = System.Text.RegularExpressions.Regex.Match(
-            fileName, 
-            $"_{prefix}(\\d+)", 
+            fileName,
+            $"_{prefix}(\\d+)",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            
+
         return match.Success ? int.Parse(match.Groups[1].Value) : defaultValue;
     }
-         
+
     public void AddFrame(int id, string file)
     {
         var s = GetSprite(id);
@@ -3438,7 +3345,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
         var s = GetSprite(id);
         if (idx >= 0 && idx < s.Frames.Count) s.CurrentFrame = idx;
     }
-    
+
     public void SpriteHandle(int id, int hx, int hy)
     {
         var s = GetSprite(id);
@@ -3464,7 +3371,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
 
     public void SpriteOn(int id) => GetSprite(id).Visible = true;
     public void SpriteOff(int id) => GetSprite(id).Visible = false;
-    
+
     /// <summary>Sätter alpha omedelbart (0–255). Avbryter eventuell pågående fade.</summary>
     public void SpriteAlpha(int id, int alpha255)
     {
@@ -3497,6 +3404,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
         if (target > 0f && !s.Visible)
             s.Visible = true;
     }
+
     /// <summary>Returnerar true om spriten har en pågående fade.</summary>
     public bool IsSpriteAFading(int id) =>
         _sprites.TryGetValue(id, out var s) && s.FadeStep != 0f;
@@ -3517,8 +3425,8 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 sp.Alpha += sp.FadeStep;
 
                 bool reached = sp.FadeStep > 0f
-                    ? sp.Alpha >= sp.FadeTarget    // fade in
-                    : sp.Alpha <= sp.FadeTarget;   // fade ut
+                    ? sp.Alpha >= sp.FadeTarget // fade in
+                    : sp.Alpha <= sp.FadeTarget; // fade ut
 
                 if (reached)
                 {
@@ -3527,26 +3435,33 @@ private void EnsureShaderArraySize(GpuLayer layer)
                     sp.FadeTarget = -1f;
 
                     if (sp.Alpha <= 0f)
-                        sp.Visible = false;        // auto-hide vid fade-out till 0
+                        sp.Visible = false; // auto-hide vid fade-out till 0
                 }
             }
         }
-        // --- GpuLayers ---
-        foreach (var layer in _frameA.Concat(_frameB))
+    }
+    
+    
+    public void TickLayerFades()
+    {
+        lock (LockObject)
         {
-            if (layer.FadeStep == 0f) continue;
-
-            layer.Opacity += layer.FadeStep;   // float -> double, OK
-
-            bool reached = layer.FadeStep > 0f
-                ? layer.Opacity >= layer.FadeTarget
-                : layer.Opacity <= layer.FadeTarget;
-
-            if (reached)
+            foreach (var layer in _frameA.Concat(_frameB))
             {
-                layer.Opacity    = layer.FadeTarget;
-                layer.FadeStep   = 0f;
-                layer.FadeTarget = -1f;
+                if (layer.FadeStep == 0f) continue;
+
+                layer.Opacity += layer.FadeStep;
+
+                bool reached = layer.FadeStep > 0f
+                    ? layer.Opacity >= layer.FadeTarget
+                    : layer.Opacity <= layer.FadeTarget;
+
+                if (reached)
+                {
+                    layer.Opacity = layer.FadeTarget;
+                    layer.FadeStep = 0f;
+                    layer.FadeTarget = -1f;
+                }
             }
         }
     }
@@ -3558,9 +3473,18 @@ private void EnsureShaderArraySize(GpuLayer layer)
         lock (LockObject)
         {
             if (layerIdx >= 0 && layerIdx < _frameA.Count)
-            { _frameA[layerIdx].Opacity = val; _frameA[layerIdx].FadeStep = 0f; _frameA[layerIdx].FadeTarget = -1f; }
+            {
+                _frameA[layerIdx].Opacity = val;
+                _frameA[layerIdx].FadeStep = 0f;
+                _frameA[layerIdx].FadeTarget = -1f;
+            }
+
             if (layerIdx >= 0 && layerIdx < _frameB.Count)
-            { _frameB[layerIdx].Opacity = val; _frameB[layerIdx].FadeStep = 0f; _frameB[layerIdx].FadeTarget = -1f; }
+            {
+                _frameB[layerIdx].Opacity = val;
+                _frameB[layerIdx].FadeStep = 0f;
+                _frameB[layerIdx].FadeTarget = -1f;
+            }
         }
     }
 
@@ -3577,14 +3501,14 @@ private void EnsureShaderArraySize(GpuLayer layer)
 
                 if (frames <= 0 || Math.Abs(target - (float)layer.Opacity) < 0.001f)
                 {
-                    layer.Opacity    = target;
-                    layer.FadeStep   = 0f;
+                    layer.Opacity = target;
+                    layer.FadeStep = 0f;
                     layer.FadeTarget = -1f;
                     continue;
                 }
 
                 layer.FadeTarget = target;
-                layer.FadeStep   = (target - (float)layer.Opacity) / frames;
+                layer.FadeStep = (target - (float)layer.Opacity) / frames;
             }
         }
     }
@@ -3592,8 +3516,8 @@ private void EnsureShaderArraySize(GpuLayer layer)
     /// <summary>Returnerar true om lagret har en pågående fade.</summary>
     public bool IsLayerFading(int layerIdx) =>
         layerIdx >= 0 && layerIdx < _frameA.Count && _frameA[layerIdx].FadeStep != 0f;
-    
-    
+
+
     public void SpriteSetPixel(int id, int x, int y, Color c)
     {
         var s = GetSprite(id);
@@ -3661,8 +3585,8 @@ private void EnsureShaderArraySize(GpuLayer layer)
             }
         }
     }
-    
-    
+
+
     public bool SpriteHit(int id1, int id2, int step = 2)
     {
         if (!_sprites.TryGetValue(id1, out var s1) || !_sprites.TryGetValue(id2, out var s2)) return false;
@@ -3678,9 +3602,9 @@ private void EnsureShaderArraySize(GpuLayer layer)
         if (!(x1 < x2 + s2.Width && x1 + s1.Width > x2 && y1 < y2 + s2.Height && y1 + s1.Height > y2))
             return false;
 
-        int overlapLeft   = Math.Max(x1, x2);
-        int overlapTop    = Math.Max(y1, y2);
-        int overlapRight  = Math.Min(x1 + s1.Width, x2 + s2.Width);
+        int overlapLeft = Math.Max(x1, x2);
+        int overlapTop = Math.Max(y1, y2);
+        int overlapRight = Math.Min(x1 + s1.Width, x2 + s2.Width);
         int overlapBottom = Math.Min(y1 + s1.Height, y2 + s2.Height);
 
         using var fb1 = bmp1.Lock();
@@ -3718,6 +3642,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
                 }
             }
         }
+
         return false;
     }
 
@@ -3730,6 +3655,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
             set = new HashSet<int>();
             _groups[group] = set;
         }
+
         set.Add(id);
     }
 
@@ -3749,9 +3675,10 @@ private void EnsureShaderArraySize(GpuLayer layer)
             if (_sprites.TryGetValue(id, out var s))
                 s.Groups.Remove(group);
         }
+
         set.Clear();
     }
-    
+
     // ── HITBOX — rektangel mot rektangel ────────────────────────
 
     public bool SpriteHitBox(int id1, int id2)
@@ -3763,7 +3690,7 @@ private void EnsureShaderArraySize(GpuLayer layer)
         int x1 = s1.X - s1.HandleX, y1 = s1.Y - s1.HandleY;
         int x2 = s2.X - s2.HandleX, y2 = s2.Y - s2.HandleY;
 
-        return x1 < x2 + s2.Width  && x1 + s1.Width  > x2 &&
+        return x1 < x2 + s2.Width && x1 + s1.Width > x2 &&
                y1 < y2 + s2.Height && y1 + s1.Height > y2;
     }
 
@@ -3776,9 +3703,9 @@ private void EnsureShaderArraySize(GpuLayer layer)
         if (!s1.Visible || !s2.Visible) return false;
 
         // Mittpunkt och radie för varje sprite
-        double cx1 = s1.X - s1.HandleX + s1.Width  / 2.0;
+        double cx1 = s1.X - s1.HandleX + s1.Width / 2.0;
         double cy1 = s1.Y - s1.HandleY + s1.Height / 2.0;
-        double cx2 = s2.X - s2.HandleX + s2.Width  / 2.0;
+        double cx2 = s2.X - s2.HandleX + s2.Width / 2.0;
         double cy2 = s2.Y - s2.HandleY + s2.Height / 2.0;
 
         double r1 = Math.Min(s1.Width, s1.Height) / 2.0;
@@ -3807,26 +3734,28 @@ private void EnsureShaderArraySize(GpuLayer layer)
                     $"[SpriteHitGroup] fel vid SpriteHit({id},{otherId}): {ex.Message}\n{ex.StackTrace}");
             }
         }
+
         return 0;
     }
 
     public int SpriteHitBoxGroup(int id, string group)
     {
         if (!_groups.TryGetValue(group, out var set)) return 0;
-    
+
         foreach (int otherId in set)
         {
             if (otherId == id) continue;
-        
+
             if (!_sprites.TryGetValue(otherId, out var s2))
             {
                 System.Diagnostics.Debug.WriteLine($"[HitBoxGroup] sprite {otherId} finns inte i _sprites!");
                 continue;
             }
-        
+
             if (SpriteHitBox(id, otherId))
                 return otherId;
         }
+
         return 0;
     }
 
@@ -3838,8 +3767,10 @@ private void EnsureShaderArraySize(GpuLayer layer)
             if (otherId == id) continue;
             if (SpriteHitCircle(id, otherId)) return otherId;
         }
+
         return 0;
     }
+
     public Sprite GetSprite(int id)
     {
         if (!_sprites.TryGetValue(id, out var s))
@@ -3855,50 +3786,5 @@ private void EnsureShaderArraySize(GpuLayer layer)
     {
         if (x2 < x1) (x1, x2) = (x2, x1);
         if (y2 < y1) (y1, y2) = (y2, y1);
-    }
-
-    private unsafe void RenderSpriteInternal(byte* dp, int rb, Sprite s)
-    {
-        var bmp = s.Bitmap;
-        int sw = bmp.PixelSize.Width, sh = bmp.PixelSize.Height;
-        var k = s.TransparentKey;
-
-        double angleRad = s.Angle * Math.PI / 180.0;
-        double cosA = Math.Cos(angleRad), sinA = Math.Sin(angleRad);
-        double invZoomX = 1.0 / s.ZoomX, invZoomY = 1.0 / s.ZoomY;
-
-        // Enkel bounding box för att veta vilka pixlar på skärmen vi behöver kontrollera
-        double radius = Math.Sqrt(sw * sw + sh * sh) * Math.Max(s.ZoomX, s.ZoomY);
-        int minX = Math.Max(0, (int)(s.X - radius)), maxX = Math.Min(Width - 1, (int)(s.X + radius));
-        int minY = Math.Max(0, (int)(s.Y - radius)), maxY = Math.Min(Height - 1, (int)(s.Y + radius));
-
-        using var sLock = bmp.Lock();
-        byte* sp = (byte*)sLock.Address;
-        int srb = sLock.RowBytes;
-
-        for (int y = minY; y <= maxY; y++)
-        {
-            byte* rowPtr = dp + y * rb;
-            double dy = y - s.Y;
-            for (int x = minX; x <= maxX; x++)
-            {
-                double dx = x - s.X;
-                // Rotera och skala tillbaka till käll-spritens koordinater
-                double lx = (dx * cosA + dy * sinA) * invZoomX + s.HandleX;
-                double ly = (dy * cosA - dx * sinA) * invZoomY + s.HandleY;
-                int ilx = (int)lx, ily = (int)ly;
-
-                if (ilx >= 0 && ilx < sw && ily >= 0 && ily < sh)
-                {
-                    byte* srcPx = sp + ily * srb + ilx * 4;
-                    if (srcPx[2] == k.R && srcPx[1] == k.G && srcPx[0] == k.B) continue;
-                    int di = x * 4;
-                    rowPtr[di + 0] = srcPx[0];
-                    rowPtr[di + 1] = srcPx[1];
-                    rowPtr[di + 2] = srcPx[2];
-                    rowPtr[di + 3] = 255;
-                }
-            }
-        }
     }
 }

@@ -1642,6 +1642,7 @@ public static class AmosRunner
                             }
 
                             graphics.Ink = c;
+                            //graphics.SetInkColor(c.R / 255f, c.G / 255f, c.B / 255f, c.A / 255f);
                             break;
                         }
                         case "LOCATE":
@@ -1914,6 +1915,7 @@ public static class AmosRunner
  
                                 // NYTT: Stega sprite-fades innan frame presenteras
                                 graphics.TickSpriteFades();
+                                graphics.TickLayerFades();
                                 
                                 // 1. Säkerställ att all ritning är klar
                                 graphics.EndFrame();
@@ -2080,7 +2082,7 @@ public static class AmosRunner
                         case "DOUBLE":
                             if (arg.ToUpperInvariant() == "BUFFER")
                             {
-                                graphics.DoubleBuffer();
+                               // graphics.DoubleBuffer();
                             }
                             break;
                         
@@ -2423,39 +2425,53 @@ public static class AmosRunner
 
                         case "BOB":
                         {
-                            var bArgs = SplitCsvOrSpaces(arg);
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int currentLayer = graphics.GetActiveScreenNumber();
+                            int? savedScreen = null;
+
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = currentLayer;
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                                currentLayer = tempScreen.Value;
+                            }
+
+                            var bArgs = SplitCsvOrSpaces(cleanArg);
                             if (bArgs.Count > 0)
                             {
                                 string sub = bArgs[0].ToUpperInvariant();
 
-                                if (sub == "OFF" && bArgs.Count >= 2)
+                                if (sub == "LAYER" && bArgs.Count >= 3)
                                 {
-                                    // BOB OFF 1
+                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int layerId = EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.BobLayer(id, layerId);
+                                }
+                                else if (sub == "OFF" && bArgs.Count >= 2)
+                                {
                                     int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.BobOff(id);
                                 }
                                 else if (sub == "ON" && bArgs.Count >= 2)
                                 {
-                                    // BOB ON 1
                                     int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.BobOn(id);
                                 }
                                 else if (sub == "MOVE" && bArgs.Count >= 3)
                                 {
                                     int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int x1 = graphics.GetBob(id).X;
-                                    int y1 = graphics.GetBob(id).Y;
-                                    //int img = graphics.GetBob(id).ImageIndex;
-                                    x1 = x1 + EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    y1 = y1 + EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics);
+                                    int x1 = graphics.GetBob(id).X + EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    int y1 = graphics.GetBob(id).Y + EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.BobPos(id, x1, y1);
                                 }
                                 else if (sub == "HANDLE")
-                                    graphics.BobHandle(EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                    graphics.BobHandle(
+                                        EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics));
                                 else if (sub == "ROTATE")
-                                    graphics.BobRotate(EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                    graphics.BobRotate(
+                                        EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics));
                                 else if (sub == "ZOOM")
                                 {
@@ -2468,15 +2484,16 @@ public static class AmosRunner
                                 }
                                 else if (bArgs.Count >= 4)
                                 {
-                                    // BOB id, x, y, imageIndex
-                                    int id = EvalInt(bArgs[0], vars, ln, getInkey, isKeyDown, graphics);
-                                    int x1 = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int y1 = EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    int id  = EvalInt(bArgs[0], vars, ln, getInkey, isKeyDown, graphics);
+                                    int x1  = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int y1  = EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
                                     int img = EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics);
-
-                                    graphics.SetBob(id, x1, y1, img);
+                                    graphics.SetBob(id, x1, y1, img, currentLayer);
                                 }
                             }
+
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
 
                             onGraphicsChanged();
                             break;
@@ -2720,19 +2737,44 @@ public static class AmosRunner
                             }
                             break;
                         }
+                        
                         case "SPRITE":
-                            var ss = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int currentLayer = graphics.GetActiveScreenNumber();
+                            int? savedScreen = null;
+                            int? id = null;
+
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = currentLayer;
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                                currentLayer = tempScreen.Value;
+                            }
+
+                            var ss = SplitCsvOrSpaces(cleanArg);
                             if (ss.Count == 0) break;
+
                             if (!int.TryParse(ss[0], out var sid))
                             {
                                 var sub = ss[0].ToUpperInvariant();
-                                if (sub == "POS")
-                                    graphics.SpritePos(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
+
+                                if (sub == "LAYER" && ss.Count >= 3)
+                                {
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int layerId = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpriteLayer(id.Value, layerId);
+                                }
+
+                                else if (sub == "POS"){
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpritePos(id.Value,
                                         EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics));
+                                }
                                 else if (sub == "LOAD")
                                 {
-                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     string path = Unquote(ss[2]);
 
                                     // Om vi har mer än 2 argument (id + path), då är det ett sheet
@@ -2742,109 +2784,126 @@ public static class AmosRunner
                                         int fw = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
                                         int fh = EvalInt(ss[4], vars, ln, getInkey, isKeyDown, graphics);
                                         int count = EvalInt(ss[5], vars, ln, getInkey, isKeyDown, graphics);
-                                        graphics.LoadSpriteSheet(id, path, fw, fh, count);
+                                        graphics.LoadSpriteSheet(id.Value, path, fw, fh, count);
                                     }
-                                    else if (ss.Count == 5) // "LOAD", id, path, w, h = 5 delar (frameCount från filnamn)
+                                    else if
+                                        (ss.Count == 5) // "LOAD", id, path, w, h = 5 delar (frameCount från filnamn)
                                     {
                                         int fw = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
                                         int fh = EvalInt(ss[4], vars, ln, getInkey, isKeyDown, graphics);
-                                        graphics.LoadSpriteSheetAuto(id, path, fw, fh, null);
+                                        graphics.LoadSpriteSheetAuto(id.Value, path, fw, fh, null);
                                     }
-                                    else if (ss.Count == 4) // "LOAD", id, path, count = 4 delar (width/height från filnamn)
+                                    else if
+                                        (ss.Count == 4) // "LOAD", id, path, count = 4 delar (width/height från filnamn)
                                     {
                                         int count = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
-                                        graphics.LoadSpriteSheetAuto(id, path, null, null, count);
+                                        graphics.LoadSpriteSheetAuto(id.Value, path, null, null, count);
                                     }
                                     else if (ss.Count == 3) // "LOAD", id, path = 3 delar
                                     {
                                         // Kolla om filnamnet innehåller _W, _H eller _B/_F (dvs. är det ett spritesheet?)
                                         string fileName = System.IO.Path.GetFileNameWithoutExtension(path);
-                                        bool isSpriteSheet = fileName.Contains("_W", System.StringComparison.OrdinalIgnoreCase) ||
-                                                             fileName.Contains("_H", System.StringComparison.OrdinalIgnoreCase) ||
-                                                             fileName.Contains("_B", System.StringComparison.OrdinalIgnoreCase) ||
-                                                             fileName.Contains("_F", System.StringComparison.OrdinalIgnoreCase);
-        
+                                        bool isSpriteSheet =
+                                            fileName.Contains("_W", System.StringComparison.OrdinalIgnoreCase) ||
+                                            fileName.Contains("_H", System.StringComparison.OrdinalIgnoreCase) ||
+                                            fileName.Contains("_B", System.StringComparison.OrdinalIgnoreCase) ||
+                                            fileName.Contains("_F", System.StringComparison.OrdinalIgnoreCase);
+
                                         if (isSpriteSheet)
                                         {
                                             // Auto-parse allt från filnamnet
-                                            graphics.LoadSpriteSheetAuto(id, path);
+                                            graphics.LoadSpriteSheetAuto(id.Value, path);
                                         }
                                         else
                                         {
                                             // Vanlig single-frame sprite
-                                            graphics.LoadSprite(id, path);
+                                            graphics.LoadSprite(id.Value, path);
                                         }
                                     }
                                     else
                                     {
                                         // Fallback: Vanlig laddning av en bild
-                                        graphics.LoadSprite(id, path);
+                                        graphics.LoadSprite(id.Value, path);
                                     }
                                 }
                                 else if (sub == "IMAGE" && ss.Count >= 3)
                                 {
-                                    int sid2 = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     int imgId = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    int frameId = ss.Count >= 4 ? EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics) : 1;
-                                    graphics.SpriteImage(sid2, imgId, frameId);
+                                    int frameId = ss.Count >= 4
+                                        ? EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics)
+                                        : 1;
+                                    graphics.SpriteImage(id.Value, imgId, frameId);
                                 }
                                 else if (sub == "ADDFRAME")
-                                    graphics.AddFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
+                                {
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.AddFrame(id.Value,
                                         Unquote(ss[2]));
+                                }
                                 else if (sub == "FRAME")
-                                    graphics.SetSpriteFrame(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
+                                {
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SetSpriteFrame(id.Value,
                                         EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
+                                }
                                 else if (sub == "HANDLE")
-                                    graphics.SpriteHandle(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
+                                {
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpriteHandle(id.Value,
                                         EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics));
+                                }
                                 else if (sub == "MOVE" && ss.Count >= 3)
                                 {
-                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int x1 = graphics.GetSprite(id).X;
-                                    int y1 = graphics.GetSprite(id).Y;
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int x1 = graphics.GetSprite(id.Value).X;
+                                    int y1 = graphics.GetSprite(id.Value).Y;
                                     x1 = x1 + EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
                                     y1 = y1 + EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.SpritePos(id, x1, y1);
+                                    graphics.SpritePos(id.Value, x1, y1);
                                 }
                                 else if (sub == "ROTATE")
-                                    graphics.SpriteRotate(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
+                                {
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpriteRotate(id.Value,
                                         EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
+                                }
                                 else if (sub == "ZOOM")
                                 {
-                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     double zx = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics) / 100.0;
                                     double zy = (ss.Count >= 4)
                                         ? EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics) / 100.0
                                         : zx;
-                                    graphics.SpriteZoom(id, zx, zy);
+                                    graphics.SpriteZoom(id.Value, zx, zy);
                                 }
                                 else if (sub == "ALPHA" && ss.Count >= 3)
                                 {
                                     // SPRITE ALPHA id, 0-255
-                                    int id  = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     int val = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.SpriteAlpha(id, val);
+                                    graphics.SpriteAlpha(id.Value, val);
                                 }
                                 else if (sub == "FADE" && ss.Count >= 4)
                                 {
                                     // SPRITE FADE id, targetAlpha(0-255), frames
-                                    int id      = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int target  = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    int frames  = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.StartSpriteFade(id, target, frames);
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int target = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    int frames = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.StartSpriteFade(id.Value, target, frames);
                                 }
                                 else if (sub == "GROUP")
                                 {
-                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     string group = Unquote(ss[2]);
-                                    graphics.SpriteAddGroup(id, group);
+                                    graphics.SpriteAddGroup(id.Value, group);
                                 }
                                 else if (sub == "UNGROUP")
                                 {
-                                    int    id    = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     string group = Unquote(ss[2]);
-                                    graphics.SpriteRemoveGroup(id, group);
+                                    graphics.SpriteRemoveGroup(id.Value, group);
                                 }
                                 else if (sub == "CLEARGROUP")
                                 {
@@ -2853,18 +2912,55 @@ public static class AmosRunner
                                 }
                                 else if (sub == "ON")
                                 {
-                                    int id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.SpriteOn(id);
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpriteOn(id.Value);
                                 }
                                 else if (sub == "OFF")
-                                    graphics.SpriteOff(EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics));
+                                {
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SpriteOff(id.Value);
+                                }
+                                else
+                                {
+                                    id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.CreateSprite(sid, id.Value,
+                                        EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
+                                }
+                                if (savedScreen.HasValue)
+                                    graphics.SetDrawingScreen(savedScreen.Value);
+                                if (tempScreen.HasValue && id.HasValue)
+                                    graphics.SpriteLayer(id.Value, currentLayer);
                             }
                             else
-                                graphics.CreateSprite(sid, EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics),
-                                    EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics));
-
+                            {
+                                // ============================================================
+                                // DIREKT SYNTAX: SPRITE id, x, y, img
+                                // Ex: SPRITE #0,1,0,0,1 (lager 0, sprite 1, x=0, y=0, image 1)
+                                // ============================================================
+                                if (ss.Count >= 4)
+                                {
+                                    id = sid;
+                                    int x1  = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
+                                    int y1  = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+                                    int img = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
+                                    
+                                    // Skapa spriten med rätt storlek från bilden
+                                    graphics.SpriteImage(id.Value, img, 1); 
+                                    // Sätt vilken bild som ska visas
+                                    graphics.SpriteImage(id.Value, img, 1); // frame 1 som standard
+                                    // Sätt position
+                                    graphics.SpritePos(id.Value, x1, y1);
+                                    // Gör spriten synlig
+                                    graphics.SpriteOn(id.Value);
+                                    
+                                    if (savedScreen.HasValue)
+                                        graphics.SetDrawingScreen(savedScreen.Value);
+                                    if (tempScreen.HasValue)
+                                        graphics.SpriteLayer(id.Value, currentLayer);
+                                }
+                            }
                             break;
-                        
+                        }
                         case "SAM":
                             var samArgs = SplitCsvOrSpaces(arg);
                             if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "PLAY")
@@ -3002,19 +3098,19 @@ public static class AmosRunner
                             if (arg.StartsWith("MODE ", StringComparison.OrdinalIgnoreCase))
                             {
                                 var moveParts = SplitCsvOrSpaces(arg.Substring(5).Trim());
-                                int barId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
+                                int layerId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
                                 bool RM = EvalDouble(moveParts[1], vars, ln, getInkey, isKeyDown, graphics) != 0.0;
-                                graphics.SetRasterMode(barId, RM);
+                                graphics.SetRasterMode(layerId, RM);
                                 break;
                             }
                             if (arg.StartsWith("GFXMODE ", StringComparison.OrdinalIgnoreCase))
                             {
-                                var moveParts = SplitCsvOrSpaces(arg.Substring(5).Trim());
-                                int barId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
+                                var moveParts = SplitCsvOrSpaces(arg.Substring(8).Trim());
+                                int layerId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
                                 bool RM = EvalDouble(moveParts[1], vars, ln, getInkey, isKeyDown, graphics) != 0.0;
-                                graphics.SetRasterGfxMode(barId, RM);
+                                graphics.SetRasterGfxMode(layerId, RM);
                                 break;
-                            }                           
+                            }                        
                             
                             // RASTER STR(n) = "color1,color2"  →  SetShaderColors (legacy)
                             if (arg.StartsWith("STR(", StringComparison.OrdinalIgnoreCase))
@@ -3117,68 +3213,73 @@ public static class AmosRunner
                             break;
                         
                         case "FONT":
-                            var fArgs = SplitCsvOrSpaces(arg);
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+
+                            var fArgs = SplitCsvOrSpaces(cleanArg);
                             if (fArgs.Count > 0)
                             {
                                 var fSub = fArgs[0].ToUpperInvariant();
+
                                 if (fSub == "LOAD" && fArgs.Count >= 5)
-                                    graphics.FontLoad(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        Unquote(fArgs[2]), EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics),
+                                    graphics.FontLoad(
+                                        EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        Unquote(fArgs[2]),
+                                        EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(fArgs[4], vars, ln, getInkey, isKeyDown, graphics));
+
                                 else if (fSub == "MAP" && fArgs.Count >= 3)
-                                    graphics.FontMap(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                    graphics.FontMap(
+                                        EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
                                         Unquote(string.Join(" ", fArgs.Skip(2))));
+
                                 else if (fSub == "PRINT" && fArgs.Count >= 4)
                                 {
-                                    // FONT PRINT kan ha #X: FONT PRINT #1, fontId, x, y, "text"
-                                    string printArgs = string.Join(",", fArgs.Skip(1));
-                                    var (tempScreen, cleanArg) = ExtractScreenPrefix(printArgs);
-                                    int? savedScreen = null;
-                                        
-                                    if (tempScreen.HasValue)
+                                    // Bygg ihop argumenten efter "PRINT"
+                                    string printRest = string.Join(",", fArgs.Skip(1));
+    
+                                    // Nu körs ExtractScreenPrefix på "#3, 134, 0, 0, \"HELLO AMOS\""
+                                    var (tempScreen2, cleanPrint) = ExtractScreenPrefix(printRest);
+                                    int? savedScreen2 = null;
+    
+                                    if (tempScreen2.HasValue)
                                     {
-                                        savedScreen = graphics.GetActiveScreenNumber();
-                                        graphics.SetDrawingScreen(tempScreen.Value);
+                                        savedScreen2 = graphics.GetActiveScreenNumber();
+                                        graphics.SetDrawingScreen(tempScreen2.Value);
                                     }
-                                        
-                                    var parts = SplitCsvOrSpaces(cleanArg);
+    
+                                    var parts = SplitTopLevelCsv(cleanPrint);
                                     graphics.FontPrint(
                                         EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(parts[2], vars, ln, getInkey, isKeyDown, graphics),
-                                        ValueToString(EvalValue(string.Join(" ", parts.Skip(3)), vars, ln, getInkey, isKeyDown, graphics))
-                                    );
-                                        
-                                    if (savedScreen.HasValue)
-                                        graphics.SetDrawingScreen(savedScreen.Value);
+                                        ValueToString(EvalValue(parts[3], vars, ln, getInkey, isKeyDown, graphics)));
+    
+                                    if (savedScreen2.HasValue)
+                                        graphics.SetDrawingScreen(savedScreen2.Value);
                                 }
                                 else if (fSub == "CHAR" && fArgs.Count >= 5)
                                 {
-                                    // FONT CHAR kan ha #X: FONT CHAR #1, fontId, x, y, "A"
-                                    string charArgs = string.Join(",", fArgs.Skip(1));
-                                    var (tempScreen, cleanArg) = ExtractScreenPrefix(charArgs);
-                                    int? savedScreen = null;
-                                        
-                                    if (tempScreen.HasValue)
-                                    {
-                                        savedScreen = graphics.GetActiveScreenNumber();
-                                        graphics.SetDrawingScreen(tempScreen.Value);
-                                    }
-                                        
-                                    var parts = SplitCsvOrSpaces(cleanArg);
+                                    var parts = SplitCsvOrSpaces(string.Join(",", fArgs.Skip(1)));
                                     graphics.FontChar(
                                         EvalInt(parts[0], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(parts[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(parts[2], vars, ln, getInkey, isKeyDown, graphics),
-                                        ValueToString(EvalValue(parts[3], vars, ln, getInkey, isKeyDown, graphics))
-                                    );
-                                        
-                                    if (savedScreen.HasValue)
-                                        graphics.SetDrawingScreen(savedScreen.Value);
+                                        ValueToString(EvalValue(parts[3], vars, ln, getInkey, isKeyDown, graphics)));
                                 }
+
                                 else if (fSub == "ROTATE" && fArgs.Count >= 3)
-                                    graphics.FontRotate(EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
+                                    graphics.FontRotate(
+                                        EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(fArgs[2], vars, ln, getInkey, isKeyDown, graphics));
+
                                 else if (fSub == "ZOOM" && fArgs.Count >= 3)
                                 {
                                     int fid = EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics);
@@ -3188,34 +3289,36 @@ public static class AmosRunner
                                         : fzx;
                                     graphics.FontZoom(fid, fzx, fzy);
                                 }
+
                                 else if (fSub == "SET" && fArgs.Count >= 3)
                                 {
-                                    var fArgs2 = SplitTopLevelCsv(arg.Substring(4).Trim());
-                                        
+                                    var fArgs2 = SplitTopLevelCsv(cleanArg.Substring(4).Trim());
                                     if (fArgs2.Count >= 3)
                                     {
-                                        int width = EvalInt(fArgs2[0], vars, ln, getInkey, isKeyDown, graphics);
+                                        int width  = EvalInt(fArgs2[0], vars, ln, getInkey, isKeyDown, graphics);
                                         int height = EvalInt(fArgs2[1], vars, ln, getInkey, isKeyDown, graphics);
                                         string fnt = ValueToString(EvalValue(fArgs2[2], vars, ln, getInkey, isKeyDown, graphics));
-                                            
                                         graphics.ConfigureText(width, height, fnt);
                                     }
                                 }
+
                                 else if (fSub == "STYLE" && fArgs.Count >= 2)
                                 {
-                                    var fArgs2 = SplitTopLevelCsv(arg.Substring(4).Trim()); 
-                                    string style = fArgs2[0];
-                                    
-                                    graphics.FontTextStyle(style);
+                                    var fArgs2 = SplitTopLevelCsv(cleanArg.Substring(4).Trim());
+                                    graphics.FontTextStyle(fArgs2[0]);
                                 }
+
                                 else if (fSub == "CLEAR")
-                                {
                                     graphics.FontClear();
-                                }
+                                
                             }
+
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
 
                             onGraphicsChanged();
                             break;
+                        }
                         
                         case "MAP":
                             var mArgs = SplitCsvOrSpaces(arg);

@@ -215,21 +215,20 @@ for (int i = 35; i < 50; i++) {
         }
     }
 
-    // 3. FINAL MIX
-    if (mask.a < 0.01 && !hasR && weatherType < 0.5) return half4(0.0, 0.0, 0.0, 0.0);
-
     half3 combinedBG = hasR ? finalRGB + pCol : pCol;
-    if (mode > 0.5) {
-        //float redness = mask.r - max(mask.g, mask.b);
-        //float influence = saturate(redness * 1.0); // 4.0 = hur strikt röd måste pixeln vara
-        //half3 result = mix(mask.rgb, mask.rgb * combinedBG, half(influence));
-        //return half4(result, mask.a);
-        return half4(mask.rgb * combinedBG, mask.a);
-    } else {
-        if (mask.a > 0.1) return mask;
-        float outA = (hasR || weatherType > 2.5) ? 1.0 : half(length(pCol));
-        return half4(combinedBG, outA);
-    }
+    
+if (mode > 0.5) {
+    // GFX-mode: visa alltid texturen, multiplicera med raster om det finns
+    if (mask.a < 0.01) return half4(0.0, 0.0, 0.0, 0.0);
+    if (hasR) return half4(mask.rgb * combinedBG, mask.a);
+    return mask;  // Ingen raster → passthrough
+} else {
+    // Bakgrundsmode
+    if (mask.a > 0.1) return mask;  // ← FÖRST: visa textur om den finns
+    if (!hasR && weatherType < 0.5) return half4(0.0, 0.0, 0.0, 0.0);
+    float outA = (hasR || weatherType > 2.5) ? 1.0 : half(length(pCol));
+    return half4(combinedBG, outA);
+}
 }";
     }
 }

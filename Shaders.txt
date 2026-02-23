@@ -36,3 +36,10 @@ Metal / Mac Mini – Shader-regler (uppdaterad)
     Undvik att använda HLSL-liknande intrinsics med half på Apple GPU (t.ex. lerp, smoothstep) → gör beräkningar i float, konvertera till half på output.
     Alla “Shadertoy”-liknande variabler (fragColor, pAlpha) måste mappas till Metal-standard: half4 eller float4 output.
     Transparens måste alltid hanteras i output alpha, inte via en separat variabel.
+    
+    
+    
+            //float redness = mask.r - max(mask.g, mask.b);
+            //float influence = saturate(redness * 1.0); // 4.0 = hur strikt röd måste pixeln vara
+            //half3 result = mix(mask.rgb, mask.rgb * combinedBG, half(influence));
+            //return half4(result, mask.a);
