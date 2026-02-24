@@ -106,7 +106,6 @@ public partial class MainWindow : Window
         Editor.TextArea.LeftMargins.Insert(0, breakpointMargin);
         Editor.ShowLineNumbers = true; // Aktivera linjenummer för att marginalen ska synas
         
-        _gfx.Screen(640, 480);
         _gfx.Clear(Colors.Black);
 
         Editor.Text =
@@ -184,7 +183,7 @@ public partial class MainWindow : Window
             }
         }
     }
-
+    
     private void OnSelectAll(object? sender, RoutedEventArgs e)
     {
         Editor.SelectAll();
@@ -784,12 +783,14 @@ public partial class MainWindow : Window
         _gfx.PaperColor = Colors.Transparent;
         _gfx.Ink = Colors.White;
         _gfx.ConfigureText(8,16,"Topaz a600a1200a400");
+        _gfx.OnScreenResolutionChanged += (w, h) => {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => {
+                _screenWindow?.UpdateScreenSize(w, h);
+            });
+        };
         _gfx.Screen(640,480);
         foreach(var id in _gfx.GetSpriteIds()) {
             _gfx.SpriteOff(id);
-        }
-        foreach(var id in _gfx.GetBobIds()) {
-            _gfx.BobOff(id);
         }
         // ✅ NYTT: Rensa ALLA sprites och bobs helt och hållet
         _gfx.ClearAllResources();
@@ -1134,6 +1135,8 @@ public partial class MainWindow : Window
         UpdateTitleBar(); // Uppdatera till "Untitled"
     }
 
+
+    
     private async void SaveAsProject_OnClick(object? sender, RoutedEventArgs e)
     {
         var sp = StorageProvider;
@@ -1162,7 +1165,8 @@ public partial class MainWindow : Window
             await AppendConsoleLineAsync($"Saved: {file.Name}");
         }
         catch (Exception ex) { await AppendConsoleLineAsync($"ERROR saving: {ex.Message}"); }
-    }   
+    }
+    
     private async void SaveProject_OnClick(object? sender, RoutedEventArgs e)
     {
         var sp = StorageProvider;
@@ -1243,7 +1247,6 @@ public partial class MainWindow : Window
             await using var stream = await file.OpenReadAsync();
             var project = await AmosProjectSerializer.LoadAsync(stream);
 
-            _gfx.ImportProject(project);
             Editor.Text = project.ProgramText ?? string.Empty;
 
             _currentProjectFile = file;
@@ -1290,7 +1293,6 @@ public partial class MainWindow : Window
 
             var project = await AmosProjectSerializer.LoadAsync(stream);
 
-            _gfx.ImportProject(project);
             Editor.Text = project.ProgramText ?? string.Empty;
 
             // Skapa IStorageFile-referens från path

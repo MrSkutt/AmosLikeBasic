@@ -9,10 +9,8 @@
         UseLayoutRounding="True">
     <Grid Name="GridControl" Background="Black" ClipToBounds="True" Focusable="True">
         <Viewbox Stretch="Uniform" UseLayoutRounding="True">
-            <Grid Name="ScreenGrid" Width="640" Height="480" Background="Black">
+            <Grid Name="ScreenGrid" Background="Black">
                 <amosLikeBasic:AmosGpuView Name="ScreenControl"
-                                           Width="640"
-                                           Height="480"
                                            Focusable="True"
                                            IsTabStop="True"
                                            PointerPressed="OnScreenPointerPressed" />

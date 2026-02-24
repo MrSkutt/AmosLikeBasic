@@ -29,13 +29,32 @@ public partial class ScreenWindow : Window
         
         Console.LayoutUpdated += (_, _) => UpdateConsoleFont();
         
+        
         Opened += (_, _) =>
         {
             ScreenControl?.Focus();
             GridControl?.Focus();
+
+            // Logga fönsterstorlek och scaling
+            var root = this.VisualRoot;
+            var bounds = this.Bounds.Size;
+            var scaling = root?.RenderScaling ?? 1.0;
+            System.Console.WriteLine($"Window size: {bounds.Width}x{bounds.Height}, scale {scaling}");
+
+            // Skicka uniform iResolution till shadern
+            //ScreenControl?.SetShaderResolution(new Vector2(640, 480));
         };
+        
     }
 
+    public void UpdateScreenSize(int width, int height)
+    {
+        ScreenControl.Width = width;
+        ScreenControl.Height = height;
+        ScreenGrid.Width = width;
+        ScreenGrid.Height = height;
+    }
+    
     private void UpdateConsoleFont()
     {
         const int Columns = 80;

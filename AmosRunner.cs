@@ -42,6 +42,7 @@ public static class AmosRunner
                 return Color.FromArgb(a, r, g, b);
             }
         }
+        
 
         try { return Color.Parse(s); }
         catch (Exception ex) { throw new FormatException($"Ogiltigt färgvärde: '{s}'", ex); }
@@ -192,38 +193,57 @@ public static class AmosRunner
     // ✅ NYTT: Hjälpfunktion för att extrahera #X prefix
     private static (int? tempScreen, string cleanArg) ExtractScreenPrefix(string arg)
     {
-        if (string.IsNullOrWhiteSpace(arg)) 
+        if (string.IsNullOrWhiteSpace(arg))
             return (null, arg);
-        
+
         arg = arg.Trim();
-        
-        // Kolla om första parametern börjar med #
-        if (arg.StartsWith("#"))
+
+        bool inString = false;
+
+        for (int i = 0; i < arg.Length; i++)
         {
-            // Hitta var första komma/space är (efter #X)
-            int separatorIdx = -1;
-            for (int i = 1; i < arg.Length; i++)
+            char c = arg[i];
+
+            // Växla strängläge
+            if (c == '"')
             {
-                if (arg[i] == ',' || char.IsWhiteSpace(arg[i]))
-                {
-                    separatorIdx = i;
-                    break;
-                }
+                inString = !inString;
+                continue;
             }
-            
-            if (separatorIdx > 1)
+
+            // Vi bryr oss bara om # utanför strängar
+            if (!inString && c == '#')
             {
-                // Extrahera talet efter #
-                string screenNumStr = arg[1..separatorIdx];
-                if (int.TryParse(screenNumStr, out int screenNum))
+                int start = i;
+                int j = i + 1;
+
+                // Måste följas av minst en siffra
+                while (j < arg.Length && char.IsDigit(arg[j]))
+                    j++;
+
+                if (j > i + 1) // vi hittade siffror
                 {
-                    // Returnera screen-numret och resten av argumenten (utan #X,)
-                    string cleanArg = arg[(separatorIdx + 1)..].Trim();
-                    return (screenNum, cleanArg);
+                    string numberStr = arg.Substring(i + 1, j - (i + 1));
+
+                    if (int.TryParse(numberStr, out int screenNum))
+                    {
+                        // Hoppa över eventuell whitespace
+                        while (j < arg.Length && char.IsWhiteSpace(arg[j]))
+                            j++;
+
+                        // Hoppa över eventuell komma
+                        if (j < arg.Length && arg[j] == ',')
+                            j++;
+
+                        // Ta bort prefixet
+                        string cleanArg = arg.Remove(start, j - start).Trim();
+
+                        return (screenNum, cleanArg);
+                    }
                 }
             }
         }
-        
+
         return (null, arg);
     }
     
@@ -1928,19 +1948,16 @@ public static class AmosRunner
                                         layer.Timer += 0.016f;
                                     }
                                 }
-                                // Animations
+                                // 2. Animations
                                 animationManager.Tick(graphics); 
                                 
                                 // 3. Vänta tills nästa frame är redo (timing)
                                 await WaitNextFrameAsync(token);
 
-                                // 4. Byt buffrar EFTER att vi väntat
-                                graphics.SwapBuffers();
-
-                                // 5. Signalera att UI ska uppdateras
+                                // 4. Signalera att UI ska uppdateras
                                 onGraphicsChanged();
 
-                                // 6. Börja rita på nya inactive frame
+                                // 5. Börja rita på nya inactive frame
                                 graphics.BeginFrame();
                             }
                             else if (arg.ToUpperInvariant() == "MUSIC")
@@ -2079,12 +2096,6 @@ public static class AmosRunner
                             }
                             break;
                         }
-                        case "DOUBLE":
-                            if (arg.ToUpperInvariant() == "BUFFER")
-                            {
-                               // graphics.DoubleBuffer();
-                            }
-                            break;
                         
                         case "IF":
                         {
@@ -2400,16 +2411,6 @@ public static class AmosRunner
                                     if (savedScreen.HasValue)
                                         graphics.SetDrawingScreen(savedScreen.Value);
                                 }
-                                else
-                                {
-                                    // === LOAD 1, "bob.png" (BOB IMAGE) ===
-                                    string p2 = arg[(commaIndex + 1)..];
-            
-                                    int index = EvalInt(firstParam, vars, ln, getInkey, isKeyDown, graphics);
-                                    string path = ValueToString(EvalValue(p2, vars, ln, getInkey, isKeyDown, graphics));
-            
-                                    graphics.LoadBobImage(index, path);
-                                }
                             }
                             else
                             {
@@ -2419,82 +2420,6 @@ public static class AmosRunner
                                 graphics.LoadBackground(path);
                             }
     
-                            onGraphicsChanged();
-                            break;
-                        }
-
-                        case "BOB":
-                        {
-                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
-                            int currentLayer = graphics.GetActiveScreenNumber();
-                            int? savedScreen = null;
-
-                            if (tempScreen.HasValue)
-                            {
-                                savedScreen = currentLayer;
-                                graphics.SetDrawingScreen(tempScreen.Value);
-                                currentLayer = tempScreen.Value;
-                            }
-
-                            var bArgs = SplitCsvOrSpaces(cleanArg);
-                            if (bArgs.Count > 0)
-                            {
-                                string sub = bArgs[0].ToUpperInvariant();
-
-                                if (sub == "LAYER" && bArgs.Count >= 3)
-                                {
-                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int layerId = EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.BobLayer(id, layerId);
-                                }
-                                else if (sub == "OFF" && bArgs.Count >= 2)
-                                {
-                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.BobOff(id);
-                                }
-                                else if (sub == "ON" && bArgs.Count >= 2)
-                                {
-                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.BobOn(id);
-                                }
-                                else if (sub == "MOVE" && bArgs.Count >= 3)
-                                {
-                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int x1 = graphics.GetBob(id).X + EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    int y1 = graphics.GetBob(id).Y + EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.BobPos(id, x1, y1);
-                                }
-                                else if (sub == "HANDLE")
-                                    graphics.BobHandle(
-                                        EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics));
-                                else if (sub == "ROTATE")
-                                    graphics.BobRotate(
-                                        EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics));
-                                else if (sub == "ZOOM")
-                                {
-                                    int id = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    double zx = EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics) / 100.0;
-                                    double zy = (bArgs.Count >= 4)
-                                        ? EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics) / 100.0
-                                        : zx;
-                                    graphics.BobZoom(id, zx, zy);
-                                }
-                                else if (bArgs.Count >= 4)
-                                {
-                                    int id  = EvalInt(bArgs[0], vars, ln, getInkey, isKeyDown, graphics);
-                                    int x1  = EvalInt(bArgs[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    int y1  = EvalInt(bArgs[2], vars, ln, getInkey, isKeyDown, graphics);
-                                    int img = EvalInt(bArgs[3], vars, ln, getInkey, isKeyDown, graphics);
-                                    graphics.SetBob(id, x1, y1, img, currentLayer);
-                                }
-                            }
-
-                            if (savedScreen.HasValue)
-                                graphics.SetDrawingScreen(savedScreen.Value);
-
                             onGraphicsChanged();
                             break;
                         }
@@ -2945,9 +2870,7 @@ public static class AmosRunner
                                     int img = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
                                     
                                     // Skapa spriten med rätt storlek från bilden
-                                    graphics.SpriteImage(id.Value, img, 1); 
-                                    // Sätt vilken bild som ska visas
-                                    graphics.SpriteImage(id.Value, img, 1); // frame 1 som standard
+                                    graphics.SpriteImage(id.Value, img, 1);
                                     // Sätt position
                                     graphics.SpritePos(id.Value, x1, y1);
                                     // Gör spriten synlig
@@ -3053,7 +2976,18 @@ public static class AmosRunner
                         
                         case "RASTER":
                         {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
                             int currentLayer = graphics.GetActiveScreenNumber();
+                            int? savedScreen = null;
+                            int? id = null;
+
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = currentLayer;
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                                currentLayer = tempScreen.Value;
+                                arg = cleanArg;
+                            }
 
                             // RASTER MOVE id, newY
                             if (arg.StartsWith("MOVE ", StringComparison.OrdinalIgnoreCase))
@@ -3095,14 +3029,6 @@ public static class AmosRunner
                                 graphics.SetRasterWrap(currentLayer, barId, Wrap);
                                 break;
                             }
-                            if (arg.StartsWith("MODE ", StringComparison.OrdinalIgnoreCase))
-                            {
-                                var moveParts = SplitCsvOrSpaces(arg.Substring(5).Trim());
-                                int layerId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
-                                bool RM = EvalDouble(moveParts[1], vars, ln, getInkey, isKeyDown, graphics) != 0.0;
-                                graphics.SetRasterMode(layerId, RM);
-                                break;
-                            }
                             if (arg.StartsWith("GFXMODE ", StringComparison.OrdinalIgnoreCase))
                             {
                                 var moveParts = SplitCsvOrSpaces(arg.Substring(8).Trim());
@@ -3111,7 +3037,14 @@ public static class AmosRunner
                                 graphics.SetRasterGfxMode(layerId, RM);
                                 break;
                             }                        
-                            
+                            if (arg.StartsWith("SPACE ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var moveParts = SplitCsvOrSpaces(arg.Substring(6).Trim());
+                                int layerId = (int)Math.Round(EvalDouble(moveParts[0], vars, ln, getInkey, isKeyDown, graphics));
+                                int RM = (int)Math.Round(EvalDouble(moveParts[1], vars, ln, getInkey, isKeyDown, graphics));
+                                graphics.SetRasterSpaceMode(layerId, RM);
+                                break;
+                            }   
                             // RASTER STR(n) = "color1,color2"  →  SetShaderColors (legacy)
                             if (arg.StartsWith("STR(", StringComparison.OrdinalIgnoreCase))
                             {
@@ -3134,18 +3067,18 @@ public static class AmosRunner
                             }
 
                             // RASTER id, x, y, height [, "colors"]
-                            var rbArgs = SplitCsvOrSpaces(arg.Trim());
+                            var rbArgs = SplitTopLevelCsv(arg.Trim());
                             if (rbArgs.Count >= 4)
                             {
                                 int rbNum = Convert.ToInt32(EvalValue(rbArgs[0], vars, ln, getInkey, isKeyDown, graphics));
                                 float x      = (float)EvalDouble(rbArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                                 float rbOff  = (float)EvalDouble(rbArgs[2], vars, ln, getInkey, isKeyDown, graphics);
                                 float rbH    = (float)EvalDouble(rbArgs[3], vars, ln, getInkey, isKeyDown, graphics);
-                                
+                                    
                                 if (rbArgs.Count >= 5)
                                 {
                                     // Color string provided → use SetRasterBar (new API)
-                                    string colorPart = string.Join(",", rbArgs.Skip(4)).Trim().Trim('"');
+                                    string colorPart = ValueToString(EvalValue(rbArgs[4].Trim(), vars, ln, getInkey, isKeyDown, graphics));
                                     graphics.SetRasterBar(currentLayer, rbNum, x, rbOff, rbH, colorPart);
                                 }
                                 else
@@ -3154,6 +3087,9 @@ public static class AmosRunner
                                     graphics.SetShaderParams(currentLayer, rbNum, rbOff, rbH);
                                 }
                             }
+                            
+                            if (savedScreen.HasValue)
+                                graphics.SetDrawingScreen(savedScreen.Value);
                             break;
                         }
                         
@@ -4273,42 +4209,6 @@ public static class AmosRunner
                     return string.Concat(Enumerable.Repeat(str, count));
                 }
 
-                if (id.Equals("BOB#X", StringComparison.OrdinalIgnoreCase))
-                {
-                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                    t.TryConsume(')');
-                    return (double)g.GetBob(val).X;     
-                }
-                if (id.Equals("BOB#Y", StringComparison.OrdinalIgnoreCase))
-                {
-                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                    t.TryConsume(')');
-                    return (double)g.GetBob(val).Y;     
-                }
-                if (id.Equals("BOB#ZOOMX", StringComparison.OrdinalIgnoreCase))
-                {
-                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                    t.TryConsume(')');
-                    return (double)g.GetBob(val).ZoomX;      
-                }
-                if (id.Equals("BOB#ZOOMY", StringComparison.OrdinalIgnoreCase))
-                {
-                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                    t.TryConsume(')');
-                    return (double)g.GetBob(val).ZoomY;      
-                } 
-                if (id.Equals("BOB#ANGLE", StringComparison.OrdinalIgnoreCase))
-                {
-                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                    t.TryConsume(')');
-                    return (double)g.GetBob(val).Angle;      
-                } 
-                if (id.Equals("BOB#VISIBLE", StringComparison.OrdinalIgnoreCase))
-                {
-                    int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
-                    t.TryConsume(')');
-                    return g.GetSprite(val).Visible ? 1.0 : 0.0; 
-                } 
                 if (id.Equals("SPRITE#X", StringComparison.OrdinalIgnoreCase))
                 {
                     int val = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture); 
