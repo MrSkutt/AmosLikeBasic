@@ -1932,10 +1932,12 @@ public static class AmosRunner
                         case "WAIT":
                             if (arg.ToUpperInvariant() == "VBL")
                             {
- 
                                 // NYTT: Stega sprite-fades innan frame presenteras
                                 graphics.TickSpriteFades();
                                 graphics.TickLayerFades();
+                                
+                                // ✅ NYTT: Auto-uppdatera WAVE Time parameter
+                                graphics.TickSpriteEffects(0.016f);
                                 
                                 // 1. Säkerställ att all ritning är klar
                                 graphics.EndFrame();
@@ -2844,6 +2846,149 @@ public static class AmosRunner
                                 {
                                     id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.SpriteOff(id.Value);
+                                }
+                                else if (sub == "EFFECT")
+                                {
+                                    // SPRITE EFFECT ADD/CLEAR/UPDATE id, ...
+                                    if (ss.Count < 2) break;
+                                    
+                                    string effectSub = ss[1].ToUpperInvariant();
+                                    
+                                    if (effectSub == "ADD" && ss.Count >= 4)
+                                    {
+                                        // SPRITE EFFECT ADD id, type, param1, param2, ...
+                                        id = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+                                        string effectType = ss[3].ToUpperInvariant();
+                                        var sprite = graphics.GetSprite(id.Value);
+                                        
+                                        switch (effectType)
+                                        {
+                                            case "BLUR":
+                                                if (ss.Count >= 5)
+                                                {
+                                                    float radius = (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics);
+                                                    sprite.Effects.Add(new SpriteBlurEffect { Radius = radius });
+                                                }
+                                                break;
+    
+                                            case "WAVE":
+                                                if (ss.Count >= 6)
+                                                {
+                                                    float amplitudeX = (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics);
+                                                    float frequencyX = (float)EvalDouble(ss[5], vars, ln, getInkey, isKeyDown, graphics);
+        
+                                                    float amplitudeY = ss.Count >= 7 
+                                                        ? (float)EvalDouble(ss[6], vars, ln, getInkey, isKeyDown, graphics) 
+                                                        : 0f;
+                                                    float frequencyY = ss.Count >= 8 
+                                                        ? (float)EvalDouble(ss[7], vars, ln, getInkey, isKeyDown, graphics) 
+                                                        : 0f;
+        
+                                                    // ✅ Auto-sätt phaseY till pi/2 (90 grader) för organisk rörelse
+                                                    float phaseY = amplitudeY > 0 ? 1.57f : 0f;  // pi/2 ≈ 1.57
+        
+                                                    sprite.Effects.Add(new WaveEffect { 
+                                                        AmplitudeX = amplitudeX,
+                                                        FrequencyX = frequencyX,
+                                                        AmplitudeY = amplitudeY,
+                                                        FrequencyY = frequencyY,
+                                                        PhaseX = 0f,
+                                                        PhaseY = phaseY  // ✅ Ge Y-wave en 90° fasförskjutning
+                                                    });
+                                                }
+                                                break;
+                                            case "COLOR":
+                                                if (ss.Count >= 7)
+                                                {
+                                                    float brightness = (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics);
+                                                    float contrast = (float)EvalDouble(ss[5], vars, ln, getInkey, isKeyDown, graphics);
+                                                    float saturation = (float)EvalDouble(ss[6], vars, ln, getInkey, isKeyDown, graphics);
+                                                    sprite.Effects.Add(new ColorGradeEffect {
+                                                        Brightness = brightness,
+                                                        Contrast = contrast,
+                                                        Saturation = saturation
+                                                    });
+                                                }
+                                                break;
+    
+
+                                        }
+                                        sprite.InvalidateEffectCache();
+                                    }
+                                    else if (effectSub == "CLEAR" && ss.Count >= 3)
+                                    {
+                                        // SPRITE EFFECT CLEAR id
+                                        id = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+                                        var sprite = graphics.GetSprite(id.Value);
+                                        sprite.Effects.Clear();
+                                        sprite.InvalidateEffectCache();
+                                    }
+                                    else if (effectSub == "UPDATE" && ss.Count >= 6)
+                                    {
+                                        id = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+                                        int idx = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
+                                        string param = ss[4].ToUpperInvariant();
+                                        float val = (float)EvalDouble(ss[5], vars, ln, getInkey, isKeyDown, graphics);
+    
+                                        var sprite = graphics.GetSprite(id.Value);
+                                        if (idx >= 0 && idx < sprite.Effects.Count)
+                                        {
+                                            var effect = sprite.Effects[idx];
+        
+                                            // ✅ Flagga för om vi ska invalidera cache
+                                            bool shouldInvalidateCache = true;
+        
+                                            switch (effect)
+                                            {
+                                                case SpriteBlurEffect blur when param == "RADIUS":
+                                                    blur.Radius = val;
+                                                    break;
+                                                case WaveEffect wave when param == "AMPLITUDEX":
+                                                    wave.AmplitudeX = val;
+                                                    break;
+                                                case WaveEffect wave when param == "FREQUENCYX":
+                                                    wave.FrequencyX = val;
+                                                    break;
+                                                case WaveEffect wave when param == "AMPLITUDEY":
+                                                    wave.AmplitudeY = val;
+                                                    break;
+                                                case WaveEffect wave when param == "FREQUENCYY":
+                                                    wave.FrequencyY = val;
+                                                    break;
+                                                case WaveEffect wave when param == "PHASEX":
+                                                    wave.PhaseX = val;
+                                                    shouldInvalidateCache = false; // ✅ Animerad parameter
+                                                    break;
+                                                case WaveEffect wave when param == "PHASEY":
+                                                    wave.PhaseY = val;
+                                                    shouldInvalidateCache = false; // ✅ Animerad parameter
+                                                    break;
+                                                case WaveEffect wave when param == "TIME":
+                                                    wave.Time = val/10;
+                                                    shouldInvalidateCache = false; // ✅ Animerad parameter
+                                                    break;
+                                                case ColorGradeEffect color when param == "BRIGHTNESS":
+                                                    color.Brightness = val;
+                                                    break;
+                                                case ColorGradeEffect color when param == "CONTRAST":
+                                                    color.Contrast = val;
+                                                    break;
+                                                case ColorGradeEffect color when param == "SATURATION":
+                                                    color.Saturation = val;
+                                                    break;
+                                            }
+                                            // ✅ DEBUG: Visa vad som händer
+                                           System.Diagnostics.Debug.WriteLine($"🔍 UPDATE: sprite={id.Value}, idx={idx}, param={param}, val={val}");
+                                            System.Diagnostics.Debug.WriteLine($"   Effect type: {effect.GetType().Name}");
+                                            System.Diagnostics.Debug.WriteLine($"   shouldInvalidateCache: {shouldInvalidateCache}");
+ 
+                                            // ✅ Invalidera bara för statiska parametrar (RADIUS, AMPLITUDE etc)
+                                            if (shouldInvalidateCache)
+                                            {
+                                                sprite.InvalidateEffectCache();
+                                            }
+                                        }
+                                    }
                                 }
                                 else
                                 {

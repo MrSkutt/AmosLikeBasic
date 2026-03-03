@@ -34,15 +34,6 @@ public partial class ScreenWindow : Window
         {
             ScreenControl?.Focus();
             GridControl?.Focus();
-
-            // Logga fönsterstorlek och scaling
-            var root = this.VisualRoot;
-            var bounds = this.Bounds.Size;
-            var scaling = root?.RenderScaling ?? 1.0;
-            System.Console.WriteLine($"Window size: {bounds.Width}x{bounds.Height}, scale {scaling}");
-
-            // Skicka uniform iResolution till shadern
-            //ScreenControl?.SetShaderResolution(new Vector2(640, 480));
         };
         
     }

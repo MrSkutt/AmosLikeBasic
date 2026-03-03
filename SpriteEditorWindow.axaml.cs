@@ -263,16 +263,6 @@ public partial class SpriteEditorWindow : Window
             UpdateCurrentColorIndicator();
         }
     }
-
-    
-    private void ColorPickerControl_OnColorChanged(object? sender, ColorChangedEventArgs e)
-    {
-        if (_suppressUiEvents)
-            return;
-
-        _currentColor = e.NewColor;
-        UpdateCurrentColorIndicator();
-    }
     
     private void PaletteWhite_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) 
     { 

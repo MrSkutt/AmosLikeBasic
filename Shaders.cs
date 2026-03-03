@@ -35,12 +35,9 @@ half4 main(float2 fragCoord) {
     wrappedCoord.x = wrappedCoord.x - iResolution.x * floor(wrappedCoord.x / iResolution.x);
     wrappedCoord.y = wrappedCoord.y - iResolution.y * floor(wrappedCoord.y / iResolution.y);
 
-
-
-
-
     // Sample the texture
-    half4 mask = sample(inputTexture, wrappedCoord);
+    //half4 mask = sample(inputTexture, wrappedCoord);
+    half4 mask = inputTexture.eval(wrappedCoord);
     float y = fragCoord.y;
     float2 uv = fragCoord / iScreenResolution.xy;
     
