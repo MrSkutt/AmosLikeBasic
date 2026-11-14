@@ -86,8 +86,9 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
 
         try
         {
+            // RGBA går att rendera till på alla GPU-backends (BGRA inte alltid på OpenGL)
             var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
-                SKColorType.Bgra8888, SKAlphaType.Premul);
+                SKColorType.Rgba8888, SKAlphaType.Premul);
 
             using var surface = (_gr != null ? SKSurface.Create(_gr, true, info) : null)
                                 ?? SKSurface.Create(info);
@@ -241,15 +242,11 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
         c.Restore();
     }
 
-    // Bytes i våra WriteableBitmaps ligger i plattformens ordning (PNG kopieras rakt in, PLOT skriver
-    // RGBA), oavsett vad PixelFormat säger. Den gamla vägen via RenderTargetBitmap visade dem så,
-    // så vi tolkar dem likadant. Sätts av AmosGpuView på UI-tråden innan första ritningen.
-    internal static SKColorType BitmapColorType = SKColorType.Bgra8888;
-
+    // Våra WriteableBitmaps är alltid BGRA (se AmosGraphics.CopyPixelsBgra)
     internal static SKImage ToSkImage(WriteableBitmap bmp)
     {
         using var fb = bmp.Lock();
-        var info = new SKImageInfo(fb.Size.Width, fb.Size.Height, BitmapColorType, SKAlphaType.Premul);
+        var info = new SKImageInfo(fb.Size.Width, fb.Size.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
         return SKImage.FromPixelCopy(info, fb.Address, fb.RowBytes);
     }
 
@@ -331,25 +328,6 @@ public sealed class AmosGpuView : Control
 {
     public AmosGraphics Graphics { get; set; } = null!;
     private static readonly string RasterShaderCode = Shader.RasterShaderCode;
-    private static bool _colorTypeDetected;
-
-    // Rita en röd pixel och se i vilken ordning plattformen lagrar den (RGBA på macOS, BGRA på Windows)
-    private static SKColorType DetectPlatformColorType()
-    {
-        using var rtb = new RenderTargetBitmap(new PixelSize(1, 1));
-        using (var c = rtb.CreateDrawingContext())
-            c.FillRectangle(Brushes.Red, new Rect(0, 0, 1, 1));
-
-        var px = new byte[4];
-        unsafe
-        {
-            fixed (byte* p = px)
-                rtb.CopyPixels(new PixelRect(0, 0, 1, 1), (nint)p, px.Length, 4);
-        }
-
-        return px[0] == 255 ? SKColorType.Rgba8888 : SKColorType.Bgra8888;
-    }
-
     protected override Size MeasureOverride(Size availableSize)
     {
         if (Graphics != null && Graphics.Width > 0) return new Size(Graphics.Width, Graphics.Height);
@@ -359,12 +337,6 @@ public sealed class AmosGpuView : Control
     public override void Render(DrawingContext ctx)
     {
         if (Graphics == null) return;
-
-        if (!_colorTypeDetected)
-        {
-            LayerDrawOperation.BitmapColorType = DetectPlatformColorType();
-            _colorTypeDetected = true;
-        }
 
         List<GpuLayer> layersCopy;
         List<AmosGraphics.QueuedFontText> fontTextsCopy;
@@ -558,11 +530,15 @@ public sealed class AmosGraphics
                 }
             }
 
-            // Kopiera pixlar till ActiveScreen (med RGBA->BGRA fixen)
+            // Kopiera pixlar till ActiveScreen (konverterade till BGRA)
             var b = new byte[ps.Width * ps.Height * 4];
             unsafe
             {
-                fixed (byte* p = b) rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
+                fixed (byte* p = b)
+                {
+                    rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
+                    ToBgra(rtb, p, ps.Width, ps.Height, ps.Width * 4);
+                }
             }
 
             lock (LockObject)
@@ -814,7 +790,7 @@ public sealed class AmosGraphics
             var bmp = CreateEmptyBitmap(w, h);
             using (var fb = bmp.Lock())
             {
-                b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
+                CopyPixelsBgra(b, new PixelRect(0, 0, w, h), fb);
                 unsafe
                 {
                     FixupImageColors(fb.Address.ToPointer(), w * h);
@@ -850,8 +826,7 @@ public sealed class AmosGraphics
                 var frame = CreateEmptyBitmap(frameW, frameH);
                 using (var fb = frame.Lock())
                 {
-                    b.CopyPixels(new PixelRect(col * frameW, row * frameH, frameW, frameH),
-                        fb.Address, fb.RowBytes * frameH, fb.RowBytes);
+                    CopyPixelsBgra(b, new PixelRect(col * frameW, row * frameH, frameW, frameH), fb);
                     unsafe
                     {
                         FixupImageColors(fb.Address.ToPointer(), frameW * frameH);
@@ -2004,9 +1979,9 @@ public sealed class AmosGraphics
             {
                 uint* p = (uint*)fb.Address;
                 // BGRA format: [B][G][R][A] i minnet
-                uint val = (uint)((c.A << 24) | (c.B << 16) | (c.G << 8) | c.R);
+                uint val = (uint)((c.A << 24) | (c.R << 16) | (c.G << 8) | c.B);
 
-                if ((val & 0xFF00FFFF) == 0) // Kontrollera om BGR = 0
+                if ((val & 0xFFFFFF00) == 0) // Alpha, röd och grön = 0 ger genomskinligt (som förut)
                     p[y * (fb.RowBytes / 4) + x] = 0;
                 else
                     p[y * (fb.RowBytes / 4) + x] = val;
@@ -2083,9 +2058,9 @@ public sealed class AmosGraphics
                     for (var x = x1; x <= x2; x++)
                     {
                         var i = x * 4;
-                        row[i + 0] = rb;
+                        row[i + 0] = bb;
                         row[i + 1] = gb;
-                        row[i + 2] = bb;
+                        row[i + 2] = rb;
                         row[i + 3] = a;
                     }
                 }
@@ -2105,7 +2080,7 @@ public sealed class AmosGraphics
             int h = bmp.PixelSize.Height;
 
             // Konvertera Ink till uint (BGRA)
-            uint cVal = (uint)((Ink.A << 24) | (Ink.B << 16) | (Ink.G << 8) | Ink.R);
+            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
 
             unsafe
             {
@@ -2158,7 +2133,7 @@ public sealed class AmosGraphics
 
             int w = bmp.PixelSize.Width;
             int h = bmp.PixelSize.Height;
-            uint cVal = (uint)((Ink.A << 24) | (Ink.B << 16) | (Ink.G << 8) | Ink.R);
+            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
 
             unsafe
             {
@@ -2238,7 +2213,7 @@ public sealed class AmosGraphics
 
             int w = bmp.PixelSize.Width;
             int h = bmp.PixelSize.Height;
-            uint cVal = (uint)((Ink.A << 24) | (Ink.B << 16) | (Ink.G << 8) | Ink.R);
+            uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
 
             unsafe
             {
@@ -2288,7 +2263,7 @@ public sealed class AmosGraphics
             if (x1 < 0 || x1 >= w || y1 < 0 || y1 >= h) return;
 
             // FIX: Skapa färg i BGRA-format
-            uint fillColor = (uint)((Ink.A << 24) | (Ink.B << 16) | (Ink.G << 8) | Ink.R);
+            uint fillColor = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
 
             unsafe
             {
@@ -2386,7 +2361,11 @@ public sealed class AmosGraphics
             var b = new byte[ps.Width * ps.Height * 4];
             unsafe
             {
-                fixed (byte* p = b) rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
+                fixed (byte* p = b)
+                {
+                    rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
+                    ToBgra(rtb, p, ps.Width, ps.Height, ps.Width * 4);
+                }
             }
 
             using (var dst = GetActiveScreen().Lock())
@@ -2436,11 +2415,7 @@ public sealed class AmosGraphics
                     using (var fb = t.Lock())
                     {
                         // 1. KOPIERA PIXLAR FRÅN FONT-ATLAS
-                        b.CopyPixels(
-                            new PixelRect(x * tw, y * th, tw, th),
-                            fb.Address,
-                            fb.RowBytes * th,
-                            fb.RowBytes);
+                        CopyPixelsBgra(b, new PixelRect(x * tw, y * th, tw, th), fb);
 
                         unsafe
                         {
@@ -2469,11 +2444,7 @@ public sealed class AmosGraphics
                                     bcol = (bcol * a) / 255;
 
                                     // BGRA + Premul (Skia)
-                                    p[i] =
-                                        (a << 24) |
-                                        (r << 0) |
-                                        (g << 8) |
-                                        (bcol << 16);
+                                    p[i] = (a << 24) | (r << 16) | (g << 8) | bcol;
                                 }
                             }
                         }
@@ -2579,6 +2550,30 @@ public sealed class AmosGraphics
     // -------------------------------------------------------------------------------
     //  HJÄLPMETOD FÖR FÄRGKORRIGERING (MAC vs PC)
     // -------------------------------------------------------------------------------
+    // Alla våra WriteableBitmaps lagrar pixlar som BGRA (förmultiplicerad alpha), precis som deras
+    // PixelFormat säger. Bilder från disk och RenderTargetBitmap har plattformens ordning
+    // (RGBA på macOS, BGRA på Windows), så de konverteras när de kopieras in.
+    public static void CopyPixelsBgra(Bitmap src, PixelRect rect, ILockedFramebuffer fb)
+    {
+        src.CopyPixels(rect, fb.Address, fb.RowBytes * rect.Height, fb.RowBytes);
+        unsafe
+        {
+            ToBgra(src, (byte*)fb.Address, rect.Width, rect.Height, fb.RowBytes);
+        }
+    }
+
+    public static unsafe void ToBgra(Bitmap src, byte* p, int width, int height, int rowBytes)
+    {
+        if (src.Format != PixelFormat.Rgba8888) return;
+
+        for (int y = 0; y < height; y++)
+        {
+            byte* row = p + y * rowBytes;
+            for (int x = 0; x < width * 4; x += 4)
+                (row[x], row[x + 2]) = (row[x + 2], row[x]);
+        }
+    }
+
     private unsafe void FixupImageColors(void* address, int pixelCount)
     {
         uint* p = (uint*)address;
@@ -2613,8 +2608,7 @@ public sealed class AmosGraphics
                 var layer = DrawingFrame[_currentScreen];
                 using (var fb = layer.Bitmap.Lock())
                 {
-                    b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address,
-                        fb.RowBytes * layer.Bitmap.PixelSize.Height, fb.RowBytes);
+                    CopyPixelsBgra(b, new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb);
                 }
             }
         }
@@ -2657,8 +2651,7 @@ public sealed class AmosGraphics
                     var t = CreateEmptyBitmap(tw, th);
                     using (var fb = t.Lock())
                     {
-                        b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th,
-                            fb.RowBytes);
+                        CopyPixelsBgra(b, new PixelRect(x * tw, y * th, tw, th), fb);
                         unsafe
                         {
                             FixupImageColors(fb.Address.ToPointer(), tw * th);
@@ -2698,8 +2691,7 @@ public sealed class AmosGraphics
                     using (var fb = t.Lock())
                     {
                         // Kopiera exakt den rutan från källbilden
-                        b.CopyPixels(new PixelRect(x * tw, y * th, tw, th), fb.Address, fb.RowBytes * th,
-                            fb.RowBytes);
+                        CopyPixelsBgra(b, new PixelRect(x * tw, y * th, tw, th), fb);
                         unsafe
                         {
                             FixupImageColors(fb.Address.ToPointer(), tw * th);
@@ -2906,7 +2898,7 @@ public sealed class AmosGraphics
             var s = GetSprite(id);
             using (var fb = s.Bitmap.Lock())
             {
-                b.CopyPixels(new PixelRect(0, 0, w, h), fb.Address, fb.RowBytes * h, fb.RowBytes);
+                CopyPixelsBgra(b, new PixelRect(0, 0, w, h), fb);
 
                 unsafe
                 {
@@ -2957,9 +2949,7 @@ public sealed class AmosGraphics
                 var f = CreateEmptyBitmap(frameW, frameH);
                 using (var fb = f.Lock())
                 {
-                    sourceInfo.CopyPixels(new PixelRect(srcX, srcY, frameW, frameH), fb.Address,
-                        fb.RowBytes * frameH,
-                        fb.RowBytes);
+                    CopyPixelsBgra(sourceInfo, new PixelRect(srcX, srcY, frameW, frameH), fb);
 
                     unsafe
                     {
@@ -3024,9 +3014,7 @@ public sealed class AmosGraphics
         var f = CreateEmptyBitmap(s.Width, s.Height);
         using (var fb = f.Lock())
         {
-            b.CopyPixels(new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb.Address,
-                fb.RowBytes * s.Height,
-                fb.RowBytes);
+            CopyPixelsBgra(b, new PixelRect(0, 0, (int)b.Size.Width, (int)b.Size.Height), fb);
             unsafe
             {
                 FixupImageColors(fb.Address.ToPointer(), s.Width * s.Height);
@@ -3514,7 +3502,7 @@ public static class ShaderHelper
         {
             var (leftPad, rightPad, topPad, bottomPad) = effect.GetPadding();
             var info = new SKImageInfo(input.Width + leftPad + rightPad, input.Height + topPad + bottomPad,
-                input.ColorType, SKAlphaType.Premul);
+                SKColorType.Rgba8888, SKAlphaType.Premul);
 
             using var paint = effect.GetShaderPaint(input);
             if (paint == null) return null;

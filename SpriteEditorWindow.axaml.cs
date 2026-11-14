@@ -427,11 +427,7 @@ public partial class SpriteEditorWindow : Window
 
                 using (var fb = spriteBmp.Lock())
                 {
-                    bitmap.CopyPixels(
-                        new PixelRect(0, 0, w, h),
-                        fb.Address,
-                        fb.RowBytes * h,
-                        fb.RowBytes);
+                    AmosGraphics.CopyPixelsBgra(bitmap, new PixelRect(0, 0, w, h), fb);
                 }
 
                 _currentFileName = file.Path.LocalPath;
@@ -504,11 +500,9 @@ public partial class SpriteEditorWindow : Window
                     
                         using (var fb = frameBmp.Lock())
                         {
-                            bitmap.CopyPixels(
+                            AmosGraphics.CopyPixelsBgra(bitmap,
                                 new PixelRect(col * config.FrameWidth, row * config.FrameHeight, config.FrameWidth, config.FrameHeight),
-                                fb.Address,
-                                fb.RowBytes * config.FrameHeight,
-                                fb.RowBytes);
+                                fb);
                         }
                     
                         sprite.Frames.Add(frameBmp);
