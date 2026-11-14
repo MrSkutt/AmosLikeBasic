@@ -15,7 +15,7 @@ using Avalonia.Interactivity;
 
 namespace AmosLikeBasic;
 
-public static class AmosRunner
+public static partial class AmosRunner
 {
     // Lägg till i din klass
     private static Dictionary<int, FileChannel> _openFiles = new Dictionary<int, FileChannel>();
@@ -324,14 +324,15 @@ public static class AmosRunner
     {
         var animationManager = new AnimationManager();
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        var lastVarUpdateTime = DateTime.MinValue;
-        var updateInterval = TimeSpan.FromMilliseconds(500);
+        long lastVarUpdateTime = long.MinValue / 2;
+        const long updateIntervalMs = 500;
         // En lokal hjälpfunktion för att uppdatera variabler och trigga UI
         var setVar = (string name, object value) => {
             vars[name] = value;
                 
-            var now = DateTime.Now;
-            if (now - lastVarUpdateTime > updateInterval)
+            // TickCount64 är mycket billigare än DateTime.Now, som annars kostade på varje tilldelning
+            var now = Environment.TickCount64;
+            if (now - lastVarUpdateTime > updateIntervalMs)
             {
                 onVariablesChanged(new Dictionary<string, object>(vars)); // Skicka en kopia
                 lastVarUpdateTime = now;
@@ -366,14 +367,19 @@ public static class AmosRunner
         
         // === EXPANDERA INLINE-IF TILL MULTI-RAD ===
         // "IF X THEN CMD1 : CMD2"  →  "IF X THEN\nCMD1\nCMD2\nENDIF"
-        lines = ExpandInlineIf(lines);
+        // sourceLines[pc] = radnumret i editorn (1-baserat), för debuggern och felmeddelanden
+        var sourceLineList = new List<int>();
+        lines = ExpandInlineIf(lines, sourceLineList);
+        var sourceLines = sourceLineList.ToArray();
 
         // Hjälpfunktion (placeras som static method i klassen):
-        static string[] ExpandInlineIf(string[] input)
+        static string[] ExpandInlineIf(string[] input, List<int> origin)
         {
             var result = new List<string>();
-            foreach (var raw in input)
+            for (int lineIndex = 0; lineIndex < input.Length; lineIndex++)
             {
+                var raw = input[lineIndex];
+                int before = result.Count;
                 var stripped = StripLeadingLineNumber(StripComments(raw)).Trim();
                 var upper = stripped.ToUpperInvariant();
 
@@ -416,12 +422,14 @@ public static class AmosRunner
                             }
                     
                             result.Add("ENDIF");
+                            while (origin.Count < result.Count) origin.Add(lineIndex + 1);
                             continue;
                         }
                     }
                 }
         
                 result.Add(raw); // Alla andra rader oförändrade
+                origin.Add(lineIndex + 1);
             }
             return result.ToArray();
         }
@@ -1023,38 +1031,39 @@ public static class AmosRunner
             return result;
         }
         
+        // Allt som går att göra en gång (kommentarer, radnummer, uppdelning i satser) görs här
+        // i stället för varje gång raden körs
+        ClearCompiledCache();
+        var prepared = PrepareLines(lines, sourceLines);
+
         int pc = 0;
         while (pc < lines.Length) {
             token.ThrowIfCancellationRequested();
             
-            // Hoppa över tomma rader vid stepping
-            while (pc < lines.Length && IsEmptyLine(lines[pc]))
+            // Hoppa över tomma rader, kommentarer och etiketter
+            while (pc < lines.Length && prepared[pc].Skip)
             {
                 pc++;
             }
                 
             if (pc >= lines.Length) break;
-            
-            var line = StripComments((lines[pc] ?? "").Trim());
-            if (string.IsNullOrWhiteSpace(line) || line.EndsWith(':')) { pc++; continue; }
-            line = StripLeadingLineNumber(line).Trim();
 
-            // Jump over comments
-            var upperCheck = line.ToUpperInvariant();
-            if (upperCheck == "REM" || upperCheck.StartsWith("REM ")) { pc++; continue; }
+            var preparedLine = prepared[pc];
+            var line = preparedLine.Text;
+            var ln = preparedLine.SourceLine;
 
-            await waitForStep(pc);          // stannar aldrig på REM
-            var ln = pc + 1;
+            // Debuggern räknar i editorns rader (0-baserat), en gång per källrad
+            if (preparedLine.FirstOfSourceLine)
+                await waitForStep(ln - 1);          // stannar aldrig på REM
             
-            var commands = SplitMultipleCommands(line);
             bool jumpHappened = false;
 
-            foreach (var fullCmd in commands) {
+            foreach (var preparedCmd in preparedLine.Commands) {
+                var fullCmd = preparedCmd.Full;
                 try
                 {
-                    var trimmedCmd = fullCmd.Trim();
-                    if (string.IsNullOrEmpty(trimmedCmd)) continue;
-                    var (cmd, arg) = SplitCommand(trimmedCmd);
+                    var cmd = preparedCmd.Cmd;
+                    var arg = preparedCmd.Arg;
 
                     switch (cmd)
                     {
@@ -3937,7 +3946,8 @@ public static class AmosRunner
         res.Add(l[s..].Trim()); return res;
     }
     
-    private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
+    // Den ursprungliga villkorstolken (se CompileCondition i AmosRunner.Compiled.cs)
+    private static bool EvalConditionInterpreted(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
     {
         c = StripOuterParens(c.Trim());
 
@@ -3945,35 +3955,35 @@ public static class AmosRunner
         //    så att t.ex. (A=1 OR B=1) AND C=1 fungerar.
         var orIdx = TopLevelIndexOf(c, "OR", isWord: true);
         if (orIdx >= 0) {
-            return EvalCondition(c[..orIdx], v, ln, gk, ikd, g) || 
-                   EvalCondition(c[(orIdx + 2)..], v, ln, gk, ikd, g);
+            return EvalConditionInterpreted(c[..orIdx], v, ln, gk, ikd, g) || 
+                   EvalConditionInterpreted(c[(orIdx + 2)..], v, ln, gk, ikd, g);
         }
 
         // 2. Hantera AND
         var andIdx = TopLevelIndexOf(c, "AND", isWord: true);
         if (andIdx >= 0) {
-            return EvalCondition(c[..andIdx], v, ln, gk, ikd, g) && 
-                   EvalCondition(c[(andIdx + 3)..], v, ln, gk, ikd, g);
+            return EvalConditionInterpreted(c[..andIdx], v, ln, gk, ikd, g) && 
+                   EvalConditionInterpreted(c[(andIdx + 3)..], v, ln, gk, ikd, g);
         }
 
         // NOT (binder hårdare än AND/OR)
         if (c.StartsWith("NOT ", StringComparison.OrdinalIgnoreCase) ||
             c.StartsWith("NOT(", StringComparison.OrdinalIgnoreCase))
         {
-            return !EvalCondition(c.Substring(3), v, ln, gk, ikd, g);
+            return !EvalConditionInterpreted(c.Substring(3), v, ln, gk, ikd, g);
         }
 
         // 3. Jämförelser (=, <, >, etc.) på toppnivå
         var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
         if (ops.All(op => TopLevelIndexOf(c, op, isWord: false) < 0)) {
             // Konvertera till double: allt utom exakt 0.0 räknas som sant
-            return Math.Abs(Convert.ToDouble(EvalValue(c, v, ln, gk, ikd, g))) > 0.000001;
+            return Math.Abs(Convert.ToDouble(EvalValueInterpreted(c, v, ln, gk, ikd, g))) > 0.000001;
         }
 
         foreach (var op in ops) {
             var i = TopLevelIndexOf(c, op, isWord: false); if (i < 0) continue;
-            var lV = EvalValue(c[..i].Trim(), v, ln, gk, ikd, g); 
-            var rV = EvalValue(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
+            var lV = EvalValueInterpreted(c[..i].Trim(), v, ln, gk, ikd, g); 
+            var rV = EvalValueInterpreted(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
                 
             if (lV is string || rV is string) { 
                 var ls = ValueToString(lV); 
@@ -4019,7 +4029,9 @@ public static class AmosRunner
         return string.IsNullOrWhiteSpace(stripped) || stripped.EndsWith(":");
     }
     
-    private static object EvalValue(string t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+    // Den ursprungliga tolken: läser och räknar ut uttrycket direkt från text.
+    // Används av den kompilerade varianten (AmosRunner.Compiled.cs) som reserv.
+    private static object EvalValueInterpreted(string t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         if (string.IsNullOrWhiteSpace(t)) return "";
         var tok = new Tokenizer(t);
         return ParseExpr(ref tok, v, ln, gk, ikd, g);
@@ -5117,6 +5129,8 @@ public static class AmosRunner
     private ref struct Tokenizer {
         private readonly string _s; private int _i;
         public Tokenizer(string s) { _s = s; _i = 0; }
+        public int Pos { get => _i; set => _i = value; }
+        public string Source => _s;
         public void SkipWs() { while (_i < _s.Length && char.IsWhiteSpace(_s[_i])) _i++; }
         public bool TryConsume(char c) { SkipWs(); if (_i < _s.Length && _s[_i] == c) { _i++; return true; } return false; }
         public bool TryReadInt(out int v) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsDigit(_s[_i]) || (_i == s && _s[_i] == '-'))) _i++; return int.TryParse(_s[s.._i], out v); }
