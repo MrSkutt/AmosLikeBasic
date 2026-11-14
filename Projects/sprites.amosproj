@@ -1,1 +1,1 @@
-{"Version":2,"ProgramText":"\n\n  SPRITE LOAD 1, \u0022Graphics/hero.png\u0022\n  SPRITE ON 1\n  SPRITE LAYER 1,0\n\n","ScreenWidth":null,"ScreenHeight":null,"Sprites":null,"MapWidth":null,"MapHeight":null,"MapData":null}
+{"Version":2,"ProgramText":"\n\n  SPRITE LOAD 1, \u0022Graphics/hero.png\u0022\n  SPRITE ON 1\n  SPRITE LAYER 1,0\n  SPRITE ZOOM 1,200,200\n  SPRITE ROTATE 1,90\n"}

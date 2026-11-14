@@ -37,6 +37,7 @@ public sealed class GpuLayer
     // Shader-support
     public string? SkSlCode { get; set; }
     public SKRuntimeEffect? CachedEffect { get; set; }
+    public string? CompiledSkSlCode { get; set; } // Koden som CachedEffect kompilerades från
 }
 
 
@@ -71,18 +72,22 @@ public class ShaderDrawOperation : ICustomDrawOperation
         var canvas = skia.SkCanvas;
 
         
-        if (_layer.CachedEffect == null && !string.IsNullOrEmpty(_layer.SkSlCode))
+        // Kompilera om när koden ändrats (t.ex. RASTER SPACE). Även misslyckade försök
+        // kommer ihåg koden så att en trasig shader inte kompileras om varje frame.
+        var code = _layer.SkSlCode;
+        if (!string.IsNullOrEmpty(code) && code != _layer.CompiledSkSlCode)
         {
-            // ✅ V3 API
-            _layer.CachedEffect = SKRuntimeEffect.CreateShader(_layer.SkSlCode, out var errors);
+            _layer.CompiledSkSlCode = code;
+            _layer.CachedEffect = SKRuntimeEffect.CreateShader(code, out var errors);
             if (!string.IsNullOrEmpty(errors))
             {
                 System.Diagnostics.Debug.WriteLine($"SkSL Error: {errors}");
-                return;
+                _layer.CachedEffect = null;
             }
         }
 
-        if (_layer.CachedEffect != null)
+        var effect = _layer.CachedEffect;
+        if (effect != null)
         {
             try
             {
@@ -94,23 +99,23 @@ public class ShaderDrawOperation : ICustomDrawOperation
                 skBitmap.InstallPixels(info, fb.Address, fb.RowBytes);
                 using var image = SKImage.FromBitmap(skBitmap);
 
-                var children = new SKRuntimeEffectChildren(_layer.CachedEffect);
-                if (_layer.CachedEffect.Children.Contains("inputTexture"))
+                var children = new SKRuntimeEffectChildren(effect);
+                if (effect.Children.Contains("inputTexture"))
                     children.Add("inputTexture", image.ToShader());
 
-                var uniforms = new SKRuntimeEffectUniforms(_layer.CachedEffect);
+                var uniforms = new SKRuntimeEffectUniforms(effect);
             
-                if (_layer.CachedEffect.Uniforms.Contains("iResolution"))
+                if (effect.Uniforms.Contains("iResolution"))
                     uniforms.Add("iResolution", new float[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
 
                 // Lägg till denna för att shadern ska veta skärmens storlek separat från bildens storlek
-                if (_layer.CachedEffect.Uniforms.Contains("iScreenResolution"))
+                if (effect.Uniforms.Contains("iScreenResolution"))
                     uniforms.Add("iScreenResolution", new float[] { (float)_destRect.Width, (float)_destRect.Height });
 
-                if (_layer.CachedEffect.Uniforms.Contains("iTime"))
+                if (effect.Uniforms.Contains("iTime"))
                     uniforms.Add("iTime", _layer.Timer);
 
-                if (_layer.CachedEffect.Uniforms.Contains("uParams")) 
+                if (effect.Uniforms.Contains("uParams")) 
                 {
                     int slotCount = _layer.ShaderValues.Length;
                     float[] uParamData = new float[slotCount * 4]; // varje Vector4 = 4 floats
@@ -129,7 +134,7 @@ public class ShaderDrawOperation : ICustomDrawOperation
                 }
                     
                 // Säkerställ att uPositions och uHeights är exakt 50 element
-                if (_layer.CachedEffect.Uniforms.Contains("uPositions")) 
+                if (effect.Uniforms.Contains("uPositions")) 
                 {
                     float[] p50 = new float[50];
                     if (_layer.ShaderParams != null) 
@@ -137,7 +142,7 @@ public class ShaderDrawOperation : ICustomDrawOperation
                     uniforms.Add("uPositions", p50);
                 }
 
-                if (_layer.CachedEffect.Uniforms.Contains("uHeights")) 
+                if (effect.Uniforms.Contains("uHeights")) 
                 {
                     float[] h50 = new float[50];
                     if (_layer.ShaderHeights != null) 
@@ -145,20 +150,21 @@ public class ShaderDrawOperation : ICustomDrawOperation
                     uniforms.Add("uHeights", h50);
                 }
 
-                if (_layer.CachedEffect.Uniforms.Contains("uColors")) 
+                if (effect.Uniforms.Contains("uColors")) 
                 {
                     float[] cFrom = new float[50 * 4];
                     float[] cTo = new float[50 * 4];
         
-                    int colorCount = (_layer.ShaderColors != null) ? Math.Min(50, _layer.ShaderColors.Length) : 0;
+                    var shaderColors = _layer.ShaderColors;
+                    int colorCount = (shaderColors != null) ? Math.Min(50, shaderColors.Length) : 0;
         
                     for (int i = 0; i < 50; i++) 
                     {
                         if (i < colorCount) {
-                            cFrom[i * 4 + 0] = _layer.ShaderColors[i].Red / 255f;
-                            cFrom[i * 4 + 1] = _layer.ShaderColors[i].Green / 255f;
-                            cFrom[i * 4 + 2] = _layer.ShaderColors[i].Blue / 255f;
-                            cFrom[i * 4 + 3] = _layer.ShaderColors[i].Alpha / 255f;
+                            cFrom[i * 4 + 0] = shaderColors![i].Red / 255f;
+                            cFrom[i * 4 + 1] = shaderColors![i].Green / 255f;
+                            cFrom[i * 4 + 2] = shaderColors![i].Blue / 255f;
+                            cFrom[i * 4 + 3] = shaderColors![i].Alpha / 255f;
 
                             cTo[i * 4 + 0] = _layer.ShaderColorsTo[i].Red / 255f;
                             cTo[i * 4 + 1] = _layer.ShaderColorsTo[i].Green / 255f;
@@ -175,7 +181,7 @@ public class ShaderDrawOperation : ICustomDrawOperation
                 }
 
 
-                using var shader = _layer.CachedEffect.ToShader(uniforms, children); // ✅ Utan 'true'
+                using var shader = effect.ToShader(uniforms, children);
                 using var paint = new SKPaint { Shader = shader };
                 canvas.DrawRect(new SKRect((float)_destRect.X, (float)_destRect.Y, (float)_destRect.Right, (float)_destRect.Bottom), paint);
             }
@@ -283,29 +289,73 @@ public sealed class AmosGpuView : Control
                         if (f == null) continue;
                         if (qt.Layer != -1 && qt.Layer != layerIndex) continue;
 
-                        double totalW = qt.Text.Length * f.CharWidth;
-                        double cX = totalW / 2.0;
-                        double cY = f.CharHeight / 2.0;
-                        double angleRad = qt.Angle * Math.PI / 180.0;
-
-                        for (int i = 0; i < qt.Text.Length; i++)
+                        var textEffects = qt.GetEffects(Graphics);
+                        if (textEffects.Count > 0)
                         {
-                            char c = qt.Text[i];
-                            if (c == ' ') continue;
-                            var charBmp = Graphics.GetFontChar(f, c);
-                            if (charBmp == null) continue;
+                            // ✅ MED EFFEKTER: Använd processed bitmap
+                            var processedBmp = qt.GetProcessedBitmap(Graphics, textEffects);
+                            if (processedBmp == null) continue;
 
-                            var transform =
-                                Matrix.CreateTranslation(i * f.CharWidth, 0)
-                                * Matrix.CreateTranslation(-cX, -cY)
-                                * Matrix.CreateScale(qt.ZoomX, qt.ZoomY)
-                                * Matrix.CreateRotation(angleRad)
-                                * Matrix.CreateTranslation(cX + qt.X, cY + qt.Y);
+                            var totalPadding = qt.GetTotalPadding(textEffects);
+                            double drawX = qt.X - totalPadding.left;
+                            double drawY = qt.Y - totalPadding.top;
 
+                            // ✅ NYTT: Applicera rotation/zoom VIA TRANSFORM
+                            if (qt.Angle != 0 || qt.ZoomX != 1.0 || qt.ZoomY != 1.0)
+                            {
+                                double cX = processedBmp.Size.Width / 2.0;
+                                double cY = processedBmp.Size.Height / 2.0;
+                                double angleRad = qt.Angle * Math.PI / 180.0;
 
-                            using (compCtx.PushPostTransform(transform))
-                                compCtx.DrawImage(charBmp, new Rect(charBmp.Size),
-                                    new Rect(0, 0, f.CharWidth, f.CharHeight));
+                                var transform =
+                                    Matrix.CreateTranslation(-cX, -cY)
+                                    * Matrix.CreateScale(qt.ZoomX, qt.ZoomY)
+                                    * Matrix.CreateRotation(angleRad)
+                                    * Matrix.CreateTranslation(drawX + cX, drawY + cY);
+
+                                using (compCtx.PushPostTransform(transform))
+                                {
+                                    compCtx.DrawImage(
+                                        processedBmp,
+                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height),
+                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height));
+                                }
+                            }
+                            else
+                            {
+                                // Ingen rotation/zoom - rita direkt
+                                compCtx.DrawImage(
+                                    processedBmp,
+                                    new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height),
+                                    new Rect(drawX, drawY, processedBmp.Size.Width, processedBmp.Size.Height));
+                            }
+                        }
+                        else
+                        {
+                            // ✅ UTAN EFFEKTER: Rita som vanligt med rotation/zoom
+                            double totalW = qt.Text.Length * f.CharWidth;
+                            double cX = totalW / 2.0;
+                            double cY = f.CharHeight / 2.0;
+                            double angleRad = qt.Angle * Math.PI / 180.0;
+
+                            for (int i = 0; i < qt.Text.Length; i++)
+                            {
+                                char c = qt.Text[i];
+                                if (c == ' ') continue;
+                                var charBmp = Graphics.GetFontChar(f, c);
+                                if (charBmp == null) continue;
+
+                                var transform =
+                                    Matrix.CreateTranslation(i * f.CharWidth, 0)
+                                    * Matrix.CreateTranslation(-cX, -cY)
+                                    * Matrix.CreateScale(qt.ZoomX, qt.ZoomY)
+                                    * Matrix.CreateRotation(angleRad)
+                                    * Matrix.CreateTranslation(cX + qt.X, cY + qt.Y);
+
+                                using (compCtx.PushPostTransform(transform))
+                                    compCtx.DrawImage(charBmp, new Rect(charBmp.Size),
+                                        new Rect(0, 0, f.CharWidth, f.CharHeight));
+                            }
                         }
                     }
 
@@ -322,19 +372,42 @@ public sealed class AmosGpuView : Control
                         {
                             var processedBmp = sprite.GetBitmap(Graphics.GetImageBank());
                             var totalPadding = sprite.GetTotalPadding();
-    
+
                             double drawX = sprite.X - totalPadding.left;
                             double drawY = sprite.Y - totalPadding.top;
-    
-                            using (compCtx.PushOpacity(sprite.Alpha))
+
+                            // ✅ NYTT: Applicera rotation/zoom VIA TRANSFORM
+                            if (sprite.Angle != 0 || sprite.ZoomX != 1.0 || sprite.ZoomY != 1.0)
                             {
-                                // ✅ Source: hela bilden
-                                var sourceRect = new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height);
-        
-                                // ✅ Dest: rita på (drawX, drawY) med SAMMA storlek som source
-                                var destRect = new Rect(drawX, drawY, processedBmp.Size.Width, processedBmp.Size.Height);
-        
-                                compCtx.DrawImage(processedBmp, sourceRect, destRect);
+                                double cX = processedBmp.Size.Width / 2.0;
+                                double cY = processedBmp.Size.Height / 2.0;
+                                double angleRad = sprite.Angle * Math.PI / 180.0;
+
+                                var transform =
+                                    Matrix.CreateTranslation(-cX, -cY)
+                                    * Matrix.CreateScale(sprite.ZoomX, sprite.ZoomY)
+                                    * Matrix.CreateRotation(angleRad)
+                                    * Matrix.CreateTranslation(drawX + cX, drawY + cY);
+
+                                using (compCtx.PushPostTransform(transform))
+                                using (compCtx.PushOpacity(sprite.Alpha))
+                                {
+                                    compCtx.DrawImage(
+                                        processedBmp,
+                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height),
+                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height));
+                                }
+                            }
+                            else
+                            {
+                                // Ingen rotation/zoom
+                                using (compCtx.PushOpacity(sprite.Alpha))
+                                {
+                                    compCtx.DrawImage(
+                                        processedBmp,
+                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height),
+                                        new Rect(drawX, drawY, processedBmp.Size.Width, processedBmp.Size.Height));
+                                }
                             }
                         }
                         else
@@ -350,15 +423,20 @@ public sealed class AmosGpuView : Control
                             {
                                 baseBmp = sprite.Frames[Math.Clamp(sprite.CurrentFrame, 0, sprite.Frames.Count - 1)];
                             }
-        
-                            // ✅ INGEN TRANSFORM - rita direkt på sprite.X, sprite.Y (vänster kant)
+                            double cX = baseBmp.Size.Width / 2.0;
+                            double cY = baseBmp.Size.Height / 2.0;
+                            double angleRad = sprite.Angle * Math.PI / 180.0;
+
+                            var transform =
+                                Matrix.CreateTranslation(-cX, -cY)
+                                * Matrix.CreateScale(sprite.ZoomX, sprite.ZoomY)
+                                * Matrix.CreateRotation(angleRad)
+                                * Matrix.CreateTranslation(cX + sprite.X, cY + sprite.Y);
+
+                            using (compCtx.PushPostTransform(transform))
                             using (compCtx.PushOpacity(sprite.Alpha))
-                            {
-                                compCtx.DrawImage(
-                                    baseBmp,
-                                    new Rect(0, 0, baseBmp.Size.Width, baseBmp.Size.Height),
-                                    new Rect(sprite.X, sprite.Y, baseBmp.Size.Width, baseBmp.Size.Height));
-                            }
+                                compCtx.DrawImage(baseBmp, new Rect(baseBmp.Size),
+                                    new Rect(0, 0, sprite.Width, sprite.Height));
                         }
                     }
 
@@ -538,7 +616,7 @@ public sealed class AmosGraphics
     string RasterShaderCode = Shader.RasterShaderCode;
     string RasterShaderCode2 = Shader.RasterShaderCode2;
     string RasterShaderCode3 = Shader.RasterShaderCode3;
-
+    
     public void ClearFrames()
     {
         ActiveFrame.Clear();
@@ -817,6 +895,82 @@ public sealed class AmosGraphics
         public bool BaseZoomInitialized;
         public string CharMap { get; set; } = "";
         public int Layer { get; set; } = 0;
+
+        // Effekterna hör till fonten (inte till en utskrift) så att de överlever FONT CLEAR
+        public List<SpriteEffect> Effects { get; } = new();
+        public int EffectsVersion;
+
+        // Text + statiska effekter (BLUR/COLOR) per textsträng, så de inte räknas om varje frame.
+        // Används bara från UI-tråden (AmosGpuView.Render).
+        public Dictionary<string, WriteableBitmap> StaticCache { get; } = new();
+        public int StaticCacheVersion = -1;
+    }
+
+    // FONT EFFECT ADD: finns effekttypen redan på fonten uppdateras den i stället (Time behålls),
+    // så att ADD inne i en loop inte staplar nya effekter varje frame.
+    public bool AddFontEffect(int fontId, SpriteEffect effect)
+    {
+        lock (LockObject)
+        {
+            if (!_fonts.TryGetValue(fontId, out var f)) return false;
+
+            var existing = f.Effects.FirstOrDefault(e => e.GetType() == effect.GetType());
+            switch (existing, effect)
+            {
+                case (null, _):
+                    f.Effects.Add(effect);
+                    f.EffectsVersion++;
+                    break;
+                case (WaveEffect w, WaveEffect n):
+                    // WAVE räknas om varje frame, ingen cache att invalidera
+                    w.AmplitudeX = n.AmplitudeX;
+                    w.FrequencyX = n.FrequencyX;
+                    w.AmplitudeY = n.AmplitudeY;
+                    w.FrequencyY = n.FrequencyY;
+                    break;
+                case (SpriteBlurEffect b, SpriteBlurEffect n) when b.Radius != n.Radius:
+                    b.Radius = n.Radius;
+                    f.EffectsVersion++;
+                    break;
+                case (ColorGradeEffect c, ColorGradeEffect n)
+                    when c.Brightness != n.Brightness || c.Contrast != n.Contrast || c.Saturation != n.Saturation:
+                    c.Brightness = n.Brightness;
+                    c.Contrast = n.Contrast;
+                    c.Saturation = n.Saturation;
+                    f.EffectsVersion++;
+                    break;
+            }
+
+            return true;
+        }
+    }
+
+    public SpriteEffect? GetFontEffect(int fontId, int index)
+    {
+        lock (LockObject)
+        {
+            return _fonts.TryGetValue(fontId, out var f) && index >= 0 && index < f.Effects.Count
+                ? f.Effects[index]
+                : null;
+        }
+    }
+
+    public void InvalidateFontEffects(int fontId)
+    {
+        lock (LockObject)
+        {
+            if (_fonts.TryGetValue(fontId, out var f)) f.EffectsVersion++;
+        }
+    }
+
+    public void ClearFontEffects(int fontId)
+    {
+        lock (LockObject)
+        {
+            if (!_fonts.TryGetValue(fontId, out var f)) return;
+            f.Effects.Clear();
+            f.EffectsVersion++;
+        }
     }
 
     // NY: Delad bildbank (som sprites men med stöd för frames)
@@ -908,10 +1062,9 @@ public sealed class AmosGraphics
     }
 
     private readonly Dictionary<int, Dictionary<int, RasterBarAllocation>> _rasterBars = new();
-    private readonly Dictionary<int, int> _totalShaderSlotsUsed = new();
 
-    private const int MAX_RASTER_SLOTS = 50;
     private const int WRAP_OFFSET = 25;
+    private const int FIRST_BAR_SLOT = 1; // Slot 0 är reserverad för bakgrunden
 
     private Dictionary<int, RasterBarAllocation> GetLayerBars(int layerIdx)
     {
@@ -924,93 +1077,29 @@ public sealed class AmosGraphics
         return bars;
     }
 
-    private int GetLayerSlotsUsed(int layerIdx)
-    {
-        return _totalShaderSlotsUsed.TryGetValue(layerIdx, out var n) ? n : 1;
-    }
+    private static int CountUsedSlots(Dictionary<int, RasterBarAllocation> bars)
+        => FIRST_BAR_SLOT + bars.Values.Sum(b => b.ShaderSlotCount);
 
-    private void SetLayerSlotsUsed(int layerIdx, int value)
+    // Hitta första lediga sammanhängande slot-intervall (bars kan ha tagits bort mitt i)
+    private static int FindFreeSlots(Dictionary<int, RasterBarAllocation> bars, int needed)
     {
-        _totalShaderSlotsUsed[layerIdx] = value;
+        var used = new bool[WRAP_OFFSET];
+        foreach (var b in bars.Values)
+            for (int i = 0; i < b.ShaderSlotCount; i++)
+                used[b.FirstShaderSlot + i] = true;
+
+        for (int start = FIRST_BAR_SLOT; start + needed <= WRAP_OFFSET; start++)
+        {
+            int n = 0;
+            while (n < needed && !used[start + n]) n++;
+            if (n == needed) return start;
+        }
+
+        return -1;
     }
 
     public void SetRasterBar(int layerIdx, int basicBarId, float x, float y, float height, string colorString)
-    {
-        if (basicBarId < 1 || basicBarId > 100)
-        {
-            OnError?.Invoke($"[RASTER] Bar ID must be between 1-100, got {basicBarId}");
-            return;
-        }
-
-        var bars = GetLayerBars(layerIdx);
-        int slotsUsed = GetLayerSlotsUsed(layerIdx);
-
-        var colorNames = colorString.Split(',')
-            .Select(c => c.Trim())
-            .Where(c => !string.IsNullOrEmpty(c))
-            .ToList();
-
-        if (colorNames.Count == 0)
-        {
-            OnError?.Invoke("[RASTER] No colors specified!");
-            return;
-        }
-
-        if (colorNames.Count > 10)
-        {
-            OnError?.Invoke("[RASTER] Maximum 10 colors per bar!");
-            return;
-        }
-
-        var colors = new List<Color>();
-        foreach (var name in colorNames)
-        {
-            try
-            {
-                colors.Add(Color.Parse(name));
-            }
-            catch
-            {
-                OnError?.Invoke($"[RASTER] Unknown color: '{name}'");
-                return;
-            }
-        }
-
-        int neededSlots = Math.Max(1, colors.Count - 1);
-
-        RasterBarAllocation? existing = null;
-        if (bars.TryGetValue(basicBarId, out existing))
-        {
-            slotsUsed -= existing.ShaderSlotCount;
-            ClearBarShaderSlots(layerIdx, existing);
-        }
-
-        if (slotsUsed + neededSlots > WRAP_OFFSET)
-        {
-            int available = WRAP_OFFSET - slotsUsed;
-            OnError?.Invoke($"[RASTER] Not enough shader slots! Need {neededSlots}, only {available} available. " +
-                            $"(Total used: {slotsUsed}/25)");
-            if (existing != null)
-                SetLayerSlotsUsed(layerIdx, slotsUsed + existing.ShaderSlotCount);
-            return;
-        }
-
-        int firstSlot = slotsUsed;
-        SetLayerSlotsUsed(layerIdx, slotsUsed + neededSlots);
-
-        var allocation = new RasterBarAllocation
-        {
-            BasicBarId = basicBarId,
-            FirstShaderSlot = firstSlot,
-            ShaderSlotCount = neededSlots,
-            StartY = y,
-            TotalHeight = height,
-            Colors = colors
-        };
-
-        bars[basicBarId] = allocation;
-        ApplyRasterBarToShader(layerIdx, allocation);
-    }
+        => SetRasterBarWrapped(layerIdx, basicBarId, x, y, height, colorString, wrap: false);
 
     public void SetRasterBarWrapped(int layerIdx, int basicBarId, float x, float y,
         float height, string colorString, bool wrap = true)
@@ -1022,7 +1111,6 @@ public sealed class AmosGraphics
         }
 
         var bars = GetLayerBars(layerIdx);
-        int slotsUsed = GetLayerSlotsUsed(layerIdx);
 
         var colorNames = colorString.Split(',')
             .Select(c => c.Trim())
@@ -1057,25 +1145,24 @@ public sealed class AmosGraphics
 
         int neededSlots = Math.Max(1, colors.Count - 1);
 
-        RasterBarAllocation? existing = null;
-        if (bars.TryGetValue(basicBarId, out existing))
-        {
-            slotsUsed -= existing.ShaderSlotCount;
+        // Frigör den gamla baren först så att dess slots kan återanvändas
+        if (bars.Remove(basicBarId, out var existing))
             ClearBarShaderSlots(layerIdx, existing);
-        }
 
-        if (slotsUsed + neededSlots > WRAP_OFFSET)
+        int firstSlot = FindFreeSlots(bars, neededSlots);
+        if (firstSlot < 0)
         {
-            int available = WRAP_OFFSET - slotsUsed;
-            OnError?.Invoke($"[RASTER] Not enough shader slots! Need {neededSlots}, only {available} available. " +
-                            $"(Total used: {slotsUsed}/25)");
+            OnError?.Invoke($"[RASTER] Not enough shader slots! Need {neededSlots}. " +
+                            $"(Total used: {CountUsedSlots(bars)}/{WRAP_OFFSET})");
             if (existing != null)
-                SetLayerSlotsUsed(layerIdx, slotsUsed + existing.ShaderSlotCount);
+            {
+                // Återställ den gamla baren
+                bars[basicBarId] = existing;
+                ApplyRasterBarToShader(layerIdx, existing);
+                ApplyRasterBarWrap(layerIdx, existing);
+            }
             return;
         }
-
-        int firstSlot = slotsUsed;
-        SetLayerSlotsUsed(layerIdx, slotsUsed + neededSlots);
 
         var allocation = new RasterBarAllocation
         {
@@ -1090,14 +1177,7 @@ public sealed class AmosGraphics
 
         bars[basicBarId] = allocation;
         ApplyRasterBarToShader(layerIdx, allocation);
-
-        if (wrap)
-        {
-            if (y < 0)
-                SetRasterBar(layerIdx, basicBarId + 1000, x, y + Height, height, colorString);
-            else if (y + height > Height)
-                SetRasterBar(layerIdx, basicBarId + 1000, x, y - Height, height, colorString);
-        }
+        ApplyRasterBarWrap(layerIdx, allocation);
     }
 
     public void SetRasterWrap(int layerIdx, int basicBarId, bool enabled)
@@ -1110,15 +1190,32 @@ public sealed class AmosGraphics
         }
 
         bar.Wrap = enabled;
-        ApplyRasterBarToShader(layerIdx, bar);
+        ApplyRasterBarWrap(layerIdx, bar);
     }
 
     private void ApplyRasterBarToShader(int layerIdx, RasterBarAllocation bar)
+        => WriteBarSlots(layerIdx, bar, bar.FirstShaderSlot, bar.StartY);
+
+    // Wrap-kopian ligger WRAP_OFFSET slots efter originalet, en skärmhöjd bort
+    private void ApplyRasterBarWrap(int layerIdx, RasterBarAllocation bar)
+    {
+        int wrapSlot = bar.FirstShaderSlot + WRAP_OFFSET;
+        if (!bar.Wrap)
+        {
+            ClearShaderSlots(layerIdx, wrapSlot, bar.ShaderSlotCount);
+            return;
+        }
+
+        float wrappedY = bar.StartY > 0 ? bar.StartY - Height : bar.StartY + Height;
+        WriteBarSlots(layerIdx, bar, wrapSlot, wrappedY);
+    }
+
+    private void WriteBarSlots(int layerIdx, RasterBarAllocation bar, int firstSlot, float startY)
     {
         if (bar.Colors.Count == 1)
         {
-            SetShaderParams(layerIdx, bar.FirstShaderSlot, bar.StartY, bar.TotalHeight);
-            SetShaderColors(layerIdx, bar.FirstShaderSlot, bar.Colors[0], bar.Colors[0]);
+            SetShaderParams(layerIdx, firstSlot, startY, bar.TotalHeight);
+            SetShaderColors(layerIdx, firstSlot, bar.Colors[0], bar.Colors[0]);
         }
         else
         {
@@ -1126,8 +1223,8 @@ public sealed class AmosGraphics
             float segmentHeight = bar.TotalHeight / segments;
             for (int i = 0; i < segments; i++)
             {
-                int slot = bar.FirstShaderSlot + i;
-                float segY = bar.StartY + (i * segmentHeight);
+                int slot = firstSlot + i;
+                float segY = startY + (i * segmentHeight);
                 SetShaderParams(layerIdx, slot, segY, segmentHeight);
                 SetShaderColors(layerIdx, slot, bar.Colors[i], bar.Colors[i + 1]);
             }
@@ -1145,44 +1242,7 @@ public sealed class AmosGraphics
 
         bar.StartY = newY;
         ApplyRasterBarToShader(layerIdx, bar);
-
-        if (bar.Wrap)
-        {
-            float wrappedY = newY > 0 ? newY - Height : newY + Height;
-            if (bar.Colors.Count == 1)
-            {
-                int wrapSlot = bar.FirstShaderSlot + WRAP_OFFSET;
-                SetShaderParams(layerIdx, wrapSlot, wrappedY, bar.TotalHeight);
-                SetShaderColors(layerIdx, wrapSlot, bar.Colors[0], bar.Colors[0]);
-            }
-            else
-            {
-                int segments = bar.Colors.Count - 1;
-                float segmentHeight = bar.TotalHeight / segments;
-                for (int i = 0; i < segments; i++)
-                {
-                    int wrapSlot = bar.FirstShaderSlot + i + WRAP_OFFSET;
-                    float segY = wrappedY + (i * segmentHeight);
-                    SetShaderParams(layerIdx, wrapSlot, segY, segmentHeight);
-                    SetShaderColors(layerIdx, wrapSlot, bar.Colors[i], bar.Colors[i + 1]);
-                }
-            }
-        }
-        else
-        {
-            lock (LockObject)
-            {
-                int wrapStart = bar.FirstShaderSlot + WRAP_OFFSET;
-                int wrapEnd = wrapStart + bar.ShaderSlotCount;
-                for (int slot = wrapStart; slot < wrapEnd; slot++)
-                {
-
-                    if (layerIdx >= 0 && layerIdx < DrawingFrame.Count)
-                        DrawingFrame[layerIdx].ShaderHeights[slot] = 0;
-
-                }
-            }
-        }
+        ApplyRasterBarWrap(layerIdx, bar);
     }
 
     public void SetRasterGfxMode(int layerIdx, bool onGraphics)
@@ -1223,11 +1283,9 @@ public sealed class AmosGraphics
     public void DeleteRasterBar(int layerIdx, int basicBarId)
     {
         var bars = GetLayerBars(layerIdx);
-        if (!bars.TryGetValue(basicBarId, out var bar)) return;
+        if (!bars.Remove(basicBarId, out var bar)) return;
 
         ClearBarShaderSlots(layerIdx, bar);
-        bars.Remove(basicBarId);
-        SetLayerSlotsUsed(layerIdx, GetLayerSlotsUsed(layerIdx) - bar.ShaderSlotCount);
     }
 
     public void ClearAllRasterBars(int layerIdx = -1)
@@ -1238,7 +1296,6 @@ public sealed class AmosGraphics
             foreach (var bar in kvp.Value.Values)
                 ClearBarShaderSlots(kvp.Key, bar);
             _rasterBars.Clear();
-            _totalShaderSlotsUsed.Clear();
         }
         else
         {
@@ -1248,23 +1305,24 @@ public sealed class AmosGraphics
                     ClearBarShaderSlots(layerIdx, bar);
                 bars.Clear();
             }
-
-            _totalShaderSlotsUsed.Remove(layerIdx);
         }
     }
 
     private void ClearBarShaderSlots(int layerIdx, RasterBarAllocation bar)
     {
+        ClearShaderSlots(layerIdx, bar.FirstShaderSlot, bar.ShaderSlotCount);
+        ClearShaderSlots(layerIdx, bar.FirstShaderSlot + WRAP_OFFSET, bar.ShaderSlotCount);
+    }
+
+    private void ClearShaderSlots(int layerIdx, int firstSlot, int count)
+    {
         lock (LockObject)
         {
-            for (int i = 0; i < bar.ShaderSlotCount; i++)
-            {
-                int slot = bar.FirstShaderSlot + i;
+            if (layerIdx < 0 || layerIdx >= DrawingFrame.Count) return;
 
-                if (layerIdx >= 0 && layerIdx < DrawingFrame.Count)
-                    DrawingFrame[layerIdx].ShaderHeights[slot] = 0;
-
-            }
+            var heights = DrawingFrame[layerIdx].ShaderHeights;
+            for (int slot = firstSlot; slot < firstSlot + count && slot < heights.Length; slot++)
+                heights[slot] = 0;
         }
     }
 
@@ -1275,8 +1333,8 @@ public sealed class AmosGraphics
         {
             int idx = kvp.Key;
             var bars = kvp.Value;
-            int slotsUsed = GetLayerSlotsUsed(idx);
-            sb.AppendLine($"Layer {idx}: Slots Used: {slotsUsed}/25, Bars: {bars.Count}");
+            int slotsUsed = CountUsedSlots(bars);
+            sb.AppendLine($"Layer {idx}: Slots Used: {slotsUsed}/{WRAP_OFFSET}, Bars: {bars.Count}");
             foreach (var bar in bars.Values.OrderBy(b => b.BasicBarId))
             {
                 sb.AppendLine($"  Bar {bar.BasicBarId}: Slots {bar.FirstShaderSlot}-" +
@@ -1311,7 +1369,7 @@ public sealed class AmosGraphics
         private int _currentEffectsVersion = -1;
         // Cache för effekt-resultat
         private WriteableBitmap? _staticEffectsBitmap;  // BLUR etc cachad
-        private WriteableBitmap? _finalBitmap;           // Slutlig bild med alla effekter
+        private WriteableBitmap? _staticEffectsSource;   // Frame som cachen bygger på
         private int _staticEffectsVersion = -1;
     
         // ✅ Beräkna total padding från alla effekter
@@ -1365,61 +1423,54 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
     {
         baseBitmap = Frames[Math.Clamp(CurrentFrame, 0, Frames.Count - 1)];
     }
-
-    var gpuEffects = Effects.Where(e => e.RequiresGpuContext).ToList();
-    if (gpuEffects.Count == 0)
+ 
+    // Rotation/zoom görs INTE här - det sköts av AmosGpuView.Render med en transform
+    var allEffects = Effects.Where(e => e.RequiresGpuContext).ToList();
+    
+    if (allEffects.Count == 0)
         return baseBitmap;
-
-    // ✅ Separera statiska och dynamiska effekter
-    var staticEffects = gpuEffects.Where(e => !(e is WaveEffect)).ToList();
-    var dynamicEffects = gpuEffects.Where(e => e is WaveEffect).ToList();
-
+ 
+    // Separera statiska (BLUR, COLOR) från dynamiska (WAVE)
+    var staticEffects = allEffects.Where(e => e is not WaveEffect).ToList();
+    var dynamicEffects = allEffects.Where(e => e is WaveEffect).ToList();
+ 
     WriteableBitmap currentBitmap;
-
+ 
+    // Cache för statiska effekter (BLUR)
     if (staticEffects.Count > 0)
     {
-        // ✅ KRITISK FIX: Cacha baserat på ORIGINAL-bilden + effekt-version
         bool cacheValid = _staticEffectsBitmap != null && 
-                         _staticEffectsVersion == _effectsVersion;
-
+                         _staticEffectsVersion == _effectsVersion &&
+                         _staticEffectsSource == baseBitmap;
+ 
         if (cacheValid)
         {
-            System.Diagnostics.Debug.WriteLine($"   ✅ Using cached BLUR bitmap (0ms)");
-            currentBitmap = _staticEffectsBitmap;
+            currentBitmap = _staticEffectsBitmap!;
         }
         else
         {
-            var blurStart = System.Diagnostics.Stopwatch.StartNew();
-            
-            // ✅ Applicera BLUR direkt på originalbilden
             currentBitmap = baseBitmap;
             foreach (var effect in staticEffects)
             {
                 currentBitmap = ShaderHelper.RenderShaderToBitmap(currentBitmap, effect);
             }
             
-            blurStart.Stop();
-            System.Diagnostics.Debug.WriteLine($"   ⚠️ Rendered BLUR in {blurStart.ElapsedMilliseconds}ms");
-            
-            // ✅ Spara i cache
             _staticEffectsBitmap = currentBitmap;
             _staticEffectsVersion = _effectsVersion;
+            _staticEffectsSource = baseBitmap;
         }
     }
     else
     {
         currentBitmap = baseBitmap;
     }
-
-    // ✅ Applicera dynamiska effekter (WAVE) ovanpå cachad BLUR-bild
+ 
+    // Applicera dynamiska effekter VARJE FRAME (WAVE)
     foreach (var effect in dynamicEffects)
     {
-        var waveStart = System.Diagnostics.Stopwatch.StartNew();
         currentBitmap = ShaderHelper.RenderShaderToBitmap(currentBitmap, effect);
-        waveStart.Stop();
-        System.Diagnostics.Debug.WriteLine($"   🌊 Rendered WAVE in {waveStart.ElapsedMilliseconds}ms");
     }
-
+ 
     return currentBitmap;
 }
 
@@ -1533,15 +1584,160 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
         public double ZoomX { get; set; }
         public double ZoomY { get; set; }
         public int Layer { get; set; } = 0;
+    
+        // Effekter (BLUR/WAVE/COLOR) som gäller för fonten just nu
+        internal List<SpriteEffect> GetEffects(AmosGraphics graphics)
+        {
+            var font = graphics.GetFont(FontId);
+            if (font == null) return new List<SpriteEffect>();
+            lock (graphics.LockObject)
+                return font.Effects.Where(e => e.RequiresGpuContext).ToList();
+        }
+
+        // ✅ Beräkna total padding från alla effekter
+        public (int left, int right, int top, int bottom) GetTotalPadding(List<SpriteEffect> effects)
+        {
+            int totalLeft = 0, totalRight = 0, totalTop = 0, totalBottom = 0;
+        
+            foreach (var effect in effects)
+            {
+                var p = effect.GetPadding();
+                totalLeft += p.leftPadding;
+                totalRight += p.rightPadding;
+                totalTop += p.topPadding;
+                totalBottom += p.bottomPadding;
+            }
+        
+            return (totalLeft, totalRight, totalTop, totalBottom);
+        }
+    
+        // ✅ Rendera texten med effekter
+        public WriteableBitmap? GetProcessedBitmap(AmosGraphics graphics, List<SpriteEffect> effects)
+        {
+            var font = graphics.GetFont(FontId);
+            if (font == null) return null;
+
+            var staticEffects = effects.Where(e => e is not WaveEffect).ToList();
+            var dynamicEffects = effects.Where(e => e is WaveEffect).ToList();
+
+            // Cachen töms när effekterna ändras, eller om texten byts ofta (t.ex. en poängräknare)
+            if (font.StaticCacheVersion != font.EffectsVersion || font.StaticCache.Count > 64)
+            {
+                font.StaticCache.Clear();
+                font.StaticCacheVersion = font.EffectsVersion;
+            }
+
+            if (!font.StaticCache.TryGetValue(Text, out var currentBitmap))
+            {
+                currentBitmap = RenderText(graphics, font);
+                if (currentBitmap == null) return null;
+
+                foreach (var effect in staticEffects)
+                    currentBitmap = ShaderHelper.RenderShaderToBitmap(currentBitmap, effect);
+
+                font.StaticCache[Text] = currentBitmap;
+            }
+
+            // Applicera dynamiska effekter (WAVE) varje frame
+            foreach (var effect in dynamicEffects)
+                currentBitmap = ShaderHelper.RenderShaderToBitmap(currentBitmap, effect);
+
+            return currentBitmap;
+        }
+
+        private WriteableBitmap? RenderText(AmosGraphics graphics, Font font)
+        {
+            // Beräkna storlek för hela texten
+            int baseWidth = Text.Length * font.CharWidth;
+            int baseHeight = font.CharHeight;
+        
+            if (baseWidth <= 0 || baseHeight <= 0) return null;
+        
+            // Skapa bas-bitmap med texten
+            var baseBitmap = new WriteableBitmap(
+                new PixelSize(baseWidth, baseHeight),
+                new Vector(96, 96),
+                PixelFormat.Bgra8888,
+                AlphaFormat.Premul);
+        
+            // Rita texten till bitmap
+            using (var fb = baseBitmap.Lock())
+            {
+                unsafe
+                {
+                    uint* ptr = (uint*)fb.Address;
+                    int stride = fb.RowBytes / 4;
+                
+                    // Rensa till transparent
+                    for (int i = 0; i < baseWidth * baseHeight; i++)
+                        ptr[i] = 0;
+                
+                    // Rita varje tecken
+                    for (int i = 0; i < Text.Length; i++)
+                    {
+                        char c = Text[i];
+                        if (c == ' ') continue;
+                    
+                        var charBmp = graphics.GetFontChar(font, c);
+                        if (charBmp == null) continue;
+                    
+                        using var charFb = charBmp.Lock();
+                        byte* charPtr = (byte*)charFb.Address;
+                    
+                        int startX = i * font.CharWidth;
+                    
+                        for (int y = 0; y < font.CharHeight && y < baseHeight; y++)
+                        {
+                            for (int x = 0; x < font.CharWidth; x++)
+                            {
+                                int dstX = startX + x;
+                                if (dstX >= baseWidth) continue;
+                            
+                                int srcIdx = (y * charFb.RowBytes) + (x * 4);
+                                byte b = charPtr[srcIdx + 0];
+                                byte g = charPtr[srcIdx + 1];
+                                byte r = charPtr[srcIdx + 2];
+                                byte alpha = charPtr[srcIdx + 3];
+                            
+                                if (alpha > 0)
+                                {
+                                    int dstIdx = y * stride + dstX;
+                                    // BGRA format
+                                    ptr[dstIdx] = ((uint)alpha << 24) | 
+                                                  ((uint)r << 16) |
+                                                  ((uint)g << 8) |
+                                                  ((uint)b);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return baseBitmap;
+        }
     }
 
     public readonly List<QueuedFontText> _fontTexts = new();
+
+    // Ögonblicksbild från senaste WAIT VBL. Utan den kan skärmen ritas mitt i ett
+    // FONT CLEAR / FONT PRINT / FONT EFFECT ADD-varv och visa texten utan effekter.
+    // null = programmet använder inte WAIT VBL, rita live-listan.
+    private List<QueuedFontText>? _presentedFontTexts;
+
+    public void PresentFontTexts()
+    {
+        lock (LockObject)
+        {
+            _presentedFontTexts = _fontTexts.ToList();
+        }
+    }
 
     public IEnumerable<QueuedFontText> GetQueuedTexts()
     {
         lock (LockObject)
         {
-            return _fontTexts.ToList(); // ✅ Returnera kopia
+            return (_presentedFontTexts ?? _fontTexts).ToList(); // ✅ Returnera kopia
         }
     }
 
@@ -1561,6 +1757,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
             _map = new int[0, 0];
             _fonts.Clear();
             _fontTexts.Clear();
+            _presentedFontTexts = null;
             ClearAllRasterBars(0);
         }
     }
@@ -1609,6 +1806,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
         {
             _fonts.Clear();
             _fontTexts.Clear();
+            _presentedFontTexts = null;
         }
     }
 
@@ -3124,19 +3322,25 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
             foreach (var sprite in _sprites.Values)
             {
                 if (!sprite.Visible) continue;
-    
+ 
                 foreach (var effect in sprite.Effects)
                 {
                     if (effect is WaveEffect wave)
-                    {
                         wave.Time += deltaTime;
-                    }
-                    // Lägg till fler effekttyper här vid behov
+                }
+            }
+        
+            // Samma för font-effekter (en gång per font, oavsett hur många texter som skrivits)
+            foreach (var font in _fonts.Values)
+            {
+                foreach (var effect in font.Effects)
+                {
+                    if (effect is WaveEffect wave)
+                        wave.Time += deltaTime;
                 }
             }
         }
     }
-
     public void TickLayerFades()
     {
         lock (LockObject)
@@ -3479,73 +3683,72 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
 // Lägg till i AmosGraphics.cs eller som extension method
 public static class ShaderHelper
 {
-public static WriteableBitmap RenderShaderToBitmap(
-    WriteableBitmap input, 
-    SpriteEffect effect)
-{
-    var padding = effect.GetPadding();
-    int leftPad = padding.leftPadding;
-    int rightPad = padding.rightPadding;
-    int topPad = padding.topPadding;
-    int bottomPad = padding.bottomPadding;
-
-    int expandedWidth = input.PixelSize.Width + leftPad + rightPad;
-    int expandedHeight = input.PixelSize.Height + topPad + bottomPad;
-
-    var output = new WriteableBitmap(
-        new PixelSize(expandedWidth, expandedHeight),
-        new Vector(96, 96),
-        PixelFormat.Bgra8888,
-        AlphaFormat.Premul);
-
-    try
+    public static WriteableBitmap RenderShaderToBitmap(
+        WriteableBitmap input, 
+        SpriteEffect effect)
     {
-        var info = new SKImageInfo(expandedWidth, expandedHeight, 
-            SKColorType.Bgra8888, SKAlphaType.Premul);
-        
-        using var surface = SKSurface.Create(info);
-        var canvas = surface.Canvas;
-        canvas.Clear(SKColors.Transparent);
+        var padding = effect.GetPadding();
+        int leftPad = padding.leftPadding;
+        int rightPad = padding.rightPadding;
+        int topPad = padding.topPadding;
+        int bottomPad = padding.bottomPadding;
 
-        using var fb = input.Lock();
-        var inputInfo = new SKImageInfo(input.PixelSize.Width, input.PixelSize.Height,
-            SKColorType.Bgra8888, SKAlphaType.Premul);
-        using var skBitmap = new SKBitmap();
-        skBitmap.InstallPixels(inputInfo, fb.Address, fb.RowBytes);
-        using var image = SKImage.FromBitmap(skBitmap);
+        int expandedWidth = input.PixelSize.Width + leftPad + rightPad;
+        int expandedHeight = input.PixelSize.Height + topPad + bottomPad;
 
-        var paint = effect.GetShaderPaint(input, image);
-        if (paint != null)
+        var output = new WriteableBitmap(
+            new PixelSize(expandedWidth, expandedHeight),
+            new Vector(96, 96),
+            PixelFormat.Bgra8888,
+            AlphaFormat.Premul);
+
+        try
         {
-            using (paint)
+            var info = new SKImageInfo(expandedWidth, expandedHeight, 
+                SKColorType.Bgra8888, SKAlphaType.Premul);
+        
+            using var surface = SKSurface.Create(info);
+            var canvas = surface.Canvas;
+            canvas.Clear(SKColors.Transparent);
+
+            using var fb = input.Lock();
+            var inputInfo = new SKImageInfo(input.PixelSize.Width, input.PixelSize.Height,
+                SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var skBitmap = new SKBitmap();
+            skBitmap.InstallPixels(inputInfo, fb.Address, fb.RowBytes);
+            using var image = SKImage.FromBitmap(skBitmap);
+
+            var paint = effect.GetShaderPaint(input, image);
+            if (paint != null)
             {
-                // ✅ KRITISKT: Rita shadern över HELA expanderade canvas
-                canvas.DrawRect(new SKRect(0, 0, expandedWidth, expandedHeight), paint);
+                using (paint)
+                {
+                    canvas.DrawRect(new SKRect(0, 0, expandedWidth, expandedHeight), paint);
+                }
             }
-        }
 
-        using var snapshot = surface.Snapshot();
-        using var pixmap = snapshot.PeekPixels();
-        using var outputLock = output.Lock();
+            using var snapshot = surface.Snapshot();
+            using var pixmap = snapshot.PeekPixels();
+            using var outputLock = output.Lock();
         
-        unsafe
-        {
-            // ✅ Kopiera HELA expanderade bilden
-            Buffer.MemoryCopy(
-                pixmap.GetPixels().ToPointer(),
-                outputLock.Address.ToPointer(),
-                outputLock.RowBytes * expandedHeight,
-                pixmap.RowBytes * expandedHeight);
-        }
+            unsafe
+            {
+                // ✅ Kopiera HELA expanderade bilden
+                Buffer.MemoryCopy(
+                    pixmap.GetPixels().ToPointer(),
+                    outputLock.Address.ToPointer(),
+                    outputLock.RowBytes * expandedHeight,
+                    pixmap.RowBytes * expandedHeight);
+            }
 
-        return output;
+            return output;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"❌ RenderShaderToBitmap error: {ex.Message}");
+            return input;
+        }
     }
-    catch (Exception ex)
-    {
-        System.Diagnostics.Debug.WriteLine($"❌ RenderShaderToBitmap error: {ex.Message}");
-        return input;
-    }
-}
 }
 
 // LÄGG TILL DESSA I SLUTET AV AmosGraphics.cs (före sista })
@@ -3638,7 +3841,7 @@ half4 main(float2 fragCoord) {
     {
         EnsureShaderCompiled();
         if (_globalCachedEffect == null) return null;
-
+        
         try
         {
             var children = new SKRuntimeEffectChildren(_globalCachedEffect);
@@ -3777,7 +3980,7 @@ public class ColorGradeEffect : SpriteEffect
     public float Brightness { get; set; } = 1f;
     public float Contrast { get; set; } = 1f;
     public float Saturation { get; set; } = 1f;
-    
+
     private static SKRuntimeEffect? _globalCachedEffect;
     private static readonly object _shaderLock = new object();
 
@@ -3832,7 +4035,7 @@ half4 main(float2 fragCoord) {
             try
             {
                 var result = SKRuntimeEffect.CreateShader(ShaderCode, out var errorText);
-            
+
                 if (result == null || !string.IsNullOrEmpty(errorText))
                 {
                     System.Diagnostics.Debug.WriteLine($"❌ ColorGrade shader error: {errorText}");
@@ -3877,4 +4080,5 @@ half4 main(float2 fragCoord) {
             return null;
         }
     }
+
 }

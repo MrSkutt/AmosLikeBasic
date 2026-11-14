@@ -89,8 +89,9 @@ namespace AmosLikeBasic
             _musicCts[idx]?.Cancel();
             _musicCts[idx]?.Dispose();
 
-            _musicCts[idx] = new CancellationTokenSource();
-            var token = _musicCts[idx].Token;
+            var cts = new CancellationTokenSource();
+            _musicCts[idx] = cts;
+            var token = cts.Token;
 
             Task.Run(() => PlayMusicAsync(sequence, idx, token));
         }

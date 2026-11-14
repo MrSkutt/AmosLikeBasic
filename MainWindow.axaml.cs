@@ -1245,7 +1245,8 @@ public partial class MainWindow : Window
         try
         {
             await using var stream = await file.OpenReadAsync();
-            var project = await AmosProjectSerializer.LoadAsync(stream);
+            var project = await AmosProjectSerializer.LoadAsync(stream)
+                ?? throw new InvalidDataException("Invalid project file");
 
             Editor.Text = project.ProgramText ?? string.Empty;
 
@@ -1291,7 +1292,8 @@ public partial class MainWindow : Window
 
             await using var stream = File.OpenRead(filePath);
 
-            var project = await AmosProjectSerializer.LoadAsync(stream);
+            var project = await AmosProjectSerializer.LoadAsync(stream)
+                ?? throw new InvalidDataException("Invalid project file");
 
             Editor.Text = project.ProgramText ?? string.Empty;
 

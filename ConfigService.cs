@@ -21,7 +21,7 @@ public class ConfigService
     private readonly string _configFolder;
     private readonly string _configFilePath;
 
-    public AppConfig Config { get; private set; }
+    public AppConfig Config { get; private set; } = new AppConfig();
 
     public ConfigService(string appName)
     {

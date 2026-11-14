@@ -20,9 +20,9 @@ public static class AmosRunner
     // Lägg till i din klass
     private static Dictionary<int, FileChannel> _openFiles = new Dictionary<int, FileChannel>();
     private const int MaxChannels = 15;
-    
+    private static DateTime _programStartTime = DateTime.MinValue;
     //public static MainWindow _mainWindow;
-    
+   
     private static Color ParseColorFlexible(string s)
     {
         s = (s ?? "").Trim();
@@ -354,6 +354,7 @@ public static class AmosRunner
         
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
 
+        _programStartTime = DateTime.UtcNow;
         _lastFrameTime = DateTime.MinValue;
         
         GamepadManager.Start();
@@ -720,9 +721,9 @@ public static class AmosRunner
             
             // WHILE/WEND scan
             if (upperScan.StartsWith("WHILE "))
-            {
                 whileScanStack.Push(i);
-            }
+            else if (upperScan.StartsWith("DO"))
+                whileScanStack.Push(i);
             else if (upperScan == "WEND")
             {
                 if (whileScanStack.Count == 0)
@@ -731,6 +732,14 @@ public static class AmosRunner
                 var whilePc = whileScanStack.Pop();
                 whileMap[whilePc] = i;
                 wendMap[i] = whilePc;
+            }
+            else if (upperScan == "LOOP")  // ← NY BLOCK
+            {
+                if (whileScanStack.Count == 0)
+                    throw new Exception($"LOOP without DO at line {i + 1}");
+                var doPc = whileScanStack.Pop();
+                whileMap[doPc] = i;
+                wendMap[i] = doPc;
             }
             
             // SELECT/CASE
@@ -897,7 +906,7 @@ public static class AmosRunner
                         break;
                     }
                     if (fcmd == "ENDIF") { /* bara markör */ continue; }
-
+                    
                     // WHILE / WEND i funktionen
                     if (fcmd == "WHILE")
                     {
@@ -1482,7 +1491,7 @@ public static class AmosRunner
                             }
 
                             // Variabler för repeat-logik
-                            string lastKey = null;
+                            string? lastKey = null;
                             DateTime lastKeyTime = DateTime.MinValue;
                             int currentDelay = 500;
 
@@ -1956,7 +1965,8 @@ public static class AmosRunner
                                 // 3. Vänta tills nästa frame är redo (timing)
                                 await WaitNextFrameAsync(token);
 
-                                // 4. Signalera att UI ska uppdateras
+                                // 4. Lås fast framens texter och signalera att UI ska uppdateras
+                                graphics.PresentFontTexts();
                                 onGraphicsChanged();
 
                                 // 5. Börja rita på nya inactive frame
@@ -2205,6 +2215,19 @@ public static class AmosRunner
 
                             break;
                         }
+                        case "DO":
+                        {
+                            if (!whileMap.TryGetValue(pc, out var loopPc))
+                                throw new Exception($"DO without LOOP at line {ln}");
+                            whileStack.Push(new WhileFrame
+                            {
+                                WhilePc = pc,
+                                WendPc = whileMap[pc],
+                                Line = ln,
+                                Condition = "1"
+                            });
+                            break;
+                        }
                         case "WEND":
                         {
                             if (whileStack.Count == 0)
@@ -2232,7 +2255,18 @@ public static class AmosRunner
 
                             break;
                         }
-                        
+                        case "LOOP":
+                        {
+                            if (whileStack.Count == 0)
+                                throw new Exception($"LOOP without DO at line {ln}");
+    
+                            var frame = whileStack.Peek();
+    
+                            // ✅ LOOP hoppar alltid tillbaka (ingen villkorscheck)
+                            pc = frame.WhilePc;
+                            jumpHappened = true;
+                            break;
+                        }
                         case "REPEAT":
                         {
                             // Lägg till repeat frame utan UNTILPc
@@ -2317,6 +2351,15 @@ public static class AmosRunner
                                 jumpHappened = true;
                             }
 
+                            else if (what == "DO")
+                            {
+                                if (whileStack.Count == 0)
+                                    throw new Exception($"EXIT DO without DO at line {ln}");
+                                var wf = whileStack.Pop();
+                                pc = wf.WendPc + 1;
+                                jumpHappened = true;
+                            }
+                            
                             break;
                         }
 
@@ -2935,8 +2978,8 @@ public static class AmosRunner
                                         {
                                             var effect = sprite.Effects[idx];
         
-                                            // ✅ Flagga för om vi ska invalidera cache
-                                            bool shouldInvalidateCache = true;
+                                            // WAVE räknas om varje frame ändå, så dess parametrar påverkar inte cachen
+                                            bool shouldInvalidateCache = effect is not WaveEffect;
         
                                             switch (effect)
                                             {
@@ -2977,11 +3020,6 @@ public static class AmosRunner
                                                     color.Saturation = val;
                                                     break;
                                             }
-                                            // ✅ DEBUG: Visa vad som händer
-                                           System.Diagnostics.Debug.WriteLine($"🔍 UPDATE: sprite={id.Value}, idx={idx}, param={param}, val={val}");
-                                            System.Diagnostics.Debug.WriteLine($"   Effect type: {effect.GetType().Name}");
-                                            System.Diagnostics.Debug.WriteLine($"   shouldInvalidateCache: {shouldInvalidateCache}");
- 
                                             // ✅ Invalidera bara för statiska parametrar (RADIUS, AMPLITUDE etc)
                                             if (shouldInvalidateCache)
                                             {
@@ -3303,7 +3341,7 @@ public static class AmosRunner
                                 savedScreen = graphics.GetActiveScreenNumber();
                                 graphics.SetDrawingScreen(tempScreen.Value);
                             }
-
+                            var ss = SplitCsvOrSpaces(cleanArg);
                             var fArgs = SplitCsvOrSpaces(cleanArg);
                             if (fArgs.Count > 0)
                             {
@@ -3391,6 +3429,140 @@ public static class AmosRunner
 
                                 else if (fSub == "CLEAR")
                                     graphics.FontClear();
+                                else if (fSub == "EFFECT")
+                                {
+                                    if (ss .Count < 4)
+                                    {
+                                        graphics.OnError?.Invoke("[FONT EFFECT] Usage: FONT EFFECT ADD/UPDATE/CLEAR fontId, ...");
+                                        goto next_line;
+                                    }
+    
+                                    string effectCmd = ss[1].ToUpperInvariant();
+    
+                                    if (effectCmd == "ADD" && ss.Count >= 5)
+                                    {
+                                        // FONT EFFECT ADD fontId, effectType, param1, param2...
+                                        int fontId = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+        
+                                        // Effekten läggs på fonten och ligger kvar efter FONT CLEAR
+                                        if (graphics.GetFont(fontId) == null)
+                                        {
+                                            graphics.OnError?.Invoke($"[FONT EFFECT] Font {fontId} is not loaded");
+                                            goto next_line;
+                                        }
+        
+                                        string effectType = ss[3].ToUpperInvariant();
+                                        SpriteEffect? newEffect = null;
+        
+                                        if (effectType == "WAVE")
+                                        {
+                                            float ampX = ss.Count > 4 ? (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics) : 0f;
+                                            float freqX = ss.Count > 5 ? (float)EvalDouble(ss[5], vars, ln, getInkey, isKeyDown, graphics) : 0f;
+                                            float ampY = ss.Count > 6 ? (float)EvalDouble(ss[6], vars, ln, getInkey, isKeyDown, graphics) : 0f;
+                                            float freqY = ss.Count > 7 ? (float)EvalDouble(ss[7], vars, ln, getInkey, isKeyDown, graphics) : 0f;
+            
+                                            newEffect = new WaveEffect 
+                                            { 
+                                                AmplitudeX = ampX, 
+                                                FrequencyX = freqX,
+                                                AmplitudeY = ampY,
+                                                FrequencyY = freqY
+                                            };
+                                        }
+                                        else if (effectType == "BLUR")
+                                        {
+                                            float radius = ss.Count > 4 ? (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics) : 5f;
+                                            newEffect = new SpriteBlurEffect { Radius = radius };
+                                        }
+                                        else if (effectType == "COLOR")
+                                        {
+                                            float brightness = ss.Count > 4 ? (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics) : 1f;
+                                            float contrast = ss.Count > 5 ? (float)EvalDouble(ss[5], vars, ln, getInkey, isKeyDown, graphics) : 1f;
+                                            float saturation = ss.Count > 6 ? (float)EvalDouble(ss[6], vars, ln, getInkey, isKeyDown, graphics) : 1f;
+            
+                                            newEffect = new ColorGradeEffect 
+                                            { 
+                                                Brightness = brightness,
+                                                Contrast = contrast,
+                                                Saturation = saturation
+                                            };
+                                        }
+                                        else
+                                        {
+                                            graphics.OnError?.Invoke($"[FONT EFFECT] Unknown effect type: {effectType}");
+                                        }
+
+                                        if (newEffect != null)
+                                            graphics.AddFontEffect(fontId, newEffect);
+                                    }
+                                    else if (effectCmd == "UPDATE" && ss.Count >= 6)
+                                    {
+                                        // FONT EFFECT UPDATE fontId, effectIdx, param, value
+                                        int fontId2 = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+
+                                        int idx = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
+                                        string param = ss[4].ToUpperInvariant();
+                                        float val = (float)EvalDouble(ss[5], vars, ln, getInkey, isKeyDown, graphics);
+                                        
+                                        var effect = graphics.GetFontEffect(fontId2, idx);
+                                        if (effect != null)
+                                        {
+            
+                                            // WAVE räknas om varje frame ändå, så dess parametrar påverkar inte cachen
+                                            bool shouldInvalidateCache = effect is not WaveEffect;
+            
+                                            switch (effect)
+                                            {
+                                                case WaveEffect wave when param == "AMPLITUDEX":
+                                                    wave.AmplitudeX = val;
+                                                    break;
+                                                case WaveEffect wave when param == "FREQUENCYX":
+                                                    wave.FrequencyX = val;
+                                                    break;
+                                                case WaveEffect wave when param == "AMPLITUDEY":
+                                                    wave.AmplitudeY = val;
+                                                    break;
+                                                case WaveEffect wave when param == "FREQUENCYY":
+                                                    wave.FrequencyY = val;
+                                                    break;
+                                                case WaveEffect wave when param == "PHASEX":
+                                                    wave.PhaseX = val;
+                                                    shouldInvalidateCache = false;
+                                                    break;
+                                                case WaveEffect wave when param == "PHASEY":
+                                                    wave.PhaseY = val;
+                                                    shouldInvalidateCache = false;
+                                                    break;
+                                                case WaveEffect wave when param == "TIME":
+                                                    wave.Time = val / 10;
+                                                    shouldInvalidateCache = false;
+                                                    break;
+                                                case SpriteBlurEffect blur when param == "RADIUS":
+                                                    blur.Radius = val;
+                                                    break;
+                                                case ColorGradeEffect color when param == "BRIGHTNESS":
+                                                    color.Brightness = val;
+                                                    break;
+                                                case ColorGradeEffect color when param == "CONTRAST":
+                                                    color.Contrast = val;
+                                                    break;
+                                                case ColorGradeEffect color when param == "SATURATION":
+                                                    color.Saturation = val;
+                                                    break;
+                                            }
+            
+                                            if (shouldInvalidateCache)
+                                                graphics.InvalidateFontEffects(fontId2);
+                                        }
+                                    }
+                                    else if (effectCmd == "CLEAR" && ss.Count >= 4)
+                                    {
+                                        // FONT EFFECT CLEAR fontId
+                                        int fontId = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
+        
+                                        graphics.ClearFontEffects(fontId);
+                                    }
+                                }
                                 
                             }
 
@@ -3434,7 +3606,55 @@ public static class AmosRunner
                             }
 
                             break;
-                        
+                        case "TIMER":
+                        {
+                            // TIMER = nuvarande tid i millisekunder
+                            var currentTime = DateTime.UtcNow;
+                            var elapsed = (currentTime - new DateTime(1970, 1, 1)).TotalMilliseconds;
+                            setVar("TIMER", elapsed);
+                            break;
+                        }
+
+                        case "TICKS":
+                        {
+                            // TICKS = antal millisekunder sedan programstart
+                            var elapsed = (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
+                            setVar("TICKS", elapsed);
+                            break;
+                        }
+                        // Lägg till i switch(cmd):
+
+                        case "PROFILE":
+                        {
+                            // PROFILE START "name" - börja mäta
+                            // PROFILE END "name" - sluta mäta och skriv ut
+                            var subCmd = arg.Split(' ')[0].ToUpperInvariant();
+                            var profileName = arg.Substring(subCmd.Length).Trim().Trim('"');
+    
+                            if (subCmd == "START")
+                            {
+                                var startTime = DateTime.UtcNow;
+                                setVar($"__PROFILE_{profileName}__", 
+                                    (startTime - new DateTime(1970, 1, 1)).TotalMilliseconds);
+                            }
+                            else if (subCmd == "END")
+                            {
+                                var endTime = DateTime.UtcNow;
+                                var endMs = (endTime - new DateTime(1970, 1, 1)).TotalMilliseconds;
+        
+                                if (vars.TryGetValue($"__PROFILE_{profileName}__", out var startObj))
+                                {
+                                    var startMs = Convert.ToDouble(startObj, CultureInfo.InvariantCulture);
+                                    var elapsed = endMs - startMs;
+            
+                                    await appendLineAsync($"[PROFILE] {profileName}: {elapsed:F2} ms");
+            
+                                    // Spara resultat i variabel
+                                    setVar($"TIME_{profileName}", elapsed);
+                                }
+                            }
+                            break;
+                        }
                         case "OPEN":
                         {
                             // Syntax: OPEN IN/OUT/APPEND channel, "filename"
@@ -3844,7 +4064,29 @@ public static class AmosRunner
                     throw new DivideByZeroException("Division by zero");
 
                 res = Convert.ToDouble(res, CultureInfo.InvariantCulture) / div;
-            } else break; 
+            } 
+            // ✅ LÄGG TILL DESSA RADER HÄR (innan "else break"):
+            else if (t.TryConsumeWord("MOD")) {
+                var right = ParseFactor(ref t, v, ln, gk, ikd, g);
+                var a = Convert.ToDouble(res, CultureInfo.InvariantCulture);
+                var b = Convert.ToDouble(right, CultureInfo.InvariantCulture);
+            
+                if (Math.Abs(b) < 0.000000001)
+                    throw new DivideByZeroException("MOD by zero");
+            
+                res = a % b;
+            }
+            else if (t.TryConsumeWord("DIV")) {
+                var right = ParseFactor(ref t, v, ln, gk, ikd, g);
+                var a = Convert.ToDouble(res, CultureInfo.InvariantCulture);
+                var b = Convert.ToDouble(right, CultureInfo.InvariantCulture);
+            
+                if (Math.Abs(b) < 0.000000001)
+                    throw new DivideByZeroException("DIV by zero");
+            
+                res = Math.Floor(a / b); // Integer division
+            }
+            else break; 
         }
         return res;
     }
@@ -3858,6 +4100,16 @@ public static class AmosRunner
         if (t.TryReadIdentifier(out var id)) {
             t.SkipWs();
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
+            if (id.Equals("TICKS", StringComparison.OrdinalIgnoreCase)) 
+            {
+                t.TryConsume('(');
+                t.TryConsume(')');
+    
+                if (_programStartTime == DateTime.MinValue)
+                    _programStartTime = DateTime.UtcNow;
+    
+                return (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
+            }
             if (t.TryConsume('(')) {
                 if (v.ContainsKey("__functions__"))
                 {
@@ -4489,6 +4741,31 @@ public static class AmosRunner
                     throw new Exception($"Array '{arrName}' not found at line {ln}");
                 }
 
+                if (id.Equals("TICKS", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    t.TryConsume(')');
+                    var elapsed = (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
+                    return elapsed;
+                }
+
+                if (id.Equals("MILLIS", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Alias för TICKS
+                    t.TryConsume('(');
+                    t.TryConsume(')');
+                    var elapsed = (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
+                    return elapsed;
+                }
+
+                if (id.Equals("MICROS", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Mikrosekunder för ultra-precision
+                    t.TryConsume('(');
+                    t.TryConsume(')');
+                    var elapsed = (DateTime.UtcNow - _programStartTime).TotalMilliseconds * 1000.0;
+                    return elapsed;
+                }
                 
                 // Om vi kommer hit och det inte var en funktion, kolla om det är en array
                 if (v.TryGetValue(id, out var arrObj) && arrObj is IAmosArray array)
@@ -4564,6 +4841,11 @@ public static class AmosRunner
         // 2. Ta ut kommandot och argumentet, och trimma igen
         string cmd = l[..i].ToUpperInvariant().Trim();
         string arg = l[(i + 1)..].Trim();
+
+        // 3. "NAMN = uttryck" är alltid en tilldelning, även om NAMN råkar vara ett
+        //    kommando (TIMER, COLOR, HIT ...). Inget kommando tar ett argument som börjar med '='.
+        if (arg.StartsWith('=') && !arg.StartsWith("=="))
+            return ("LET", l);
         
         return (cmd, arg); 
     }
@@ -4750,6 +5032,26 @@ public static class AmosRunner
                 return true;
             }
             return false;
+        }
+        // ✅ LÄGG TILL DENNA NYA METOD:
+        public bool TryConsumeWord(string word) {
+            SkipWs();
+        
+            // Kolla om ordet matchar
+            if (_i + word.Length > _s.Length)
+                return false;
+        
+            // Case-insensitive jämförelse
+            if (!string.Equals(_s.Substring(_i, word.Length), word, StringComparison.OrdinalIgnoreCase))
+                return false;
+        
+            // Kolla att nästa tecken INTE är bokstav/siffra (så "MODAL" inte matchar "MOD")
+            if (_i + word.Length < _s.Length && 
+                (char.IsLetterOrDigit(_s[_i + word.Length]) || _s[_i + word.Length] == '_'))
+                return false;
+        
+            _i += word.Length;
+            return true;
         }
     }
 
