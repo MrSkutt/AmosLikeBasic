@@ -2359,7 +2359,19 @@ public static class AmosRunner
                                 pc = wf.WendPc + 1;
                                 jumpHappened = true;
                             }
-                            
+
+                            else if (what == "PROC" || what == "PROCEDURE")
+                            {
+                                // Lämna proceduren direkt, precis som END PROC
+                                if (procCallStack.Count == 0)
+                                    throw new Exception($"EXIT PROC outside PROC at line {ln}");
+                                var frame = procCallStack.Pop();
+                                foreach (var kvp in frame.SavedVars)
+                                    vars[kvp.Key] = kvp.Value;
+                                pc = frame.ReturnPc;
+                                jumpHappened = true;
+                            }
+
                             break;
                         }
 
@@ -3926,37 +3938,39 @@ public static class AmosRunner
     
     private static bool EvalCondition(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
     {
-        c = c.Trim();
+        c = StripOuterParens(c.Trim());
 
-        // NOT (hög prioritet)
-        if (c.StartsWith("NOT ", StringComparison.OrdinalIgnoreCase))
-        {
-            return !EvalCondition(c.Substring(4).Trim(), v, ln, gk, ikd, g);
-        }
-            
-        // 1. Hantera OR (Lägst prioritet, kollas först)
-        var orIdx = IndexOfWord(c, " OR ");
+        // 1. Hantera OR (Lägst prioritet, kollas först). Bara utanför parenteser och strängar,
+        //    så att t.ex. (A=1 OR B=1) AND C=1 fungerar.
+        var orIdx = TopLevelIndexOf(c, "OR", isWord: true);
         if (orIdx >= 0) {
-            return EvalCondition(c[..orIdx].Trim(), v, ln, gk, ikd, g) || 
-                   EvalCondition(c[(orIdx + 4)..].Trim(), v, ln, gk, ikd, g);
+            return EvalCondition(c[..orIdx], v, ln, gk, ikd, g) || 
+                   EvalCondition(c[(orIdx + 2)..], v, ln, gk, ikd, g);
         }
 
         // 2. Hantera AND
-        var andIdx = IndexOfWord(c, " AND ");
+        var andIdx = TopLevelIndexOf(c, "AND", isWord: true);
         if (andIdx >= 0) {
-            return EvalCondition(c[..andIdx].Trim(), v, ln, gk, ikd, g) && 
-                   EvalCondition(c[(andIdx + 5)..].Trim(), v, ln, gk, ikd, g);
+            return EvalCondition(c[..andIdx], v, ln, gk, ikd, g) && 
+                   EvalCondition(c[(andIdx + 3)..], v, ln, gk, ikd, g);
         }
 
-        // 3. Befintlig logik för jämförelser (=, <, >, etc.)
-        if (!c.Contains('=') && !c.Contains('<') && !c.Contains('>')) {
+        // NOT (binder hårdare än AND/OR)
+        if (c.StartsWith("NOT ", StringComparison.OrdinalIgnoreCase) ||
+            c.StartsWith("NOT(", StringComparison.OrdinalIgnoreCase))
+        {
+            return !EvalCondition(c.Substring(3), v, ln, gk, ikd, g);
+        }
+
+        // 3. Jämförelser (=, <, >, etc.) på toppnivå
+        var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
+        if (ops.All(op => TopLevelIndexOf(c, op, isWord: false) < 0)) {
             // Konvertera till double: allt utom exakt 0.0 räknas som sant
             return Math.Abs(Convert.ToDouble(EvalValue(c, v, ln, gk, ikd, g))) > 0.000001;
         }
 
-        var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
         foreach (var op in ops) {
-            var i = c.IndexOf(op); if (i < 0) continue;
+            var i = TopLevelIndexOf(c, op, isWord: false); if (i < 0) continue;
             var lV = EvalValue(c[..i].Trim(), v, ln, gk, ikd, g); 
             var rV = EvalValue(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
                 
@@ -4093,6 +4107,9 @@ public static class AmosRunner
         if (t.TryReadString(out var s)) return s;
         if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
         if (t.TryReadDouble(out var n)) return n; 
+        // Unärt minus/plus framför variabel, funktion eller parentes: -MAXV, -SIN(A), -(A+B)
+        if (t.TryConsume('-')) return -Convert.ToDouble(ParseFactor(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
+        if (t.TryConsume('+')) return ParseFactor(ref t, v, ln, gk, ikd, g);
         if (t.TryReadIdentifier(out var id)) {
             t.SkipWs();
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
@@ -4915,9 +4932,78 @@ public static class AmosRunner
     }
     
     private static string StripLeadingLineNumber(string l) { var i = 0; while (i < l.Length && char.IsDigit(l[i])) i++; return l[i..].Trim(); }
+    // Delar argument på komma och mellanslag, men inte inuti "strängar" eller (parenteser)
+    // och inte runt operatorer. "1, X + 10, Y" blir alltså 1 | X + 10 | Y, "T MOD 6" hålls ihop
+    // och "HEJ PÅ DIG" i citattecken förblir en sträng. Ord utan operator emellan delas som förut
+    // (t.ex. "ADD 0, BLUR 1.0"). Ett ensamt "-5" efter ett mellanslag räknas som ett eget argument.
     private static List<string> SplitCsvOrSpaces(string a) {
-        if (string.IsNullOrWhiteSpace(a)) return new List<string>();
-        return a.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var res = new List<string>();
+        if (string.IsNullOrWhiteSpace(a)) return res;
+
+        var cur = new System.Text.StringBuilder();
+        void Flush()
+        {
+            var part = cur.ToString().Trim();
+            if (part.Length > 0) res.Add(part);
+            cur.Clear();
+        }
+
+        bool q = false;
+        int depth = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            char c = a[i];
+            if (c == '"') q = !q;
+            if (q || c == '"') { cur.Append(c); continue; }
+            if (c == '(' || c == '[') depth++;
+            else if (c == ')' || c == ']') depth--;
+
+            if (depth == 0 && c == ',') { Flush(); continue; }
+            if (depth == 0 && char.IsWhiteSpace(c))
+            {
+                int j = i;
+                while (j < a.Length && char.IsWhiteSpace(a[j])) j++;
+                var before = cur.ToString().TrimEnd();
+                if (before.Length > 0 && j < a.Length)
+                {
+                    if (EndsWithOperator(before) || StartsWithOperator(a, j)) cur.Append(' ');
+                    else Flush();
+                }
+                i = j - 1;
+                continue;
+            }
+            cur.Append(c);
+        }
+        Flush();
+        return res;
+    }
+
+    private static readonly string[] WordOperators = { "MOD", "DIV", "AND", "OR", "XOR", "NOT" };
+
+    private static bool EndsWithOperator(string s)
+    {
+        if ("+-*/&=<>^".Contains(s[^1])) return true;
+        foreach (var w in WordOperators)
+            if (s.Length >= w.Length && s.EndsWith(w, StringComparison.OrdinalIgnoreCase) &&
+                (s.Length == w.Length || !char.IsLetterOrDigit(s[^(w.Length + 1)])))
+                return true;
+        return false;
+    }
+
+    private static bool StartsWithOperator(string s, int i)
+    {
+        char c = s[i];
+        // + och - räknas bara som operator om de följs av mellanslag ("X - 1"), annars är "-5" ett tal
+        if (c == '+' || c == '-') return i + 1 < s.Length && char.IsWhiteSpace(s[i + 1]);
+        if ("*/&=<>^".Contains(c)) return true;
+        foreach (var w in WordOperators)
+        {
+            int end = i + w.Length;
+            if (end <= s.Length && string.Compare(s, i, w, 0, w.Length, StringComparison.OrdinalIgnoreCase) == 0 &&
+                (end == s.Length || !char.IsLetterOrDigit(s[end])))
+                return true;
+        }
+        return false;
     }
     private static List<string> SplitCsv(string a) {
         if (string.IsNullOrWhiteSpace(a)) return new List<string>();
@@ -4976,6 +5062,55 @@ public static class AmosRunner
 
     private static int IndexOfWord(string t, string w) => t.ToUpperInvariant().IndexOf(w.ToUpperInvariant());
 
+    // Första förekomsten av 'token' utanför strängar och parenteser. Med isWord måste den stå som
+    // ett eget ord (så att OR inte hittas i t.ex. SCORE eller ORANGE).
+    private static int TopLevelIndexOf(string s, string token, bool isWord)
+    {
+        bool q = false;
+        int depth = 0;
+        for (int i = 0; i <= s.Length - token.Length; i++)
+        {
+            char ch = s[i];
+            if (ch == '"') { q = !q; continue; }
+            if (q) continue;
+            if (ch == '(') { depth++; continue; }
+            if (ch == ')') { depth--; continue; }
+            if (depth != 0) continue;
+            if (string.Compare(s, i, token, 0, token.Length, StringComparison.OrdinalIgnoreCase) != 0) continue;
+            if (isWord)
+            {
+                bool startOk = i == 0 || !(char.IsLetterOrDigit(s[i - 1]) || s[i - 1] == '_' || s[i - 1] == '$');
+                int end = i + token.Length;
+                bool endOk = end >= s.Length || !(char.IsLetterOrDigit(s[end]) || s[end] == '_' || s[end] == '$');
+                if (!startOk || !endOk) continue;
+            }
+            return i;
+        }
+        return -1;
+    }
+
+    // "(A OR B)" -> "A OR B", men inte "(A) + (B)"
+    private static string StripOuterParens(string s)
+    {
+        while (s.Length >= 2 && s[0] == '(' && s[^1] == ')')
+        {
+            bool q = false;
+            int depth = 0;
+            bool wrapsAll = true;
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] == '"') q = !q;
+                if (q) continue;
+                if (s[i] == '(') depth++;
+                else if (s[i] == ')') depth--;
+                if (depth == 0 && i < s.Length - 1) { wrapsAll = false; break; }
+            }
+            if (!wrapsAll) break;
+            s = s[1..^1].Trim();
+        }
+        return s;
+    }
+
     private ref struct Tokenizer {
         private readonly string _s; private int _i;
         public Tokenizer(string s) { _s = s; _i = 0; }
@@ -5006,7 +5141,10 @@ public static class AmosRunner
             
             var s = _i; 
             while (_i < _s.Length && (char.IsDigit(_s[_i]) || _s[_i] == '.' || (_i == s && _s[_i] == '-'))) _i++; 
-            return double.TryParse(_s[s.._i], CultureInfo.InvariantCulture, out v); 
+            if (double.TryParse(_s[s.._i], CultureInfo.InvariantCulture, out v)) return true;
+            // Inget tal (t.ex. "-MAXV"): backa så att minustecknet inte försvinner
+            _i = s;
+            return false;
         }
         public bool TryReadIdentifier(out string n) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsLetterOrDigit(_s[_i]) || _s[_i] == '$' || _s[_i] == '_' || _s[_i] == '#')) _i++; n = _s[s.._i]; return n.Length > 0; }
         public string ReadUntil(char c) { var s = _i; while (_i < _s.Length && _s[_i] != c) _i++; return _s[s.._i]; }
