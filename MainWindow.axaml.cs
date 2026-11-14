@@ -216,27 +216,33 @@ public partial class MainWindow : Window
         if (e.Key is not (Key.PageUp or Key.PageDown))
             return;
 
-        var text = Editor.Text;
-        if (string.IsNullOrEmpty(text))
+        var doc = Editor.Document;
+        if (doc == null || doc.LineCount == 0)
             return;
 
-        var lines = text.Replace("\r\n", "\n").Split('\n');
-        var currentLine = text[..Editor.CaretOffset].Count(c => c == '\n');
+        // Bläddra en skärmsida: så många rader som syns, minus en så att man ser var man var
+        var textView = Editor.TextArea.TextView;
+        double lineHeight = textView.DefaultLineHeight;
+        int page = lineHeight > 0 ? Math.Max(1, (int)(textView.Bounds.Height / lineHeight) - 1) : 20;
+        int direction = e.Key == Key.PageUp ? -1 : 1;
 
-        const int page = 20; // AMOS-känsla
+        var caret = Editor.TextArea.Caret;
+        int column = caret.Column;
+        int targetLine = Math.Clamp(caret.Line + direction * page, 1, doc.LineCount);
 
-        var targetLine = e.Key == Key.PageUp
-            ? Math.Max(0, currentLine - page)
-            : Math.Min(lines.Length - 1, currentLine + page);
+        // Rulla texten lika mycket som markören flyttar, så att den stannar på samma plats i fönstret.
+        // (TextEditor.ScrollToVerticalOffset har ingen effekt, så editorns ScrollViewer används direkt.)
+        var scrollViewer = Editor.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
+        if (scrollViewer != null)
+        {
+            double maxOffset = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+            double newOffset = Math.Clamp(scrollViewer.Offset.Y + direction * page * lineHeight, 0, maxOffset);
+            scrollViewer.Offset = new Vector(scrollViewer.Offset.X, newOffset);
+        }
 
-        int charIndex = 0;
-        for (int i = 0; i < targetLine; i++)
-            charIndex += lines[i].Length + 1;
-
-        Editor.CaretOffset = charIndex;
-        // TextEditor använder SelectionStart och SelectionLength
-        Editor.SelectionStart = charIndex;
-        Editor.SelectionLength = 0;
+        Editor.TextArea.ClearSelection();
+        caret.Line = targetLine;
+        caret.Column = Math.Min(column, doc.GetLineByNumber(targetLine).Length + 1);
         Editor.Focus();
 
         e.Handled = true;
@@ -1255,9 +1261,14 @@ public partial class MainWindow : Window
     }
 
 
+    private List<Button>? _neutralToolbarButtons;
+
     private void ApplyTheme(AmosTheme theme)
     {
         var font = new FontFamily(theme.Font);
+
+        // Temafärger till alla fönster (sprite- och karteditorn m.fl.), med läsbara textfärger
+        var palette = ThemeResources.Apply(theme);
 
         // Fönster & editor
         this.Background = new SolidColorBrush(theme.WindowBg);
@@ -1291,15 +1302,15 @@ public partial class MainWindow : Window
         StatusText.Foreground = new SolidColorBrush(theme.VarWatchFg);
         CurrentLineText.Foreground = new SolidColorBrush(theme.VarWatchAccentFg);
 
-        // Toolbar-knappar (de utan explicit färg)
-        foreach (var btn in ToolbarBorder.GetVisualDescendants().OfType<Button>())
+        // Toolbar-knappar (de utan explicit färg). De känns igen på XAML-färgen första gången;
+        // efter det har de temats färg, så listan sparas för senare temabyten.
+        _neutralToolbarButtons ??= ToolbarBorder.GetVisualDescendants().OfType<Button>()
+            .Where(btn => btn.Background is SolidColorBrush b && b.Color == Color.Parse("#0A2D8F"))
+            .ToList();
+        foreach (var btn in _neutralToolbarButtons)
         {
-            if (btn.Background is SolidColorBrush b && 
-                b.Color == Color.Parse("#0A2D8F")) // bara "neutral" knappar
-            {
-                btn.Background = new SolidColorBrush(theme.ButtonBg);
-                btn.Foreground = new SolidColorBrush(theme.ButtonFg);
-            }
+            btn.Background = new SolidColorBrush(theme.ButtonBg);
+            btn.Foreground = new SolidColorBrush(palette.ButtonFg);
         }
 
         // Hitta header-bordern i VarWatch
@@ -1317,7 +1328,8 @@ public partial class MainWindow : Window
             if (name is "SpriteButton" or "MapButton" or "LoadButton" or "SaveButton"  or "ClearLogs")
             {
                 btn.Background = new SolidColorBrush(theme.ActionButtonBg);
-                btn.Foreground = new SolidColorBrush(theme.ActionButtonFg);
+                btn.Foreground = new SolidColorBrush(
+                    ThemeResources.Readable(theme.ActionButtonBg, theme.ActionButtonFg, theme.MenuFg));
             }
         }
         

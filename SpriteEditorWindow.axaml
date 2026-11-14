@@ -6,29 +6,26 @@
   <Grid RowDefinitions="Auto,*,Auto" Margin="12">
 
     <!-- Top controls -->
-    <Border Background="#06206F" BorderBrush="#7FB2FF" BorderThickness="2" Padding="10">
+    <Border Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10">
       <Grid ColumnDefinitions="Auto,110,Auto,110,Auto,110,Auto,*"
             RowDefinitions="Auto,Auto,Auto">
 
-        <TextBlock Grid.Row="0" Grid.Column="0" Foreground="#7FB2FF" FontWeight="Bold" Text="Sprite ID" VerticalAlignment="Center"/>
+        <TextBlock Grid.Row="0" Grid.Column="0" Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" Text="Sprite ID" VerticalAlignment="Center"/>
         <NumericUpDown Grid.Row="0" Grid.Column="1" Name="SpriteIdUpDown"
                        Minimum="0" Maximum="256" Value="0"
                        Increment="1"
-                       Foreground="White" Background="#00134D"
                        ValueChanged="SpriteIdUpDown_OnValueChanged"/>
 
-        <TextBlock Grid.Row="0" Grid.Column="2" Foreground="#7FB2FF" FontWeight="Bold" Text="Width" VerticalAlignment="Center" Margin="12,0,0,0"/>
+        <TextBlock Grid.Row="0" Grid.Column="2" Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" Text="Width" VerticalAlignment="Center" Margin="12,0,0,0"/>
         <NumericUpDown Grid.Row="0" Grid.Column="3" Name="WidthUpDown"
                        Minimum="1" Maximum="256" Value="32"
                        Increment="1"
-                       Foreground="White" Background="#00134D"
                        ValueChanged="SizeUpDown_OnValueChanged"/>
 
-        <TextBlock Grid.Row="0" Grid.Column="4" Foreground="#7FB2FF" FontWeight="Bold" Text="Height" VerticalAlignment="Center" Margin="12,0,0,0"/>
+        <TextBlock Grid.Row="0" Grid.Column="4" Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" Text="Height" VerticalAlignment="Center" Margin="12,0,0,0"/>
         <NumericUpDown Grid.Row="0" Grid.Column="5" Name="HeightUpDown"
                        Minimum="1" Maximum="256" Value="32"
                        Increment="1"
-                       Foreground="White" Background="#00134D"
                        ValueChanged="SizeUpDown_OnValueChanged"/>
 
         <Button Grid.Row="0" Grid.Column="6" Name="CreateButton"
@@ -38,7 +35,7 @@
 
         <!-- Palette Row -->
         <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="8" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-          <TextBlock Foreground="#7FB2FF" FontWeight="Bold" Text="Palette:" VerticalAlignment="Center"/>
+          <TextBlock Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" Text="Palette:" VerticalAlignment="Center"/>
 
           <Button Width="28" Height="28" Background="White" Click="PaletteWhite_OnClick"/>
           <Button Width="28" Height="28" Background="Black" Click="PaletteBlack_OnClick"/>
@@ -50,7 +47,7 @@
           <Button Width="28" Height="28" Background="Magenta" Click="PaletteTransparent_OnClick"/>
 
           <!-- Current Color Indicator - med mer separation -->
-          <Border Width="40" Height="28" BorderBrush="White" BorderThickness="3" Margin="16,0,0,0" Background="Black">
+          <Border Width="40" Height="28" BorderBrush="{DynamicResource AmosLabelFg}" BorderThickness="3" Margin="16,0,0,0" Background="Black">
             <Rectangle Name="CurrentColorRect" Fill="White"/>
           </Border>
           
@@ -59,12 +56,12 @@
 
           <Button Content="Clear" Click="ClearButton_OnClick" Margin="16,0,0,0"/>
 
-          <TextBlock Margin="20,0,0,0" Foreground="#7FB2FF" FontWeight="Bold" Text="Zoom:" VerticalAlignment="Center"/>
+          <TextBlock Margin="20,0,0,0" Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" Text="Zoom:" VerticalAlignment="Center"/>
           <Slider Name="ZoomSlider"
                   Minimum="4" Maximum="30" Value="12"
                   Width="140"
                   ValueChanged="ZoomSlider_OnValueChanged"/>
-          <TextBlock Name="ZoomText" Foreground="White" VerticalAlignment="Center" Text="12x"/>
+          <TextBlock Name="ZoomText" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center" Text="12x"/>
         </StackPanel>
 
         <!-- File Operations Row -->
@@ -73,16 +70,16 @@
           <Button Content="Load Spritesheet..." Click="LoadSpritesheetButton_OnClick"/>
           <Button Content="Save" Click="SaveButton_OnClick"/>
           <Button Content="Save As..." Click="SaveAsButton_OnClick"/>
-          <TextBlock Name="FileNameText" Foreground="#7FB2FF" VerticalAlignment="Center" Text="(no file loaded)" Margin="12,0,0,0"/>
+          <TextBlock Name="FileNameText" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center" Text="(no file loaded)" Margin="12,0,0,0"/>
         </StackPanel>
       </Grid>
     </Border>
 
     <!-- Canvas -->
-    <Border Grid.Row="1" Margin="0,12,0,0" Background="#00134D" BorderBrush="#7FB2FF" BorderThickness="2" Padding="10">
+    <Border Grid.Row="1" Margin="0,12,0,0" Background="{DynamicResource AmosCanvasBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10">
       <ScrollViewer HorizontalScrollBarVisibility="Auto"
                     VerticalScrollBarVisibility="Auto">
-        <Border Background="Black" BorderBrush="#7FB2FF" BorderThickness="2" Padding="10"
+        <Border Background="Black" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10"
                 HorizontalAlignment="Left" VerticalAlignment="Top">
           <Image Name="SpriteImage"
                  Stretch="Fill"
@@ -99,7 +96,7 @@
     </Border>
 
     <!-- Frame Navigation -->
-    <Border Grid.Row="2" Background="#06206F" BorderBrush="#7FB2FF" BorderThickness="2" Padding="10" Margin="0,12,0,0"
+    <Border Grid.Row="2" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10" Margin="0,12,0,0"
             Name="FrameNavigationPanel" IsVisible="False">
       <Grid ColumnDefinitions="Auto,*,Auto">
         
@@ -111,7 +108,7 @@
               <TextBlock Text="Prev" VerticalAlignment="Center"/>
             </StackPanel>
           </Button>
-          <TextBlock Name="FrameInfoText" Foreground="#7FB2FF" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0"/>
+          <TextBlock Name="FrameInfoText" Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0"/>
           <Button Width="70" Click="NextFrameButton_OnClick">
             <StackPanel Orientation="Horizontal" Spacing="4">
               <TextBlock Text="Next" VerticalAlignment="Center"/>

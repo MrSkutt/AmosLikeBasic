@@ -2,36 +2,35 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="AmosLikeBasic.MapEditorWindow"
         Title="Map Editor" Width="1100" Height="800"
-        Background="#00134D">
+        Background="{DynamicResource AmosCanvasBg}">
     <Grid ColumnDefinitions="250, *"> <!-- Ökad bredd på sidopanelen -->
         <!-- Vänster panel -->
-        <Border Grid.Column="0" Background="#06206F" BorderBrush="#7FB2FF" BorderThickness="0,0,2,0">
+        <Border Grid.Column="0" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="0,0,2,0">
             <ScrollViewer>
                 <StackPanel Margin="15" Spacing="15">
                     <TextBlock Text="MAP SIZE" Classes="amos-title" HorizontalAlignment="Center"/>
                     
                     <Grid ColumnDefinitions="Auto, *" RowDefinitions="Auto, Auto">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Width:" VerticalAlignment="Center" Foreground="#7FB2FF" Margin="0,0,10,10"/>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Width:" VerticalAlignment="Center" Foreground="{DynamicResource AmosLabelFg}" Margin="0,0,10,10"/>
                         <NumericUpDown Grid.Row="0" Grid.Column="1" Name="MapWidthUpDown" 
                                        Value="20" Minimum="1" Maximum="1000" Increment="1" FormatString="0"
-                                       Foreground="White" Background="#000A26" BorderBrush="#7FB2FF" Margin="0,0,0,10"/>
+                                       Margin="0,0,0,10"/>
                         
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Height:" VerticalAlignment="Center" Foreground="#7FB2FF" Margin="0,0,10,0"/>
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Height:" VerticalAlignment="Center" Foreground="{DynamicResource AmosLabelFg}" Margin="0,0,10,0"/>
                         <NumericUpDown Grid.Row="1" Grid.Column="1" Name="MapHeightUpDown" 
                                        Value="15" Minimum="1" Maximum="1000" Increment="1" FormatString="0"
-                                       Foreground="White" Background="#000A26" BorderBrush="#7FB2FF"/>
+                                       />
                     </Grid>
                     
                     <Button Content="Resize Map" Click="ResizeMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
                     
-                    <Separator Background="#7FB2FF" Height="2" Margin="0,10"/>
+                    <Separator Background="{DynamicResource AmosPanelBorder}" Height="2" Margin="0,10"/>
                     
                     <TextBlock Text="FILE" Classes="amos-title" HorizontalAlignment="Center"/>
                     <Button Content="Save Map..." Click="SaveMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
                     <Button Content="Load Map..." Click="LoadMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
                     <Button Content="Clear Map" Click="OnClearMapClick" Background="DarkRed" Foreground="White" />
                     
-                    <TextBlock Text="TILES" Classes="amos-title" HorizontalAlignment="Center"/>
                     <TextBlock Text="TILES" Classes="amos-title" HorizontalAlignment="Center"/>
                     <Button Content="Load Tileset..." Click="LoadTiles_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
                     <Button Content="Show Palette" Click="ShowPalette_OnClick" Classes="amos-button" HorizontalAlignment="Stretch" Margin="0,5,0,0"/>

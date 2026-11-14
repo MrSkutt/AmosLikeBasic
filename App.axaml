@@ -5,6 +5,20 @@
              RequestedThemeVariant="Default">
              <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
 
+    <!-- Temafärger. Sätts av ThemeResources.Apply när ett tema väljs; detta är Classic Blue. -->
+    <Application.Resources>
+        <SolidColorBrush x:Key="AmosWindowBg" Color="#0B2A9B"/>
+        <SolidColorBrush x:Key="AmosPanelBg" Color="#06206F"/>
+        <SolidColorBrush x:Key="AmosPanelBorder" Color="#7FB2FF"/>
+        <SolidColorBrush x:Key="AmosLabelFg" Color="#7FB2FF"/>
+        <SolidColorBrush x:Key="AmosTitleFg" Color="#FFD400"/>
+        <SolidColorBrush x:Key="AmosInputBg" Color="#00134D"/>
+        <SolidColorBrush x:Key="AmosInputFg" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="AmosCanvasBg" Color="#00134D"/>
+        <SolidColorBrush x:Key="AmosButtonBg" Color="#0A2D8F"/>
+        <SolidColorBrush x:Key="AmosButtonFg" Color="#FFFFFF"/>
+    </Application.Resources>
+
     <Application.Styles>
         <FluentTheme />
         
@@ -13,12 +27,12 @@
 
         <!-- AMOS-ish palette + chunky controls -->
         <Style Selector="Window">
-            <Setter Property="Background" Value="#0B2A9B"/>
+            <Setter Property="Background" Value="{DynamicResource AmosWindowBg}"/>
         </Style>
 
         <Style Selector="Border.amos-panel">
-            <Setter Property="Background" Value="#06206F"/>
-            <Setter Property="BorderBrush" Value="#7FB2FF"/>
+            <Setter Property="Background" Value="{DynamicResource AmosPanelBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AmosPanelBorder}"/>
             <Setter Property="BorderThickness" Value="2"/>
             <Setter Property="CornerRadius" Value="0"/>
         </Style>
@@ -48,7 +62,7 @@
         <Style Selector="Button.amos-button">
             <Setter Property="CornerRadius" Value="2"/>
             <Setter Property="BorderThickness" Value="2"/>
-            <Setter Property="BorderBrush" Value="#7FB2FF"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AmosPanelBorder}"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Padding" Value="12,4"/>
             <Setter Property="FontSize" Value="14"/>
@@ -60,13 +74,20 @@
         </Style>
 
         <Style Selector="TextBlock.amos-title">
-            <Setter Property="Foreground" Value="#FFD400"/>
+            <Setter Property="Foreground" Value="{DynamicResource AmosTitleFg}"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="FontSize" Value="14"/>
         </Style>
         <Style Selector="NumericUpDown">
-            <Setter Property="Foreground" Value="White" />
+            <Setter Property="Foreground" Value="{DynamicResource AmosInputFg}" />
+            <Setter Property="Background" Value="{DynamicResource AmosInputBg}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AmosPanelBorder}" />
             <Setter Property="FontSize" Value="14" />
+        </Style>
+
+        <!-- Etiketter i editorernas paneler -->
+        <Style Selector="TextBlock.amos-label">
+            <Setter Property="Foreground" Value="{DynamicResource AmosLabelFg}"/>
         </Style>
     </Application.Styles>
 </Application>

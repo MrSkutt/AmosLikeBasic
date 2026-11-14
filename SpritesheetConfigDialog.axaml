@@ -8,7 +8,7 @@
     <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
     
         <TextBlock Grid.Row="0" Text="Configure Spritesheet Import" 
-                   FontSize="16" FontWeight="Bold" Foreground="#7FB2FF" Margin="0,0,0,20"/>
+                   FontSize="16" FontWeight="Bold" Foreground="{DynamicResource AmosTitleFg}" Margin="0,0,0,20"/>
 
         <!-- Frame Width -->
         <Grid Grid.Row="1" ColumnDefinitions="120,*" Margin="0,0,0,10">
