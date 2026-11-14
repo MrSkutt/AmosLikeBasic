@@ -40,10 +40,90 @@ public sealed class GpuLayer
 }
 
 
+// Ritar hela spelskärmen: alla lager ritas i spelets egen upplösning (t.ex. 640x480) till en
+// bild på GPU:n, som sedan skalas upp till fönstret en enda gång. Då kostar shaders och
+// raster bars lika mycket oavsett fönsterstorlek (förr kördes de för varje pixel i fönstret,
+// vilket gjorde helskärm på stora skärmar mycket långsamt).
+public sealed class ScreenDrawOperation : ICustomDrawOperation
+{
+    private static readonly SKSamplingOptions Nearest = new(SKFilterMode.Nearest, SKMipmapMode.None);
+    private static readonly SKSamplingOptions Linear = new(SKFilterMode.Linear, SKMipmapMode.None);
+
+    private readonly List<LayerDrawOperation> _layers;
+
+    public ScreenDrawOperation(Rect bounds, List<LayerDrawOperation> layers)
+    {
+        Bounds = bounds;
+        _layers = layers;
+    }
+
+    public Rect Bounds { get; }
+
+    public void Dispose()
+    {
+    }
+
+    public bool Equals(ICustomDrawOperation? other) => false;
+    public bool HitTest(Point p) => false;
+
+    public void Render(ImmediateDrawingContext context)
+    {
+        var leaseFeature = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
+        if (leaseFeature == null) return;
+
+        using var lease = leaseFeature.Lease();
+        var canvas = lease.SkCanvas;
+        var gr = lease.GrContext;
+
+        int w = (int)Bounds.Width, h = (int)Bounds.Height;
+        if (w <= 0 || h <= 0) return;
+
+        try
+        {
+            // 1. Alla lager i spelets upplösning
+            using var screen = CreateSurface(gr, w, h);
+            screen.Canvas.Clear(SKColors.Transparent);
+            foreach (var layer in _layers)
+                layer.DrawTo(screen.Canvas, gr);
+            using var image = screen.Snapshot();
+
+            // 2. Skala upp till fönstret. Först med hela pixlar till största heltalsfaktorn
+            //    (skarpa, lika stora pixlar), sedan mjukt resten av vägen ("sharp bilinear").
+            var m = canvas.TotalMatrix;
+            float scale = Math.Min(Math.Abs(m.ScaleX), Math.Abs(m.ScaleY));
+            int factor = Math.Max(1, (int)Math.Floor(scale + 0.001f));
+            var dest = new SKRect((float)Bounds.X, (float)Bounds.Y, (float)Bounds.Right, (float)Bounds.Bottom);
+
+            if (factor == 1)
+            {
+                canvas.DrawImage(image, new SKRect(0, 0, w, h), dest, Linear);
+                return;
+            }
+
+            using var big = CreateSurface(gr, w * factor, h * factor);
+            big.Canvas.Clear(SKColors.Transparent);
+            big.Canvas.DrawImage(image, new SKRect(0, 0, w, h), new SKRect(0, 0, w * factor, h * factor), Nearest);
+            using var bigImage = big.Snapshot();
+            canvas.DrawImage(bigImage, new SKRect(0, 0, w * factor, h * factor), dest, Linear);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine("Screen Render Crash: " + ex.Message);
+        }
+    }
+
+    // RGBA går att rendera till på alla GPU-backends (BGRA inte alltid på OpenGL)
+    internal static SKSurface CreateSurface(GRContext? gr, int w, int h)
+    {
+        var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+        return (gr != null ? SKSurface.Create(gr, true, info) : null) ?? SKSurface.Create(info);
+    }
+}
+
 // Ritar ett lager: komponerar bitmap + texter + sprites på en Skia-yta (på GPU:n när en
-// finns) och kör sedan lagrets shader med ytan som inputTexture. Allt sker på render-tråden,
-// utan att något läses tillbaka till CPU:n.
-public sealed class LayerDrawOperation : ICustomDrawOperation
+// finns) och kör sedan lagrets shader med ytan som inputTexture, till spelets skärmbild.
+// Allt sker på render-tråden, utan att något läses tillbaka till CPU:n.
+public sealed class LayerDrawOperation
 {
     private static readonly SKSamplingOptions Sampling = new(SKFilterMode.Linear, SKMipmapMode.None);
 
@@ -65,33 +145,17 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
 
     public Rect Bounds { get; }
 
-    public void Dispose()
+    public void DrawTo(SKCanvas canvas, GRContext? gr)
     {
-    }
-
-    public bool Equals(ICustomDrawOperation? other) => false;
-    public bool HitTest(Point p) => false;
-
-    public void Render(ImmediateDrawingContext context)
-    {
-        var leaseFeature = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
-        if (leaseFeature == null) return;
-
-        using var lease = leaseFeature.Lease();
-        var canvas = lease.SkCanvas;
-        _gr = lease.GrContext;
+        _gr = gr;
 
         var effect = GetOrCompileEffect();
         if (effect == null) return;
 
         try
         {
-            // RGBA går att rendera till på alla GPU-backends (BGRA inte alltid på OpenGL)
-            var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
-                SKColorType.Rgba8888, SKAlphaType.Premul);
-
-            using var surface = (_gr != null ? SKSurface.Create(_gr, true, info) : null)
-                                ?? SKSurface.Create(info);
+            using var surface = ScreenDrawOperation.CreateSurface(_gr,
+                _layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height);
             DrawLayerContent(surface.Canvas);
             using var composite = surface.Snapshot();
 
@@ -351,7 +415,8 @@ public sealed class AmosGpuView : Control
 
         var screenRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
 
-        // Ett draw-anrop per lager; själva ritningen sker på render-tråden i LayerDrawOperation
+        // Ett draw-anrop för hela skärmen; själva ritningen sker på render-tråden i ScreenDrawOperation
+        var layers = new List<LayerDrawOperation>();
         for (int layerIndex = 0; layerIndex < layersCopy.Count; layerIndex++)
         {
             var layer = layersCopy[layerIndex];
@@ -361,8 +426,9 @@ public sealed class AmosGpuView : Control
 
             var texts = fontTextsCopy.Where(qt => qt.Layer == -1 || qt.Layer == layerIndex).ToList();
             var sprites = spritesCopy.Where(s => s.Layer == -1 || s.Layer == layerIndex).ToList();
-            ctx.Custom(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites));
+            layers.Add(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites));
         }
+        ctx.Custom(new ScreenDrawOperation(screenRect, layers));
     }
 }
 
