@@ -538,7 +538,7 @@ public static partial class AmosRunner
             // Vi återanvänder din existerande tilldelningslogik (inkl. arrayer)
             var leftSide = target.Trim();
             if (string.IsNullOrWhiteSpace(leftSide))
-                throw new Exception($"Syntax Error in READ at line {ln}: empty target");
+                throw new Exception($"Syntax Error at line {ln}: nothing to assign to");
 
             if (leftSide.Contains('('))
             {
@@ -565,7 +565,7 @@ public static partial class AmosRunner
                         return;
                     }
 
-                    throw new Exception($"Unknown array in READ at line {ln}: {arrayName}");
+                    throw new Exception($"Unknown array '{arrayName}' at line {ln} (create it with DIM first)");
                 }
             }
 
@@ -1911,9 +1911,12 @@ public static partial class AmosRunner
 
                             break;
                         case "LET":
+                        {
+                            // Även "A(I) = värde" hamnar här (via SplitCommand), så arrayer måste hanteras
                             var (n, vt) = SplitAssignment(arg);
-                            setVar(n, EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics));
+                            AssignValueToTarget(n, EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics), ln);
                             break;
+                        }
                         case "DIM":
                         {
                             var eqIdx = arg.IndexOf('=');
@@ -4846,6 +4849,10 @@ public static partial class AmosRunner
             // Det rensar bort de pyttesmå avrundningsfelen i slutet.
             return d.ToString("G10", CultureInfo.InvariantCulture);
         }
+        // Andra tal (t.ex. heltal från SGN) som BASIC-tal, inte med datorns språkinställning
+        // (svenska ger annars "−1" med typografiskt minustecken)
+        if (v is IFormattable f)
+            return f.ToString(null, CultureInfo.InvariantCulture);
         return v?.ToString() ?? "";
     }
     private static bool IsQuotedString(string t) => t.Length >= 2 && t.StartsWith("\"") && t.EndsWith("\"");

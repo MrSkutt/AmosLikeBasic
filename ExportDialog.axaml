@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="AmosLikeBasic.ExportDialog"
+        Title="Export App"
+        Width="420" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <Border Classes="amos-panel" Margin="12" Padding="16">
+        <StackPanel Spacing="12">
+            <TextBlock Text="EXPORT AS STANDALONE APP" Classes="amos-title"/>
+
+            <TextBlock Classes="amos-label" TextWrapping="Wrap"
+                       Text="Builds an app with the program in the editor and the images and sounds it uses. Players do not need to install anything."/>
+
+            <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Classes="amos-label" Text="Name:" VerticalAlignment="Center"/>
+                <TextBox Grid.Row="0" Grid.Column="1" Name="NameBox"
+                         Background="{DynamicResource AmosInputBg}" Foreground="{DynamicResource AmosInputFg}"/>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Classes="amos-label" Text="Platform:" VerticalAlignment="Center" Margin="0,10,0,0"/>
+                <ComboBox Grid.Row="1" Grid.Column="1" Name="PlatformBox" HorizontalAlignment="Stretch" Margin="0,10,0,0">
+                    <ComboBoxItem Content="Mac and Windows" Tag="both"/>
+                    <ComboBoxItem Content="Mac (.app)" Tag="mac"/>
+                    <ComboBoxItem Content="Windows (.exe)" Tag="win"/>
+                </ComboBox>
+            </Grid>
+
+            <TextBlock Name="ErrorText" Foreground="#FF6060" TextWrapping="Wrap" IsVisible="False"/>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+                <Button Content="Export" Width="90" IsDefault="True" Click="ExportButton_OnClick"/>
+                <Button Content="Cancel" Width="90" IsCancel="True" Click="CancelButton_OnClick"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

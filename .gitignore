@@ -56,3 +56,6 @@ Icon?
 
 # Exporterade appar (Tools/export_app.py)
 Export/
+
+# Genererad HTML-version av manualen (Tools/build_manual.py)
+Documentation/Manual/build/

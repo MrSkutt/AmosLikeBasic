@@ -25,6 +25,8 @@
                 <MenuItem Header="Save" Click="SaveProject_OnClick"/>
                 <MenuItem Header="Save as..." Click="SaveAsProject_OnClick"/>
                 <Separator/>
+                <MenuItem Header="Export app..." Name="ExportAppMenuItem" Click="ExportApp_OnClick"/>
+                <Separator/>
                 <MenuItem Header="Exit"  Click="Exit_OnClick"/>
             </MenuItem>
             <MenuItem Header="_Edit">

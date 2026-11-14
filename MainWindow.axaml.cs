@@ -1254,6 +1254,62 @@ public partial class MainWindow : Window
     
     
     
+    // Project > Export app...: bygger en fristående app av programmet i editorn med
+    // Tools/export_app.py och visar hur det går i loggen
+    private async void ExportApp_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var sourceRoot = AppExporter.FindSourceRoot();
+        if (sourceRoot == null)
+        {
+            Log("EXPORT: Exporting needs the AmosLikeBasic source code and the .NET SDK. " +
+                $"Run the IDE from the project folder (the one with {AppExporter.ScriptPath}).\n");
+            return;
+        }
+
+        var defaultName = Path.GetFileNameWithoutExtension(_currentProjectFile?.Name ?? "MyGame");
+        var options = await new ExportDialog(defaultName).ShowDialog<ExportOptions?>(this);
+        if (options == null) return;
+
+        // Exportera det som står i editorn, även om det inte är sparat
+        var tempDir = Path.Combine(Path.GetTempPath(), "AmosLikeBasicExport");
+        Directory.CreateDirectory(tempDir);
+        var projectFile = Path.Combine(tempDir, options.Name + ".amosproj");
+        await File.WriteAllTextAsync(projectFile, System.Text.Json.JsonSerializer.Serialize(
+            new { Version = 2, ProgramText = Editor.Text ?? "" }));
+
+        void LogLine(string line) => Dispatcher.UIThread.Post(() =>
+        {
+            Log(line + Environment.NewLine);
+            LogBox.CaretIndex = LogBox.Text?.Length ?? 0;
+        });
+
+        ExportAppMenuItem.IsEnabled = false;
+        LogLine($"EXPORT: Building '{options.Name}' ({options.Platform}), this takes a minute...");
+        try
+        {
+            int exitCode = await AppExporter.RunAsync(sourceRoot, projectFile, options.Name, options.Platform, LogLine);
+            if (exitCode == 0)
+            {
+                var exportDir = Path.Combine(sourceRoot, "Export");
+                LogLine($"EXPORT: Done. The app is in {exportDir}");
+                AppExporter.OpenFolder(exportDir);
+            }
+            else
+            {
+                LogLine($"EXPORT: Failed (exit code {exitCode}), see the messages above.");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogLine($"EXPORT: {ex.Message}");
+        }
+        finally
+        {
+            ExportAppMenuItem.IsEnabled = true;
+            try { File.Delete(projectFile); } catch (IOException) { }
+        }
+    }
+
     private async void About_OnClick(object? sender, RoutedEventArgs e)
     {
         var aboutWin = new AboutWindow();
