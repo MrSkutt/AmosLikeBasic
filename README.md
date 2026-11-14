@@ -100,6 +100,24 @@ NuGet packages are restored automatically. The native audio and input libraries 
 | `Projects/` | Example programs (`.amosproj`) |
 | `Graphics/`, `Sound/`, `fonts/` | Assets used by the examples |
 
+### Exporting a program as an app
+
+Any program can be turned into a standalone app for macOS and Windows. .NET is included, so players do not need to install anything:
+
+```bash
+python3 Tools/export_app.py Projects/skogshopp.amosproj --name Skogshopp
+```
+
+This builds `Export/Skogshopp.app` and `Export/Skogshopp-win/Skogshopp.exe`, each with a `.zip` ready to share. Use `--platform mac` or `--platform win` to build only one of them. Only the images and sounds the program refers to are included; use `--include <file or folder>` for files whose names are built in code. `--icon picture.png` sets the Mac icon.
+
+The app is AmosLikeBasic in player mode: when it finds a `game.amosproj` next to itself (or in `Resources` inside a Mac bundle), it opens only the game window and runs the program. F12 toggles full screen. You can try player mode without exporting:
+
+```bash
+dotnet run -- --play Projects/skogshopp.amosproj
+```
+
+The Mac app must be built on a Mac and is only ad-hoc signed, so the first time players need to right-click it and choose Open. Distributing it without that warning requires an Apple Developer ID and notarization. The Windows version can be built on a Mac, and Windows may show a SmartScreen warning for unsigned apps.
+
 ### Resources
 
 Assets are located by `ResourceLoader`, which looks in the following places relative to the executable:

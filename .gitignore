@@ -53,3 +53,6 @@ packages/
 # =========================
 ehthumbs.db
 Icon?
+
+# Exporterade appar (Tools/export_app.py)
+Export/

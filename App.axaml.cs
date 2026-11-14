@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 
@@ -15,7 +16,19 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow();
+            if (Program.GamePath is { } gamePath)
+            {
+                // Spelarläge: bara spelfönstret, programmet startar direkt
+                var (program, title) = GamePlayer.LoadGame(gamePath);
+                var window = new ScreenWindow { Title = title, WindowStartupLocation = WindowStartupLocation.CenterScreen };
+                var player = new GamePlayer(window);
+                window.Opened += async (_, _) => await player.RunAsync(program);
+                desktop.MainWindow = window;
+            }
+            else
+            {
+                desktop.MainWindow = new MainWindow();
+            }
         }
 
         base.OnFrameworkInitializationCompleted();

@@ -59,9 +59,18 @@ public static class GamepadManager
 
         if (_initialized) return;
 
-        if (SDL_Init(SDL_INIT_GAMECONTROLLER) != 0)
+        try
         {
-            Debug.WriteLine($"[GamepadManager] SDL_Init failed: {SDL_GetError()}");
+            if (SDL_Init(SDL_INIT_GAMECONTROLLER) != 0)
+            {
+                Debug.WriteLine($"[GamepadManager] SDL_Init failed: {SDL_GetError()}");
+                return;
+            }
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            // SDL2 saknas (t.ex. SDL2.dll på Windows): kör vidare utan handkontroll
+            Debug.WriteLine($"[GamepadManager] SDL2 not available, gamepads disabled: {ex.Message}");
             return;
         }
 

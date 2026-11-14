@@ -3010,7 +3010,7 @@ public sealed class AmosGraphics
     public void AddFrame(int id, string file)
     {
         var s = GetSprite(id);
-        using var b = new Bitmap(file);
+        using var b = new Bitmap(ResourceLoader.GetPath(file));
         var f = CreateEmptyBitmap(s.Width, s.Height);
         using (var fb = f.Lock())
         {

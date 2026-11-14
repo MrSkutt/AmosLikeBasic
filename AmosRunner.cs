@@ -3586,6 +3586,7 @@ public static class AmosRunner
                             if (mArgs.Count >= 2 && mArgs[0].ToUpperInvariant() == "LOAD")
                             {
                                 var path = Unquote(mArgs[1]);
+                                try { path = ResourceLoader.GetPath(path); } catch (System.IO.FileNotFoundException) { }
                                 if (System.IO.File.Exists(path))
                                 {
                                     try
@@ -4886,6 +4887,8 @@ public static class AmosRunner
         try {
             StopMusic(engine); 
 
+            // Leta upp filen som all annan grafik och ljud (fungerar även i en exporterad app)
+            file = ResourceLoader.GetPath(file);
             IntPtr ctx = LibXmp.xmp_create_context();
             if (LibXmp.xmp_load_module(ctx, file) == 0)
             {
