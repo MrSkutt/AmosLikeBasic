@@ -51,6 +51,7 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
     private readonly GpuLayer _layer;
     private readonly List<AmosGraphics.QueuedFontText> _texts;
     private readonly List<AmosGraphics.SpriteRenderState> _sprites;
+    private GRContext? _gr; // Satt under Render: GPU-kontexten effekterna körs i
 
     public LayerDrawOperation(Rect bounds, AmosGraphics graphics, GpuLayer layer,
         List<AmosGraphics.QueuedFontText> texts, List<AmosGraphics.SpriteRenderState> sprites)
@@ -78,6 +79,7 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
 
         using var lease = leaseFeature.Lease();
         var canvas = lease.SkCanvas;
+        _gr = lease.GrContext;
 
         var effect = GetOrCompileEffect();
         if (effect == null) return;
@@ -87,7 +89,7 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
             var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
                 SKColorType.Bgra8888, SKAlphaType.Premul);
 
-            using var surface = (lease.GrContext != null ? SKSurface.Create(lease.GrContext, true, info) : null)
+            using var surface = (_gr != null ? SKSurface.Create(_gr, true, info) : null)
                                 ?? SKSurface.Create(info);
             DrawLayerContent(surface.Canvas);
             using var composite = surface.Snapshot();
@@ -162,13 +164,12 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
         if (textEffects.Count > 0)
         {
             // MED EFFEKTER: hela texten som en bild, roteras/zoomas runt sin mittpunkt
-            var processedBmp = qt.GetProcessedBitmap(_graphics, textEffects);
-            if (processedBmp == null) return;
+            if (qt.GetProcessedImage(_graphics, _gr, textEffects) is not var (img, owned)) return;
 
             var pad = qt.GetTotalPadding(textEffects);
-            using var img = ToSkImage(processedBmp);
             DrawTransformed(c, img, qt.X - pad.left, qt.Y - pad.top, img.Width, img.Height,
                 qt.Angle, qt.ZoomX, qt.ZoomY, null);
+            if (owned) img.Dispose();
             return;
         }
 
@@ -198,7 +199,7 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
         c.Restore();
     }
 
-    private static void DrawSprite(SKCanvas c, AmosGraphics.SpriteRenderState sprite)
+    private void DrawSprite(SKCanvas c, AmosGraphics.SpriteRenderState sprite)
     {
         using var paint = new SKPaint
         {
@@ -208,12 +209,12 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
         if (sprite.Effects.Count > 0)
         {
             // MED EFFEKTER: bilden har padding runt sig, ritas i naturlig storlek
-            var processedBmp = sprite.Sprite.GetEffectBitmap(sprite.BaseBitmap, sprite.Effects);
+            var (img, owned) = sprite.Sprite.GetEffectImage(_gr, sprite.BaseBitmap, sprite.Effects);
             var pad = AmosGraphics.Sprite.GetTotalPadding(sprite.Effects);
 
-            using var img = ToSkImage(processedBmp);
             DrawTransformed(c, img, sprite.X - pad.left, sprite.Y - pad.top, img.Width, img.Height,
                 sprite.Angle, sprite.ZoomX, sprite.ZoomY, paint);
+            if (owned) img.Dispose();
         }
         else
         {
@@ -245,7 +246,7 @@ public sealed class LayerDrawOperation : ICustomDrawOperation
     // så vi tolkar dem likadant. Sätts av AmosGpuView på UI-tråden innan första ritningen.
     internal static SKColorType BitmapColorType = SKColorType.Bgra8888;
 
-    private static SKImage ToSkImage(WriteableBitmap bmp)
+    internal static SKImage ToSkImage(WriteableBitmap bmp)
     {
         using var fb = bmp.Lock();
         var info = new SKImageInfo(fb.Size.Width, fb.Size.Height, BitmapColorType, SKAlphaType.Premul);
@@ -712,9 +713,16 @@ public sealed class AmosGraphics
         public int EffectsVersion;
 
         // Text + statiska effekter (BLUR/COLOR) per textsträng, så de inte räknas om varje frame.
-        // Används bara från render-tråden (LayerDrawOperation).
-        public Dictionary<string, WriteableBitmap> StaticCache { get; } = new();
+        // Används bara från render-tråden (LayerDrawOperation). Bilderna ligger på GPU:n.
+        public Dictionary<string, SKImage> StaticCache { get; } = new();
         public int StaticCacheVersion = -1;
+        public GRContext? StaticCacheContext;
+
+        public void ClearStaticCache()
+        {
+            foreach (var img in StaticCache.Values) img.Dispose();
+            StaticCache.Clear();
+        }
     }
 
     // FONT EFFECT ADD: finns effekttypen redan på fonten uppdateras den i stället (Time behålls),
@@ -1174,13 +1182,12 @@ public sealed class AmosGraphics
         public HashSet<string> Groups { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public List<SpriteEffect> Effects { get; } = new(); // ✅ Inte AmosGraphics.SpriteEffect
 
-        // Cache för processed bitmap
-        private WriteableBitmap? _processedBitmap;
         private int _effectsVersion = 0;
-        private int _currentEffectsVersion = -1;
-        // Cache för effekt-resultat
-        private WriteableBitmap? _staticEffectsBitmap;  // BLUR etc cachad
+        // Cache för statiska effekter (BLUR/COLOR). Ägs av render-tråden; ligger på GPU:n
+        // och hör därför ihop med den GRContext den skapades i.
+        private SKImage? _staticEffectsImage;
         private WriteableBitmap? _staticEffectsSource;   // Frame som cachen bygger på
+        private GRContext? _staticEffectsContext;
         private int _staticEffectsVersion = -1;
     
         // ✅ Beräkna total padding från alla effekter
@@ -1214,12 +1221,6 @@ public sealed class AmosGraphics
             TransparentKey = Colors.Magenta;
             Visible = false;
         }
-        // ✅ Flytta denna metod HIT (som en separat metod i Sprite-klassen)
-        private bool IsAnimatedEffect(SpriteEffect effect)
-        {
-            return effect is WaveEffect;
-        }
-
 
         // Aktuell frame utan effekter (från imagebanken eller spritens egna frames)
         public WriteableBitmap? GetBaseBitmap(Dictionary<int, ImageBankEntry> imageBank)
@@ -1230,110 +1231,53 @@ public sealed class AmosGraphics
             return Frames.Count > 0 ? Frames[Math.Clamp(CurrentFrame, 0, Frames.Count - 1)] : null;
         }
 
-// Kör effektkedjan. Anropas BARA från render-tråden (LayerDrawOperation), som äger cache-fälten.
-public WriteableBitmap GetEffectBitmap(WriteableBitmap baseBitmap, List<SpriteEffect> allEffects)
-{
-    // Rotation/zoom görs INTE här - det sköts av AmosGpuView.Render med en transform
-    if (allEffects.Count == 0)
-        return baseBitmap;
- 
-    // Separera statiska (BLUR, COLOR) från dynamiska (WAVE)
-    var staticEffects = allEffects.Where(e => e is not WaveEffect).ToList();
-    var dynamicEffects = allEffects.Where(e => e is WaveEffect).ToList();
- 
-    WriteableBitmap currentBitmap;
- 
-    // Cache för statiska effekter (BLUR)
-    if (staticEffects.Count > 0)
-    {
-        bool cacheValid = _staticEffectsBitmap != null && 
-                         _staticEffectsVersion == _effectsVersion &&
-                         _staticEffectsSource == baseBitmap;
- 
-        if (cacheValid)
+        // Kör effektkedjan på GPU:n. Anropas BARA från render-tråden (LayerDrawOperation), som äger cachen.
+        // Owned = true betyder att anroparen ska Dispose:a bilden; false att den ligger i cachen.
+        public (SKImage Image, bool Owned) GetEffectImage(GRContext? gr, WriteableBitmap baseBitmap,
+            List<SpriteEffect> allEffects)
         {
-            currentBitmap = _staticEffectsBitmap!;
-        }
-        else
-        {
-            currentBitmap = baseBitmap;
-            foreach (var effect in staticEffects)
+            // Rotation/zoom görs INTE här - det sköts av LayerDrawOperation med en transform
+            var staticEffects = allEffects.Where(e => e is not WaveEffect).ToList();
+            var dynamicEffects = allEffects.Where(e => e is WaveEffect).ToList();
+
+            SKImage current;
+            bool owned;
+
+            if (staticEffects.Count > 0)
             {
-                currentBitmap = ShaderHelper.RenderShaderToBitmap(currentBitmap, effect);
-            }
-            
-            _staticEffectsBitmap = currentBitmap;
-            _staticEffectsVersion = _effectsVersion;
-            _staticEffectsSource = baseBitmap;
-        }
-    }
-    else
-    {
-        currentBitmap = baseBitmap;
-    }
- 
-    // Applicera dynamiska effekter VARJE FRAME (WAVE)
-    foreach (var effect in dynamicEffects)
-    {
-        currentBitmap = ShaderHelper.RenderShaderToBitmap(currentBitmap, effect);
-    }
- 
-    return currentBitmap;
-}
+                bool cacheValid = _staticEffectsImage != null &&
+                                  _staticEffectsVersion == _effectsVersion &&
+                                  _staticEffectsSource == baseBitmap &&
+                                  _staticEffectsContext == gr;
+                if (!cacheValid)
+                {
+                    _staticEffectsImage?.Dispose();
+                    _staticEffectsImage = ShaderHelper.ApplyChain(gr, LayerDrawOperation.ToSkImage(baseBitmap), staticEffects);
+                    _staticEffectsVersion = _effectsVersion;
+                    _staticEffectsSource = baseBitmap;
+                    _staticEffectsContext = gr;
+                }
 
-        private WriteableBitmap ApplyEffectChain(WriteableBitmap source)
-        {
-            var current = source;
-
-            foreach (var effect in Effects)
-            {
-                current = effect.Apply(current);
-            }
-
-            return current;
-        }
-
-// ✅ NYTT: Metod som körs UTANFÖR rendering-loopen
-        public void UpdateEffects(Dictionary<int, ImageBankEntry> imageBank)
-        {
-            if (Effects.Count == 0)
-            {
-                _processedBitmap = null;
-                return;
-            }
-
-            if (_processedBitmap != null && _currentEffectsVersion == _effectsVersion)
-                return; // Redan uppdaterad
-
-            WriteableBitmap baseBitmap;
-            if (ImageBankId >= 0 && imageBank.TryGetValue(ImageBankId, out var entry))
-            {
-                int fi = Math.Clamp(CurrentFrame, 0, entry.Frames.Count - 1);
-                baseBitmap = entry.Frames[fi];
+                current = _staticEffectsImage!;
+                owned = false;
             }
             else
             {
-                baseBitmap = Frames[Math.Clamp(CurrentFrame, 0, Frames.Count - 1)];
+                current = LayerDrawOperation.ToSkImage(baseBitmap);
+                owned = true;
             }
 
-            // Applicera alla effekter sekventiellt
-            WriteableBitmap processed = baseBitmap;
-            foreach (var effect in Effects)
+            // Dynamiska effekter (WAVE) körs varje frame
+            foreach (var effect in dynamicEffects)
             {
-                try
-                {
-                    processed = effect.Apply(processed);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"Effect failed: {ex.Message}");
-                    _processedBitmap = baseBitmap; // Fallback
-                    return;
-                }
+                var next = ShaderHelper.Apply(gr, current, effect);
+                if (next == null) continue;
+                if (owned) current.Dispose();
+                current = next;
+                owned = true;
             }
 
-            _processedBitmap = processed;
-            _currentEffectsVersion = _effectsVersion;
+            return (current, owned);
         }
 
         public int Width { get; set; }
@@ -1475,8 +1419,10 @@ public WriteableBitmap GetEffectBitmap(WriteableBitmap baseBitmap, List<SpriteEf
             return (totalLeft, totalRight, totalTop, totalBottom);
         }
     
-        // ✅ Rendera texten med effekter
-        public WriteableBitmap? GetProcessedBitmap(AmosGraphics graphics, List<SpriteEffect> effects)
+        // Rendera texten med effekter på GPU:n. Anropas bara från render-tråden.
+        // Owned = true betyder att anroparen ska Dispose:a bilden; false att den ligger i fontens cache.
+        public (SKImage Image, bool Owned)? GetProcessedImage(AmosGraphics graphics, GRContext? gr,
+            List<SpriteEffect> effects)
         {
             var font = graphics.GetFont(FontId);
             if (font == null) return null;
@@ -1484,29 +1430,37 @@ public WriteableBitmap GetEffectBitmap(WriteableBitmap baseBitmap, List<SpriteEf
             var staticEffects = effects.Where(e => e is not WaveEffect).ToList();
             var dynamicEffects = effects.Where(e => e is WaveEffect).ToList();
 
-            // Cachen töms när effekterna ändras, eller om texten byts ofta (t.ex. en poängräknare)
-            if (font.StaticCacheVersion != font.EffectsVersion || font.StaticCache.Count > 64)
+            // Cachen töms när effekterna ändras, när GPU-kontexten byts,
+            // eller om texten byts ofta (t.ex. en poängräknare)
+            if (font.StaticCacheVersion != font.EffectsVersion || font.StaticCacheContext != gr ||
+                font.StaticCache.Count > 64)
             {
-                font.StaticCache.Clear();
+                font.ClearStaticCache();
                 font.StaticCacheVersion = font.EffectsVersion;
+                font.StaticCacheContext = gr;
             }
 
-            if (!font.StaticCache.TryGetValue(Text, out var currentBitmap))
+            if (!font.StaticCache.TryGetValue(Text, out var current))
             {
-                currentBitmap = RenderText(graphics, font);
-                if (currentBitmap == null) return null;
+                var textBitmap = RenderText(graphics, font);
+                if (textBitmap == null) return null;
 
-                foreach (var effect in staticEffects)
-                    currentBitmap = ShaderHelper.RenderShaderToBitmap(currentBitmap, effect);
-
-                font.StaticCache[Text] = currentBitmap;
+                current = ShaderHelper.ApplyChain(gr, LayerDrawOperation.ToSkImage(textBitmap), staticEffects);
+                font.StaticCache[Text] = current;
             }
 
             // Applicera dynamiska effekter (WAVE) varje frame
+            bool owned = false;
             foreach (var effect in dynamicEffects)
-                currentBitmap = ShaderHelper.RenderShaderToBitmap(currentBitmap, effect);
+            {
+                var next = ShaderHelper.Apply(gr, current, effect);
+                if (next == null) continue;
+                if (owned) current.Dispose();
+                current = next;
+                owned = true;
+            }
 
-            return currentBitmap;
+            return (current, owned);
         }
 
         private WriteableBitmap? RenderText(AmosGraphics graphics, Font font)
@@ -3548,74 +3502,48 @@ public WriteableBitmap GetEffectBitmap(WriteableBitmap baseBitmap, List<SpriteEf
         if (y2 < y1) (y1, y2) = (y2, y1);
     }
 }
-// Lägg till i AmosGraphics.cs eller som extension method
+// Kör sprite-/font-effekter som shaders. Med en GRContext sker allt på GPU:n och resultatet
+// stannar där som en textur; utan (headless) används en CPU-yta.
 public static class ShaderHelper
 {
-    public static WriteableBitmap RenderShaderToBitmap(
-        WriteableBitmap input, 
-        SpriteEffect effect)
+    // Kör en effekt och returnera en ny bild som anroparen äger, eller null om effekten misslyckades.
+    // Bilden blir större än input enligt effektens padding.
+    public static SKImage? Apply(GRContext? gr, SKImage input, SpriteEffect effect)
     {
-        var padding = effect.GetPadding();
-        int leftPad = padding.leftPadding;
-        int rightPad = padding.rightPadding;
-        int topPad = padding.topPadding;
-        int bottomPad = padding.bottomPadding;
-
-        int expandedWidth = input.PixelSize.Width + leftPad + rightPad;
-        int expandedHeight = input.PixelSize.Height + topPad + bottomPad;
-
-        var output = new WriteableBitmap(
-            new PixelSize(expandedWidth, expandedHeight),
-            new Vector(96, 96),
-            PixelFormat.Bgra8888,
-            AlphaFormat.Premul);
-
         try
         {
-            var info = new SKImageInfo(expandedWidth, expandedHeight, 
-                SKColorType.Bgra8888, SKAlphaType.Premul);
-        
-            using var surface = SKSurface.Create(info);
-            var canvas = surface.Canvas;
-            canvas.Clear(SKColors.Transparent);
+            var (leftPad, rightPad, topPad, bottomPad) = effect.GetPadding();
+            var info = new SKImageInfo(input.Width + leftPad + rightPad, input.Height + topPad + bottomPad,
+                input.ColorType, SKAlphaType.Premul);
 
-            using var fb = input.Lock();
-            var inputInfo = new SKImageInfo(input.PixelSize.Width, input.PixelSize.Height,
-                SKColorType.Bgra8888, SKAlphaType.Premul);
-            using var skBitmap = new SKBitmap();
-            skBitmap.InstallPixels(inputInfo, fb.Address, fb.RowBytes);
-            using var image = SKImage.FromBitmap(skBitmap);
+            using var paint = effect.GetShaderPaint(input);
+            if (paint == null) return null;
 
-            var paint = effect.GetShaderPaint(input, image);
-            if (paint != null)
-            {
-                using (paint)
-                {
-                    canvas.DrawRect(new SKRect(0, 0, expandedWidth, expandedHeight), paint);
-                }
-            }
-
-            using var snapshot = surface.Snapshot();
-            using var pixmap = snapshot.PeekPixels();
-            using var outputLock = output.Lock();
-        
-            unsafe
-            {
-                // ✅ Kopiera HELA expanderade bilden
-                Buffer.MemoryCopy(
-                    pixmap.GetPixels().ToPointer(),
-                    outputLock.Address.ToPointer(),
-                    outputLock.RowBytes * expandedHeight,
-                    pixmap.RowBytes * expandedHeight);
-            }
-
-            return output;
+            using var surface = (gr != null ? SKSurface.Create(gr, true, info) : null) ?? SKSurface.Create(info);
+            surface.Canvas.Clear(SKColors.Transparent);
+            surface.Canvas.DrawRect(new SKRect(0, 0, info.Width, info.Height), paint);
+            return surface.Snapshot();
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"❌ RenderShaderToBitmap error: {ex.Message}");
-            return input;
+            System.Diagnostics.Debug.WriteLine($"❌ Effect {effect.GetType().Name} error: {ex.Message}");
+            return null;
         }
+    }
+
+    // Kör effekterna i tur och ordning. Tar över ägandet av input och returnerar en bild anroparen äger.
+    public static SKImage ApplyChain(GRContext? gr, SKImage input, IEnumerable<SpriteEffect> effects)
+    {
+        var current = input;
+        foreach (var effect in effects)
+        {
+            var next = Apply(gr, current, effect);
+            if (next == null) continue;
+            current.Dispose();
+            current = next;
+        }
+
+        return current;
     }
 }
 
@@ -3623,9 +3551,7 @@ public static class ShaderHelper
 
 public abstract class SpriteEffect
 {
-    public virtual WriteableBitmap Apply(WriteableBitmap input) => input;
-
-    public virtual SKPaint? GetShaderPaint(WriteableBitmap input, SKImage inputImage) => null;
+    public virtual SKPaint? GetShaderPaint(SKImage inputImage) => null;
 
     public virtual bool RequiresGpuContext => false;
     
@@ -3705,7 +3631,7 @@ half4 main(float2 fragCoord) {
         }
     }
 
-    public override SKPaint? GetShaderPaint(WriteableBitmap input, SKImage inputImage)
+    public override SKPaint? GetShaderPaint(SKImage inputImage)
     {
         EnsureShaderCompiled();
         if (_globalCachedEffect == null) return null;
@@ -3716,7 +3642,7 @@ half4 main(float2 fragCoord) {
             children.Add("inputTexture", inputImage.ToShader());
 
             var uniforms = new SKRuntimeEffectUniforms(_globalCachedEffect);
-            uniforms.Add("iResolution", new[] { (float)input.Size.Width, (float)input.Size.Height });
+            uniforms.Add("iResolution", new[] { (float)inputImage.Width, (float)inputImage.Height });
             uniforms.Add("uRadius", Radius);
 
             var shader = _globalCachedEffect.ToShader(uniforms, children);
@@ -3812,7 +3738,7 @@ half4 main(float2 fragCoord) {
         }
     }
 
-    public override SKPaint? GetShaderPaint(WriteableBitmap input, SKImage inputImage)
+    public override SKPaint? GetShaderPaint(SKImage inputImage)
     {
         EnsureShaderCompiled();
         if (_globalCachedEffect == null) return null;
@@ -3823,7 +3749,7 @@ half4 main(float2 fragCoord) {
             children.Add("inputTexture", inputImage.ToShader());
 
             var uniforms = new SKRuntimeEffectUniforms(_globalCachedEffect);
-            uniforms.Add("iResolution", new[] { (float)input.Size.Width, (float)input.Size.Height });
+            uniforms.Add("iResolution", new[] { (float)inputImage.Width, (float)inputImage.Height });
             uniforms.Add("uAmplitudeX", AmplitudeX);
             uniforms.Add("uFrequencyX", FrequencyX);
             uniforms.Add("uAmplitudeY", AmplitudeY);
@@ -3923,7 +3849,7 @@ half4 main(float2 fragCoord) {
         }
     }
 
-    public override SKPaint? GetShaderPaint(WriteableBitmap input, SKImage inputImage)
+    public override SKPaint? GetShaderPaint(SKImage inputImage)
     {
         EnsureShaderCompiled();
         if (_globalCachedEffect == null) return null;
@@ -3934,7 +3860,7 @@ half4 main(float2 fragCoord) {
             children.Add("inputTexture", inputImage.ToShader());
 
             var uniforms = new SKRuntimeEffectUniforms(_globalCachedEffect);
-            uniforms.Add("iResolution", new[] { (float)input.Size.Width, (float)input.Size.Height });
+            uniforms.Add("iResolution", new[] { (float)inputImage.Width, (float)inputImage.Height });
             uniforms.Add("uBrightness", Brightness);
             uniforms.Add("uContrast", Contrast);
             uniforms.Add("uSaturation", Saturation);
