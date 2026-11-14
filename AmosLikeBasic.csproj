@@ -6,6 +6,10 @@
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <!-- Interpretatorns huvudloop är en stor metod. Med denna kompileras den optimerat direkt
+             i stället för att gå långsamt den första tiden av varje programkörning (~45 ms extra).
+             Kostar ungefär 50 ms längre start av appen. -->
+        <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
 
         <!-- Vi använder RuntimeIdentifiers (plural) för att stödja båda plattformarna -->
         <RuntimeIdentifiers>osx-arm64;win-x64</RuntimeIdentifiers>

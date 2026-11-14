@@ -193,6 +193,12 @@ public static partial class AmosRunner
     // ✅ NYTT: Hjälpfunktion för att extrahera #X prefix
     private static (int? tempScreen, string cleanArg) ExtractScreenPrefix(string arg)
     {
+        if (arg == null) return ExtractScreenPrefixUncached(arg!);
+        return ScreenPrefixCache.GetOrAdd(arg, ExtractScreenPrefixUncached);
+    }
+
+    private static (int? tempScreen, string cleanArg) ExtractScreenPrefixUncached(string arg)
+    {
         if (string.IsNullOrWhiteSpace(arg))
             return (null, arg);
 
@@ -273,6 +279,12 @@ public static partial class AmosRunner
     }
 
     static List<string> SplitTopLevelCsv(string s)
+    {
+        if (s == null) return SplitTopLevelCsvUncached(s!);
+        return new List<string>(TopLevelCsvCache.GetOrAdd(s, x => SplitTopLevelCsvUncached(x).ToArray()));
+    }
+
+    static List<string> SplitTopLevelCsvUncached(string s)
     {
         var res = new List<string>();
         if (string.IsNullOrWhiteSpace(s)) return res;
@@ -2120,8 +2132,7 @@ public static partial class AmosRunner
                         
                         case "IF":
                         {
-                            int tIdx = IndexOfWord(arg, "THEN");
-                            string condition = tIdx >= 0 ? arg[..tIdx].Trim() : arg;
+                            string condition = preparedCmd.IfCondition ??= IfConditionText(arg);
 
                             bool cond = EvalCondition(condition, vars, ln, getInkey, isKeyDown, graphics);
 
@@ -2244,12 +2255,8 @@ public static partial class AmosRunner
 
                             var frame = whileStack.Peek();
 
-                            // Utvärdera villkoret igen
-                            var whileLine = StripLeadingLineNumber(
-                                StripComments(lines[frame.WhilePc])
-                            );
-
-                            var conditionText = whileLine.Substring(5).Trim(); // efter "WHILE"
+                            // Utvärdera villkoret igen (WHILE-raden är redan förberedd)
+                            var conditionText = prepared[frame.WhilePc].Text.Substring(5).Trim(); // efter "WHILE"
 
                             if (EvalCondition(conditionText, vars, ln, getInkey, isKeyDown, graphics))
                             {
@@ -3841,29 +3848,27 @@ public static partial class AmosRunner
                                 // --- Tilldelning (X = ...) ---
                                 if (fullCmd.Contains('='))
                                 {
-                                    var (leftSide, varValue) = SplitAssignment(fullCmd);
+                                    // Uppdelningen vid '=' och arrayindexen görs en gång per sats
+                                    var asg = preparedCmd.Assignment ??= PrepareAssignment(fullCmd);
+                                    var leftSide = asg.Target;
 
-                                    var rightValue = EvalValue(varValue, vars, ln, getInkey, isKeyDown, graphics);
+                                    var rightValue = EvalValue(asg.Value, vars, ln, getInkey, isKeyDown, graphics);
 
-                                    if (leftSide.Contains('('))
+                                    if (asg.IsArray)
                                     {
-                                        int openParen = leftSide.IndexOf('(');
-                                        int closeParen = leftSide.LastIndexOf(')');
-
-                                        if (openParen != -1 && closeParen != -1)
+                                        if (asg.ArrayName != null)
                                         {
-                                            var arrayName = leftSide[..openParen].Trim();
-                                            var indicesStr = leftSide[(openParen + 1)..closeParen];
+                                            var arrayName = asg.ArrayName;
 
                                             if (vars.TryGetValue(arrayName, out var aVal) && aVal is IAmosArray array)
                                             {
                                                 // Parse alla index (kan vara flera för multidim)
-                                                var indexParts = SplitTopLevelCsv(indicesStr);
-                                                var indices = new int[indexParts.Count];
+                                                var indexParts = asg.IndexParts!;
+                                                var indices = new int[indexParts.Length];
 
-                                                for (int i = 0; i < indexParts.Count; i++)
+                                                for (int i = 0; i < indexParts.Length; i++)
                                                 {
-                                                    var rawIdx = EvalValue(indexParts[i].Trim(), vars, ln, getInkey,
+                                                    var rawIdx = EvalValue(indexParts[i], vars, ln, getInkey,
                                                         isKeyDown, graphics);
                                                     indices[i] = (int)Math.Round(Convert.ToDouble(rawIdx,
                                                         CultureInfo.InvariantCulture));
@@ -4952,6 +4957,11 @@ public static partial class AmosRunner
     // och "HEJ PÅ DIG" i citattecken förblir en sträng. Ord utan operator emellan delas som förut
     // (t.ex. "ADD 0, BLUR 1.0"). Ett ensamt "-5" efter ett mellanslag räknas som ett eget argument.
     private static List<string> SplitCsvOrSpaces(string a) {
+        if (a == null) return new List<string>();
+        return new List<string>(CsvOrSpacesCache.GetOrAdd(a, x => SplitCsvOrSpacesUncached(x).ToArray()));
+    }
+
+    private static List<string> SplitCsvOrSpacesUncached(string a) {
         var res = new List<string>();
         if (string.IsNullOrWhiteSpace(a)) return res;
 

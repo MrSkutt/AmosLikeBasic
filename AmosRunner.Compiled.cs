@@ -41,11 +41,19 @@ public static partial class AmosRunner
     private static readonly ConcurrentDictionary<string, ExprNode> ExprCache = new();
     private static readonly ConcurrentDictionary<string, CondNode> CondCache = new();
 
+    // Uppdelade kommandoargument, per argumenttext
+    private static readonly ConcurrentDictionary<string, string[]> CsvOrSpacesCache = new();
+    private static readonly ConcurrentDictionary<string, string[]> TopLevelCsvCache = new();
+    private static readonly ConcurrentDictionary<string, (int?, string)> ScreenPrefixCache = new();
+
     // Töms när ett nytt program startar, så att cachen inte växer mellan körningar
     private static void ClearCompiledCache()
     {
         ExprCache.Clear();
         CondCache.Clear();
+        CsvOrSpacesCache.Clear();
+        TopLevelCsvCache.Clear();
+        ScreenPrefixCache.Clear();
     }
 
     private static object EvalValue(string t, Dictionary<string, object> v, int ln, Func<string> gk,
@@ -516,6 +524,45 @@ public static partial class AmosRunner
         public string Full = "";
         public string Cmd = "";
         public string Arg = "";
+
+        // Fylls i första gången satsen körs
+        public string? IfCondition;
+        public PreparedAssignment? Assignment;
+    }
+
+    // "X = uttryck" eller "A(i, j) = uttryck", uppdelat en gång
+    private sealed class PreparedAssignment
+    {
+        public string Target = "";
+        public string Value = "";
+        public bool IsArray;             // Vänstersidan innehåller '('
+        public string? ArrayName;        // null om parenteserna inte går att tolka
+        public string[]? IndexParts;
+    }
+
+    private static PreparedAssignment PrepareAssignment(string fullCmd)
+    {
+        var (leftSide, value) = SplitAssignment(fullCmd);
+        var asg = new PreparedAssignment { Target = leftSide, Value = value, IsArray = leftSide.Contains('(') };
+        if (asg.IsArray)
+        {
+            int openParen = leftSide.IndexOf('(');
+            int closeParen = leftSide.LastIndexOf(')');
+            if (openParen != -1 && closeParen != -1)
+            {
+                asg.ArrayName = leftSide[..openParen].Trim();
+                asg.IndexParts = SplitTopLevelCsv(leftSide[(openParen + 1)..closeParen])
+                    .Select(x => x.Trim()).ToArray();
+            }
+        }
+        return asg;
+    }
+
+    // Villkoret i "IF villkor THEN", som IF-kommandot tidigare tog fram varje gång
+    private static string IfConditionText(string arg)
+    {
+        int tIdx = IndexOfWord(arg, "THEN");
+        return tIdx >= 0 ? arg[..tIdx].Trim() : arg;
     }
 
     // Samma steg som huvudloopen tidigare gjorde på varje rad varje gång den kördes
