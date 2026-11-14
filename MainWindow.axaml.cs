@@ -674,6 +674,12 @@ public partial class MainWindow : Window
         _runCts?.Cancel();
         _runCts = new CancellationTokenSource();
         var token = _runCts.Token;
+
+        // FPS, BASIC- och CPU-belastning i spelfönstrets titel, två gånger i sekunden
+        _gfx.TakeFrameStats();
+        var statsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        statsTimer.Tick += (_, _) => UpdateScreenTitle(_gfx.TakeFrameStats());
+        statsTimer.Start();
         var program = Editor.Text ?? string.Empty;
 
         try
@@ -681,8 +687,6 @@ public partial class MainWindow : Window
             // VIKTIGT: async här i lambdan till Task.Run
             await Task.Run(async () =>
             {
-                var lastCpuUpdateTime = DateTime.MinValue;
-                var cpuUpdateInterval = TimeSpan.FromMilliseconds(500); 
 
                 await AmosRunner.ExecuteAsync(
                     programText: program,
@@ -702,16 +706,6 @@ public partial class MainWindow : Window
                                 {
                                     control.InvalidateMeasure();
                                     control.InvalidateVisual();
-                                }
-                                    
-                                var now = DateTime.Now;
-                                if (now - lastCpuUpdateTime > cpuUpdateInterval)
-                                {
-                                    var cpu = _gfx.LastCpuUsagePercent;
-                                    if (_screenWindow != null)
-                                        _screenWindow.Title = $"AMOS Screen | GFX: {cpu:F1}%";
-                                    //StatusText.Text = $"Status: RUNNING | GFX: {cpu:F1}%"; // UI-thread access error risk fixad i ExecuteAsync
-                                    lastCpuUpdateTime = now;
                                 }
                             }
                         }, DispatcherPriority.Render);
@@ -811,6 +805,7 @@ public partial class MainWindow : Window
         catch (Exception ex) { await AppendConsoleLineAsync($"ERROR: {ex.Message}"); }
         finally 
         { 
+            statsTimer.Stop();
             Dispatcher.UIThread.Post(() => {
                 StopButton.IsEnabled = false; 
                 RunButton.IsEnabled = true; 
@@ -820,6 +815,14 @@ public partial class MainWindow : Window
                 Editor.Select(Editor.CaretOffset , 0);
             });
         }
+    }
+
+    private void UpdateScreenTitle(AmosGraphics.FrameStats stats)
+    {
+        if (_screenWindow == null) return;
+        // BASIC = andel av tiden interpretatorn arbetar mellan WAIT VBL ("-" utan WAIT VBL)
+        var basic = stats.BasicPercent < 0 ? "-" : $"{stats.BasicPercent:F0}%";
+        _screenWindow.Title = $"AMOS Screen | FPS {stats.Fps:F0} | BASIC {basic} | CPU {stats.CpuPercent:F0}%";
     }
 
     private async void RunButton_OnClick(object? sender, RoutedEventArgs e)

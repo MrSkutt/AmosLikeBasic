@@ -344,6 +344,7 @@ public static partial class AmosRunner
         private readonly ExprNode[] _args;
         private readonly string _text;
         private readonly bool _isBuiltin;
+        private readonly NativeBuiltin? _native;
 
         public CallNode(string id, ExprNode[] args, string text)
         {
@@ -351,6 +352,10 @@ public static partial class AmosRunner
             _args = args;
             _text = text;
             _isBuiltin = BuiltinFunctions.Contains(id);
+            // Kompilerad variant bara när antalet argument är det funktionen förväntar sig;
+            // annars tar den gamla tolken hand om det, med samma beteende som förut
+            if (NativeBuiltins.TryGetValue(id, out var nb) && args.Length >= nb.MinArgs && args.Length <= nb.MaxArgs)
+                _native = nb;
         }
 
         public override object Eval(in EvalContext c)
@@ -362,6 +367,13 @@ public static partial class AmosRunner
                 foreach (var a in _args) argValues.Add(a.Eval(c));
                 var callFunc = (Func<string, List<object>, int, object>)c.Vars["__callFunction__"];
                 return callFunc(_id, argValues, c.Line);
+            }
+
+            if (_native != null)
+            {
+                var values = new object[_args.Length];
+                for (int i = 0; i < values.Length; i++) values[i] = _args[i].Eval(c);
+                return _native.Fn(values, c);
             }
 
             if (!_isBuiltin && c.Vars.TryGetValue(_id, out var arrObj) && arrObj is IAmosArray array)
@@ -376,6 +388,94 @@ public static partial class AmosRunner
             return InterpretFactor(_text, c);
         }
     }
+
+    // ── Inbyggda funktioner som räknas ut direkt ───────────────────────
+    // Samma uträkning som motsvarande kod i ParseFactor (argumenten tolkas i samma ordning,
+    // samma avrundning och samma returtyper). Övriga inbyggda funktioner körs av ParseFactor.
+
+    private sealed record NativeBuiltin(int MinArgs, int MaxArgs, Func<object[], EvalContext, object> Fn);
+
+    private static int Round(object o) => (int)Math.Round(Num(o));
+    private static double Degrees(object o) => Num(o) * Math.PI / 180.0;
+
+    private static readonly Dictionary<string, NativeBuiltin> NativeBuiltins = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["ABS"] = new(1, 1, (a, _) => Math.Abs(Num(a[0]))),
+        ["SGN"] = new(1, 1, (a, _) => Math.Sign(Num(a[0]))),
+        ["SQR"] = new(1, 1, (a, _) => Math.Sqrt(Num(a[0]))),
+        ["LOG"] = new(1, 1, (a, _) => Math.Log(Num(a[0]))),
+        ["LOG2"] = new(1, 1, (a, _) => Math.Log2(Num(a[0]))),
+        ["LOG10"] = new(1, 1, (a, _) => Math.Log10(Num(a[0]))),
+        ["EXP"] = new(1, 1, (a, _) => Math.Exp(Num(a[0]))),
+        ["SIN"] = new(1, 1, (a, _) => Math.Sin(Degrees(a[0]))),
+        ["COS"] = new(1, 1, (a, _) => Math.Cos(Degrees(a[0]))),
+        ["TAN"] = new(1, 1, (a, _) => Math.Tan(Degrees(a[0]))),
+        ["ATN"] = new(1, 1, (a, _) => Math.Atan(Num(a[0])) * 180.0 / Math.PI),
+        ["INT"] = new(1, 1, (a, _) => Math.Floor(Num(a[0]) + 0.000001)),
+        ["RND"] = new(1, 1, (a, _) => _rng.NextDouble() * Num(a[0])),
+        ["MIN"] = new(2, 2, (a, _) => Math.Min(Num(a[0]), Num(a[1]))),
+        ["MAX"] = new(2, 2, (a, _) => Math.Max(Num(a[0]), Num(a[1]))),
+
+        ["LEN"] = new(1, 1, (a, _) => (double)ValueToString(a[0]).Length),
+        ["STR$"] = new(1, 1, (a, _) => ValueToString(a[0])),
+        ["UPPER$"] = new(1, 1, (a, _) => ValueToString(a[0]).ToUpperInvariant()),
+        ["LOWER$"] = new(1, 1, (a, _) => ValueToString(a[0]).ToLowerInvariant()),
+        ["TRIM$"] = new(1, 1, (a, _) => ValueToString(a[0]).Trim()),
+        ["CHR$"] = new(1, 1, (a, _) => ((char)Math.Clamp(Round(a[0]), 0, 255)).ToString()),
+        ["ASC"] = new(1, 1, (a, _) => { var str = ValueToString(a[0]); return str.Length > 0 ? (double)str[0] : 0.0; }),
+        ["VAL"] = new(1, 1, (a, _) =>
+        {
+            double.TryParse(ValueToString(a[0]), CultureInfo.InvariantCulture, out var dv);
+            return dv;
+        }),
+        ["LEFT$"] = new(2, 2, (a, _) =>
+        {
+            string s = ValueToString(a[0]);
+            int n = Round(a[1]);
+            if (n <= 0) return "";
+            if (n >= s.Length) return s;
+            return s.Substring(0, n);
+        }),
+        ["RIGHT$"] = new(2, 2, (a, _) =>
+        {
+            string s = ValueToString(a[0]);
+            int n = Round(a[1]);
+            if (n <= 0) return "";
+            if (n >= s.Length) return s;
+            return s.Substring(s.Length - n, n);
+        }),
+        ["MID$"] = new(2, 3, (a, _) =>
+        {
+            int len = a.Length == 3 ? Round(a[2]) : -1;
+            string s = ValueToString(a[0]);
+            int start0 = Math.Max(0, Round(a[1]) - 1); // 1-baserat
+            if (start0 >= s.Length) return "";
+            if (len < 0) return s.Substring(start0);
+            if (len <= 0) return "";
+            return s.Substring(start0, Math.Min(len, s.Length - start0));
+        }),
+        ["INSTR"] = new(2, 3, (a, _) =>
+        {
+            int start1 = a.Length == 3 ? Round(a[2]) : 1;
+            string s = ValueToString(a[0]);
+            string needle = ValueToString(a[1]);
+            if (string.IsNullOrEmpty(needle)) return 0.0;
+            int start0 = Math.Max(0, start1 - 1);
+            if (start0 > s.Length) return 0.0;
+            int idx = s.IndexOf(needle, start0, StringComparison.Ordinal);
+            return idx >= 0 ? (double)(idx + 1) : 0.0;
+        }),
+
+        ["KEYSTATE"] = new(1, 1, (a, c) => c.IsKeyDown(ValueToString(a[0])) ? 1.0 : 0.0),
+        ["JOYSTATE"] = new(2, 2, (a, _) => GamepadManager.IsButtonDown(Round(a[0]), ValueToString(a[1])) ? 1.0 : 0.0),
+        ["TILE"] = new(2, 3, (a, c) =>
+        {
+            Round(a[0]); // lagret används inte, men räknas om till tal först som förut
+            int px = Round(a[1]);
+            int py = a.Length == 3 ? Round(a[2]) : 0;
+            return (double)c.Graphics.GetMapTile(px / 32, py / 32);
+        }),
+    };
 
     private sealed class InterpretedFactorNode : ExprNode
     {

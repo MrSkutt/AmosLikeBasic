@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Globalization;
 using System.Numerics;
+using System.Threading;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -49,11 +50,13 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
     private static readonly SKSamplingOptions Nearest = new(SKFilterMode.Nearest, SKMipmapMode.None);
     private static readonly SKSamplingOptions Linear = new(SKFilterMode.Linear, SKMipmapMode.None);
 
+    private readonly AmosGraphics _graphics;
     private readonly List<LayerDrawOperation> _layers;
 
-    public ScreenDrawOperation(Rect bounds, List<LayerDrawOperation> layers)
+    public ScreenDrawOperation(Rect bounds, AmosGraphics graphics, List<LayerDrawOperation> layers)
     {
         Bounds = bounds;
+        _graphics = graphics;
         _layers = layers;
     }
 
@@ -78,6 +81,7 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
         int w = (int)Bounds.Width, h = (int)Bounds.Height;
         if (w <= 0 || h <= 0) return;
 
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             // 1. Alla lager i spelets upplösning
@@ -109,6 +113,10 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine("Screen Render Crash: " + ex.Message);
+        }
+        finally
+        {
+            _graphics.CountRenderedFrame(System.Diagnostics.Stopwatch.GetTimestamp() - start);
         }
     }
 
@@ -428,7 +436,7 @@ public sealed class AmosGpuView : Control
             var sprites = spritesCopy.Where(s => s.Layer == -1 || s.Layer == layerIndex).ToList();
             layers.Add(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites));
         }
-        ctx.Custom(new ScreenDrawOperation(screenRect, layers));
+        ctx.Custom(new ScreenDrawOperation(screenRect, Graphics, layers));
     }
 }
 
@@ -1825,6 +1833,58 @@ public sealed class AmosGraphics
         _vblTimer.Stop();
         // CPU-tid som procent av VBL
         LastCpuUsagePercent = Math.Min(100, (_vblTimer.Elapsed.TotalMilliseconds / targetVblMs) * 100);
+
+        Interlocked.Add(ref _statBasicTicks, _vblTimer.ElapsedTicks);
+        Interlocked.Increment(ref _statVblFrames);
+    }
+
+    // ── Mätvärden för fönstertiteln ──────────────────────────────────
+    // Samlas in löpande och läses av (och nollställs) med TakeFrameStats.
+
+    private long _statBasicTicks;     // Stopwatch-tid BASIC-koden kört mellan WAIT VBL
+    private int _statVblFrames;       // Antal WAIT VBL
+    private int _statRenderedFrames;  // Bilder som ritats (render-tråden)
+    private long _statRenderTicks;    // Tid för att rita dem
+    private long _statLastTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+    private TimeSpan _statLastCpu = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
+    private readonly System.Diagnostics.Process _process = System.Diagnostics.Process.GetCurrentProcess();
+
+    public readonly record struct FrameStats(
+        double Fps,            // ritade bilder per sekund
+        double BasicPercent,   // andel av tiden BASIC-koden arbetat (-1 = inga WAIT VBL att mäta mellan)
+        double RenderMs,       // genomsnittlig tid att rita en bild på render-tråden
+        double CpuPercent);    // hela appens processortid, 100 % = en kärna (som Aktivitetskontrollen)
+
+    // Anropas av ScreenDrawOperation för varje ritad bild
+    public void CountRenderedFrame(long elapsedTicks)
+    {
+        Interlocked.Increment(ref _statRenderedFrames);
+        Interlocked.Add(ref _statRenderTicks, elapsedTicks);
+    }
+
+    // Genomsnitt sedan förra anropet
+    public FrameStats TakeFrameStats()
+    {
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        long elapsed = Math.Max(1, now - _statLastTimestamp);
+        _statLastTimestamp = now;
+        double seconds = (double)elapsed / System.Diagnostics.Stopwatch.Frequency;
+
+        int rendered = Interlocked.Exchange(ref _statRenderedFrames, 0);
+        long renderTicks = Interlocked.Exchange(ref _statRenderTicks, 0);
+        int vblFrames = Interlocked.Exchange(ref _statVblFrames, 0);
+        long basicTicks = Interlocked.Exchange(ref _statBasicTicks, 0);
+
+        _process.Refresh();
+        var cpu = _process.TotalProcessorTime;
+        double cpuPercent = (cpu - _statLastCpu).TotalSeconds / seconds * 100;
+        _statLastCpu = cpu;
+
+        return new FrameStats(
+            rendered / seconds,
+            vblFrames > 0 ? (double)basicTicks / elapsed * 100 : -1,
+            rendered > 0 ? (double)renderTicks / rendered * 1000 / System.Diagnostics.Stopwatch.Frequency : 0,
+            cpuPercent);
     }
 
 
