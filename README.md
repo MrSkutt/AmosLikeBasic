@@ -1,92 +1,123 @@
-# AMOS Professional Engine
-**An AMOS-like BASIC environment for modern platforms (macOS / Windows)**
+# AMOS Like Basic
 
-This project is a modern reimplementation and evolution of the classic **AMOS Professional** environment, designed for contemporary systems while preserving the original development philosophy, syntax style, and creative workflow.
+**An AMOS-inspired BASIC environment for modern macOS and Windows.**
 
-The engine provides a structured BASIC-like language, graphics/audio primitives, windowing, input handling, and tooling intended for:
-- retro-style game development
-- educational use
-- creative coding
-- rapid prototyping
-- nostalgia-driven projects
+AMOS Like Basic brings back the workflow of the classic Amiga **AMOS Professional**: write a few lines of BASIC, press run, and get sprites, raster bars, scrolling tilemaps and music on screen right away. It is not an emulator. It is a new engine built on .NET, Avalonia and SkiaSharp, with modern GPU rendering and none of the old hardware limits.
+
+![The IDE](images/Applikation.png)
 
 ---
 
 ## Features
 
-- AMOS-style BASIC syntax
-- Multi-platform support (macOS / Windows)
-- Modern rendering and system APIs
-- Structured command system
-- Modular engine architecture
-- Scriptable runtime
-- Developer-focused tooling
-- Extensible command system
-- AMOS-compatible concepts and workflows
-- Retro Graphics Engine: Supports classic AMOS concepts like Screens, Sprites, Bobs (Blitter Objects), and Tilemaps.
-- Hardware Acceleration: Uses SkiaSharp (via Avalonia) for high-performance rendering.
-- Shader Support: Includes support for GPU-accelerated effects and raster manipulation (SkSL).
-- Asset Management: Custom resource loader for handling fonts, images, and project files.
+- **AMOS-style BASIC**: `GOTO`/`GOSUB`, `PROC`, `FUNCTION`, `FOR`/`WHILE`/`REPEAT`/`DO`, `SELECT CASE`, multi-dimensional arrays, `DATA`/`READ` and `ON ERROR`.
+- **Screens and layers**: multiple screens composited on the GPU, each with its own opacity, fades and SkSL shader.
+- **Raster bars**: copper-style gradient bars with wrap-around, plus built-in weather (snow, rain, stars) and full-screen shaders such as Star Nest and clouds.
+- **Sprites and bobs**: sprite sheets, animations, rotation, zoom, alpha fades, groups, and box, circle and pixel-perfect collision.
+- **Bitmap fonts**: fonts from images, with rotation, zoom and effects.
+- **Effects**: wave, blur and color grading on sprites and font texts.
+- **Tilemaps**: tile sets, maps, scrolling, and a built-in map editor.
+- **Sound and music**: MOD music, samples, and a chiptune synth with ready-made sound effects (`COIN`, `JUMP`, `LASER`, `EXPLOSION` and more).
+- **Input**: keyboard, plus joystick and gamepad through SDL2.
+- **IDE**: syntax-highlighting editor, breakpoints and single-stepping, a variable and array viewer, a sprite editor, and selectable retro themes.
 
 ---
 
-## Philosophy
+## A taste of the language
 
-This project is **not an emulator**.  
-It is a **modern engine inspired by AMOS**, built to:
-- preserve the spirit of classic BASIC environments
-- remove legacy hardware limitations
-- provide a productive creative coding workflow
-- enable modern deployment pipelines
+```basic
+SCREEN 640, 480
+RASTER 1, 0, 0, 480, "Red, Orange, Yellow, Green, Blue, Indigo, Violet"
+
+FONT LOAD 0, "Graphics/font.png", 32, 25
+FONT MAP 0, "ABCDEFGHIJKLMNOPQRSTUVWXYZ!?:;0123456789@()£$%.’[]”,-"
+FONT EFFECT ADD 0, BLUR 2.0
+FONT EFFECT ADD 0, WAVE, 20, 0.05, 20, 0.02
+
+SPRITE LOAD 1, "Graphics/hero.png"
+SPRITE ON 1
+
+Y = 0
+Loop:
+  FONT CLEAR
+  FONT PRINT #0, 120, 200, "HELLO AMOS"
+  RASTER MOVE 1, Y
+  INC Y : IF Y = 480 THEN Y = 0
+  WAIT VBL
+GOTO Loop
+```
+
+Effects belong to the font, so they survive `FONT CLEAR`. Slow effects like blur are computed once, and wave animates by itself every `WAIT VBL`.
+
+The `Projects/` folder contains many more examples: games (`galaga`, `phalanx`, `Jumping Jack`, `adventure`), raster and shader demos (`raster`, `raster_new`, `tunnel`, `rain`), and small focused tests. The full command reference is in [`Documentation/AMOSLikeBasic Manuall.pdf`](Documentation/AMOSLikeBasic%20Manuall.pdf).
+
+---
+
+## Getting started
+
+### Prerequisites
+
+- [.NET 9 SDK](https://dotnet.microsoft.com/download) or later
+- macOS (Apple Silicon) or Windows (x64)
+- Optional: JetBrains Rider, Visual Studio 2022 or VS Code
+
+### Build and run
+
+```bash
+git clone https://github.com/MrSkutt/AmosLikeBasic
+cd AmosLikeBasic
+dotnet run
+```
+
+NuGet packages are restored automatically. The native audio and input libraries for your platform (`libs/mac` or `libs/windows`) are copied next to the executable at build time.
+
+### Dependencies
+
+| Package | Used for |
+|---|---|
+| Avalonia, Avalonia.Desktop, Avalonia.Themes.Fluent | UI framework and windowing |
+| Avalonia.AvaloniaEdit | Code editor |
+| SkiaSharp | GPU rendering and SkSL shaders |
+| ManagedBass, ManagedBass.Mix, Un4seen.Bass | Audio and MOD playback |
+| SDL2-CS.NetCore | Joystick and gamepad input |
+
+---
+
+## Project layout
+
+| Path | Contents |
+|---|---|
+| `AmosRunner.cs` | The BASIC interpreter |
+| `AmosGraphics.cs` | Screens, layers, sprites, fonts, raster bars, effects and GPU rendering |
+| `Shaders.cs` | SkSL shaders for raster bars, weather and full-screen effects |
+| `ChiptuneSynth.cs`, `AudioEngine.cs`, `LibXmp.cs` | Sound effects, synth and music |
+| `MainWindow.axaml(.cs)` | The IDE |
+| `SpriteEditorWindow`, `MapEditorWindow`, `TilePaletteWindow` | Built-in editors |
+| `Projects/` | Example programs (`.amosproj`) |
+| `Graphics/`, `Sound/`, `fonts/` | Assets used by the examples |
+
+### Resources
+
+Assets are located by `ResourceLoader`, which looks in the following places relative to the executable:
+
+- the application folder
+- a `Resources` folder next to the executable
+- `../Resources` inside a macOS app bundle
 
 ---
 
 ## Status
 
-This project is under active development.  
-APIs, commands, and internal architecture may change.
+Under active development. Commands, APIs and internal architecture may still change.
 
 ---
 
-## Prerequisites
-To compile and run this project, you need to have the following installed on your development machine:
-- .NET 9.0 SDK (or later)
-- IDE: JetBrains Rider, Visual Studio 2022, or VS Code.
+## Screenshots
 
-## Dependencies
-The project relies on the following NuGet packages. These should restore automatically during the build process, but ensure your project file references them:
-- Avalonia (UI Framework and Windowing)
-- Avalonia.Desktop
-- Avalonia.Skia (Rendering backend)
-- Avalonia.ReactiveUI
-- ManageBass (For Audio/Sound playback)
-- SkiaSharp
-
-## How to Compile and Run
-1. Clone the repository:
-   - git clone https://github.com/MrSkutt/AmosLikeBasic
-   - cd AmosLikeBasic
-2. Restore dependencies:
-   - dotnet restore
-3. Build the project:
-   - dotnet build
-4. Run the application:
-   - dotnet run
-
-## A Note on Resources
-The application uses a custom ResourceLoader to find assets (images, fonts, sounds). Ensure your assets are placed in one of the following locations relative to the executable:
-- Directly in the application folder.
-- In a folder named Resources next to the executable.
-- (For macOS Bundles) In the ../Resources directory.
-
-## Optional: How to add dependencies manually
-If you are starting from scratch or need to add the packages manually, use the following commands
-- dotnet add package Avalonia
-- dotnet add package Avalonia.Desktop
-- dotnet add package Avalonia.Themes.Fluent
-- dotnet add package Avalonia.Skia
-- dotnet add package ManageBass
-
+| | |
+|---|---|
+| ![Adventure game](images/Adventure.png) | ![C64 theme](images/Applikation-C64.png) |
+| ![STOS theme](images/Applikation-STOS.png) | ![Workbench theme](images/Applikation-Workbecnh.png) |
 
 ---
 
@@ -94,34 +125,22 @@ If you are starting from scratch or need to add the packages manually, use the f
 
 MIT License
 
-Copyright (c) [YEAR] [YOUR NAME]
+Copyright (c) 2025 Mattias Schütt
 
-Permission is hereby granted, free of charge, to any person obtaining a copy  
-of this software and associated documentation files (the "Software"), to deal  
-in the Software without restriction, including without limitation the rights  
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell  
-copies of the Software, and to permit persons to whom the Software is  
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all  
+The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR  
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,  
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE  
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER  
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,  
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE  
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-IDE
-![Applikation](images/Applikation.png)
-
-
-
-
-Exampel on Adventure game
-![Adventure](images/Adventure.png)
-
