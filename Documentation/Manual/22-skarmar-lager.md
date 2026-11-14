@@ -142,6 +142,29 @@ GOTO Loop
 
 Ett lager kan ha 24 färgövergångar sammanlagt. Ett band med tre färger använder två övergångar. `RASTER INFO` skriver ut hur många som används.
 
+## Bildrörseffekt: SCREEN CRT
+
+Förr spelades spelen på TV-apparater och bildskärmar med bildrör. De hade synliga linjer, lite suddiga pixlar och en välvd glasyta. `SCREEN CRT` får hela spelfönstret att se ut så:
+
+```basic
+SCREEN CRT 1
+INKG "Orange"
+CIRCLEF 320, 240, 150, 150
+INKG "White"
+TEXT 250, 230, "GAMMAL TV"
+Loop:
+  WAIT VBL
+GOTO Loop
+```
+
+`SCREEN CRT 0` stänger av effekten. Du kan också ange hur tydliga linjerna och hur välvd skärmen ska vara, båda från 0 till 100:
+
+```basic nocheck
+SCREEN CRT 1, 80, 20     ; tydliga linjer, nästan platt skärm
+```
+
+Effekten ritas av grafikkortet i sista steget, när bilden skalas upp till fönstret, så den kostar nästan ingenting. Den syns bäst i ett stort fönster eller i helskärm. Med **F8** slår du på och av den medan spelet kör, och i utvecklingsmiljön finns den även under **View → CRT Effect**.
+
 ## Snö, regn och stjärnor
 
 `PARTICLE typ, täthet` lägger till väder i det valda lagret: typ 1 är snö, 2 regn och 3 blinkande stjärnor, och 0 stänger av. Tätheten styr hur stora partiklarna och mellanrummen blir:

@@ -36,6 +36,7 @@
             </MenuItem>
             <MenuItem Header="_View">
                 <MenuItem Header="Toggle Fullscreen (F10)" Click="ToggleFullscreen_OnClick"/>
+                <MenuItem Header="CRT Effect (F8)" Click="ToggleCrt_OnClick"/>
                 <MenuItem Header="Reset Layout"/>
             </MenuItem>
             <MenuItem Header="Themes">

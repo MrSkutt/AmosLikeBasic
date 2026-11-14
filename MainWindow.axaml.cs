@@ -349,6 +349,14 @@ public partial class MainWindow : Window
         }
 
         // F9 - TOGGLE BREAKPOINT (NYTT!)
+        // F8 - CRT-FILTER I SPELFÖNSTRET
+        if (e.Key == Key.F8)
+        {
+            ToggleCrt();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.F9)
         {
             ToggleBreakpointAtCurrentLine();
@@ -821,6 +829,16 @@ public partial class MainWindow : Window
                 Editor.Select(Editor.CaretOffset , 0);
             });
         }
+    }
+
+    private void ToggleCrt_OnClick(object? sender, RoutedEventArgs e) => ToggleCrt();
+
+    // Slår på och av CRT-filtret (bildrörsutseende) i spelfönstret
+    private void ToggleCrt()
+    {
+        _gfx.CrtEnabled = !_gfx.CrtEnabled;
+        _screenWindow?.ScreenControl.InvalidateVisual();
+        Log($"CRT effect {(_gfx.CrtEnabled ? "on" : "off")}" + Environment.NewLine);
     }
 
     private void UpdateScreenTitle(AmosGraphics.FrameStats stats)

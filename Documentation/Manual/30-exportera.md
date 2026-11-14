@@ -35,4 +35,4 @@ Apparna är inte signerade av Apple eller Microsoft, så datorn varnar första g
 
 ## Spela
 
-I det exporterade spelet växlar **F12** mellan fönster och helskärm, och **Escape** lämnar helskärm. Spelet ritas i sin egen upplösning och skalas upp till skärmen med skarpa pixlar, så det ser lika retro ut på en 4K-skärm.
+I det exporterade spelet växlar **F12** mellan fönster och helskärm, **Escape** lämnar helskärm och **F8** slår på och av bildrörseffekten. Spelet ritas i sin egen upplösning och skalas upp till skärmen med skarpa pixlar, så det ser lika retro ut på en 4K-skärm.

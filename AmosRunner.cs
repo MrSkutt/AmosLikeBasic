@@ -2420,6 +2420,16 @@ public static partial class AmosRunner
                                     int frames  = EvalInt(screenArgs[3], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.StartScreenFade(layerId, target, frames);
                                 }
+                                else if (subCmd == "CRT" && screenArgs.Count >= 2)
+                                {
+                                    // SCREEN CRT på/av [, scanlines 0-100 [, böjning 0-100]]
+                                    graphics.CrtEnabled = EvalDouble(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics) != 0;
+                                    if (screenArgs.Count >= 3)
+                                        graphics.CrtScanlines = (float)EvalDouble(screenArgs[2], vars, ln, getInkey, isKeyDown, graphics) / 100f;
+                                    if (screenArgs.Count >= 4)
+                                        graphics.CrtCurvature = (float)EvalDouble(screenArgs[3], vars, ln, getInkey, isKeyDown, graphics) / 100f;
+                                    onGraphicsChanged();
+                                }
                                 else if (subCmd == "ON" && screenArgs.Count >= 2)
                                 {
                                     graphics.SetScreenVisible(

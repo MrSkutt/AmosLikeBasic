@@ -39,6 +39,6 @@ När du startar AMOS Like Basic ser du editorn, där du skriver programmet. Öve
 
 Klickar du i marginalen till vänster om en rad sätter du en **brytpunkt**. Programmet stannar då när det kommer till den raden, och du kan se värdet på alla variabler i variabelrutan (tryck **F1** för att visa eller dölja den).
 
-I spelfönstret växlar **F12** mellan fönster och helskärm. Spelfönstrets titelrad visar hur fort programmet går: **FPS** (bilder per sekund), **BASIC** (hur stor del av tiden din kod arbetar) och **CPU**.
+I spelfönstret växlar **F12** mellan fönster och helskärm, och **F8** slår på och av en effekt som får bilden att se ut som på en gammal TV. Spelfönstrets titelrad visar hur fort programmet går: **FPS** (bilder per sekund), **BASIC** (hur stor del av tiden din kod arbetar) och **CPU**.
 
 Under menyn **Project** finns **Export app...**, som gör ett färdigt program av ditt spel som andra kan köra utan att installera AMOS Like Basic. Det beskrivs i kapitlet om att exportera.

@@ -150,6 +150,15 @@ public sealed class GamePlayer
             return;
         }
 
+        // F8 slår på och av CRT-filtret
+        if (e.Key == Key.F8)
+        {
+            _gfx.CrtEnabled = !_gfx.CrtEnabled;
+            _window.ScreenControl.InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
         // Registrera alltid tangenten först, så att KEYSTATE fungerar
         lock (_pressedKeys) _pressedKeys.Add(e.Key.ToString());
 

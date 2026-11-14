@@ -98,6 +98,9 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
             int factor = Math.Max(1, (int)Math.Floor(scale + 0.001f));
             var dest = new SKRect((float)Bounds.X, (float)Bounds.Y, (float)Bounds.Right, (float)Bounds.Bottom);
 
+            if (_graphics.CrtEnabled && DrawCrt(canvas, image, w, h, dest, scale))
+                return;
+
             if (factor == 1)
             {
                 canvas.DrawImage(image, new SKRect(0, 0, w, h), dest, Linear);
@@ -118,6 +121,79 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
         {
             _graphics.CountRenderedFrame(System.Diagnostics.Stopwatch.GetTimestamp() - start);
         }
+    }
+
+    // ── CRT-filter ───────────────────────────────────────────────────
+    // En shader som ritar spelbilden till fönstret som på en bildrörsskärm. Den körs i
+    // spelets koordinater (canvasen är redan uppskalad), så scanlines följer spelets rader
+    // oavsett fönsterstorlek. Det är ett enda pass med lite matematik per skärmpixel.
+    private const string CrtShaderCode = @"
+uniform shader image;
+uniform float2 res;         // spelets upplösning
+uniform float scanlines;    // 0-1
+uniform float curvature;    // 0-1
+uniform float pixelScale;   // skärmpixlar per spelpixel
+
+half4 main(float2 p) {
+    // Böjd skärm: dra ut koordinaterna mot kanterna
+    float2 c = p / res * 2.0 - 1.0;
+    float k = curvature * 0.12;
+    c *= 1.0 + k * float2(c.y * c.y, c.x * c.x);
+    float2 uv = c * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+        return half4(0.0, 0.0, 0.0, 1.0);
+
+    float2 sp = uv * res;
+    half4 col = image.eval(sp);
+
+    // Scanlines: ljusast mitt på varje rad i spelbilden, mörkare mellan raderna
+    float fy = fract(sp.y) - 0.5;
+    float line = 1.0 - scanlines * 0.9 * (fy * fy * 4.0);
+
+    // Svag färgmask i röd, grön och blå, som bildrörets fosforränder
+    float m = mod(floor(p.x * pixelScale), 3.0);
+    float3 mask = m < 1.0 ? float3(1.0, 0.82, 0.82) : (m < 2.0 ? float3(0.82, 1.0, 0.82) : float3(0.82, 0.82, 1.0));
+
+    // Vinjett: mörkare mot kanterna och hörnen
+    float vig = pow(clamp(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.0, 1.0), 0.18);
+
+    // Lite ljusare totalt, så att scanlines och mask inte gör bilden för mörk.
+    // Färgerna är förmultiplicerade med alpha, så de får inte bli större än alpha.
+    float3 rgb = clamp(float3(col.rgb) * line * mask * vig * 1.22, 0.0, float(col.a));
+    return half4(half3(rgb), col.a);
+}";
+
+    private static SKRuntimeEffect? _crtEffect;
+    private static bool _crtCompileFailed;
+
+    private bool DrawCrt(SKCanvas canvas, SKImage image, int w, int h, SKRect dest, float scale)
+    {
+        if (_crtEffect == null && !_crtCompileFailed)
+        {
+            _crtEffect = SKRuntimeEffect.CreateShader(CrtShaderCode, out var errors);
+            if (_crtEffect == null || !string.IsNullOrEmpty(errors))
+            {
+                System.Diagnostics.Debug.WriteLine($"CRT shader error: {errors}");
+                _crtEffect = null;
+                _crtCompileFailed = true; // försök inte varje bild; vanlig uppskalning används i stället
+            }
+        }
+        if (_crtEffect == null) return false;
+
+        // Linjär läsning ger mjukare pixlar i sidled; scanlines ger skärpan i höjdled
+        using var imageShader = image.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, Linear);
+        var children = new SKRuntimeEffectChildren(_crtEffect) { { "image", imageShader } };
+        var uniforms = new SKRuntimeEffectUniforms(_crtEffect)
+        {
+            { "res", new[] { (float)w, (float)h } },
+            { "scanlines", Math.Clamp(_graphics.CrtScanlines, 0f, 1f) },
+            { "curvature", Math.Clamp(_graphics.CrtCurvature, 0f, 1f) },
+            { "pixelScale", Math.Max(1f, scale) }
+        };
+        using var shader = _crtEffect.ToShader(uniforms, children);
+        using var paint = new SKPaint { Shader = shader };
+        canvas.DrawRect(dest, paint);
+        return true;
     }
 
     // RGBA går att rendera till på alla GPU-backends (BGRA inte alltid på OpenGL)
@@ -452,6 +528,12 @@ public sealed class AmosGraphics
 
     private readonly System.Diagnostics.Stopwatch _vblTimer = new();
     public double LastCpuUsagePercent { get; private set; } = 0;
+
+    // CRT-filter: spelbilden visas som på en gammal bildrörsskärm när den skalas upp till
+    // fönstret (SCREEN CRT, F8). Styrkorna är 0-1.
+    public bool CrtEnabled { get; set; }
+    public float CrtScanlines { get; set; } = 0.55f;
+    public float CrtCurvature { get; set; } = 0.5f;
     public readonly object LockObject = new(); // Korrekt namn för låset
     private int _currentScreen = 0;
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
