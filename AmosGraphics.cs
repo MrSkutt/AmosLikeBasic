@@ -232,7 +232,7 @@ public sealed class AmosGpuView : Control
         {
             List<GpuLayer> layersCopy;
             List<AmosGraphics.QueuedFontText> fontTextsCopy;
-            List<int> spriteIdsCopy;
+            List<AmosGraphics.SpriteRenderState> spritesCopy;
 
             lock (Graphics.LockObject)
             {
@@ -241,7 +241,7 @@ public sealed class AmosGpuView : Control
 
                 layersCopy = new List<GpuLayer>(Graphics.ActiveFrame);
                 fontTextsCopy = Graphics.GetQueuedTexts().ToList();
-                spriteIdsCopy = Graphics.GetSpriteIds();
+                spritesCopy = Graphics.GetSpriteRenderStates();
             }
 
             // RITA GPU-LAGER MED SHADER
@@ -360,18 +360,14 @@ public sealed class AmosGpuView : Control
                     }
 
                     // Print sprites
-                    foreach (var id in spriteIdsCopy)
+                    foreach (var sprite in spritesCopy)
                     {
-                        var sprite = Graphics.GetSprite(id);
-                        if (!sprite.Visible) continue;
                         if (sprite.Layer != -1 && sprite.Layer != layerIndex) continue;
 
-                        var gpuEffects = sprite.Effects.Where(e => e.RequiresGpuContext).ToList();
-    
-                        if (gpuEffects.Count > 0)
+                        if (sprite.Effects.Count > 0)
                         {
-                            var processedBmp = sprite.GetBitmap(Graphics.GetImageBank());
-                            var totalPadding = sprite.GetTotalPadding();
+                            var processedBmp = sprite.Sprite.GetEffectBitmap(sprite.BaseBitmap, sprite.Effects);
+                            var totalPadding = AmosGraphics.Sprite.GetTotalPadding(sprite.Effects);
 
                             double drawX = sprite.X - totalPadding.left;
                             double drawY = sprite.Y - totalPadding.top;
@@ -413,16 +409,7 @@ public sealed class AmosGpuView : Control
                         else
                         {
                             // ✅ UTAN EFFEKT - sprite.X är VÄNSTER KANT
-                            WriteableBitmap baseBmp;
-                            if (sprite.ImageBankId >= 0 && Graphics.GetImageBank().TryGetValue(sprite.ImageBankId, out var entry))
-                            {
-                                int fi = Math.Clamp(sprite.CurrentFrame, 0, entry.Frames.Count - 1);
-                                baseBmp = entry.Frames[fi];
-                            }
-                            else
-                            {
-                                baseBmp = sprite.Frames[Math.Clamp(sprite.CurrentFrame, 0, sprite.Frames.Count - 1)];
-                            }
+                            var baseBmp = sprite.BaseBitmap;
                             double cX = baseBmp.Size.Width / 2.0;
                             double cY = baseBmp.Size.Height / 2.0;
                             double angleRad = sprite.Angle * Math.PI / 180.0;
@@ -1373,11 +1360,11 @@ public sealed class AmosGraphics
         private int _staticEffectsVersion = -1;
     
         // ✅ Beräkna total padding från alla effekter
-        public (int left, int right, int top, int bottom) GetTotalPadding()
+        public static (int left, int right, int top, int bottom) GetTotalPadding(List<SpriteEffect> effects)
         {
             int totalLeft = 0, totalRight = 0, totalTop = 0, totalBottom = 0;
         
-            foreach (var effect in Effects.Where(e => e.RequiresGpuContext))
+            foreach (var effect in effects)
             {
                 var p = effect.GetPadding();
                 totalLeft += p.leftPadding;
@@ -1410,23 +1397,19 @@ public sealed class AmosGraphics
         }
 
 
-public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
+        // Aktuell frame utan effekter (från imagebanken eller spritens egna frames)
+        public WriteableBitmap? GetBaseBitmap(Dictionary<int, ImageBankEntry> imageBank)
+        {
+            if (ImageBankId >= 0 && imageBank.TryGetValue(ImageBankId, out var entry) && entry.Frames.Count > 0)
+                return entry.Frames[Math.Clamp(CurrentFrame, 0, entry.Frames.Count - 1)];
+
+            return Frames.Count > 0 ? Frames[Math.Clamp(CurrentFrame, 0, Frames.Count - 1)] : null;
+        }
+
+// Kör effektkedjan. Anropas BARA från UI-tråden (AmosGpuView.Render), som äger cache-fälten.
+public WriteableBitmap GetEffectBitmap(WriteableBitmap baseBitmap, List<SpriteEffect> allEffects)
 {
-    // Hämta original bitmap
-    WriteableBitmap baseBitmap;
-    if (ImageBankId >= 0 && imageBank.TryGetValue(ImageBankId, out var entry))
-    {
-        int fi = Math.Clamp(CurrentFrame, 0, entry.Frames.Count - 1);
-        baseBitmap = entry.Frames[fi];
-    }
-    else
-    {
-        baseBitmap = Frames[Math.Clamp(CurrentFrame, 0, Frames.Count - 1)];
-    }
- 
     // Rotation/zoom görs INTE här - det sköts av AmosGpuView.Render med en transform
-    var allEffects = Effects.Where(e => e.RequiresGpuContext).ToList();
-    
     if (allEffects.Count == 0)
         return baseBitmap;
  
@@ -1560,7 +1543,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
         s.CurrentFrame = frameId;
 
         // Hämta bitmap från imagebanken
-        var bmp = s.GetBitmap(GetImageBank());
+        var bmp = s.GetBaseBitmap(GetImageBank());
         if (bmp != null)
         {
             // Uppdatera bredd/höjd om de inte redan satts manuellt
@@ -1571,6 +1554,63 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
     }
 
     private readonly Dictionary<int, Sprite> _sprites = new();
+
+    // Allt Render behöver veta om en sprite, kopierat vid ett och samma tillfälle
+    public sealed record SpriteRenderState(
+        Sprite Sprite, WriteableBitmap BaseBitmap, List<SpriteEffect> Effects,
+        int X, int Y, int Width, int Height,
+        double Angle, double ZoomX, double ZoomY, float Alpha, int Layer);
+
+    // Ögonblicksbild från senaste WAIT VBL, gjord på runner-tråden så att Render aldrig
+    // läser en sprite som håller på att ändras. null = programmet använder inte WAIT VBL.
+    private List<SpriteRenderState>? _presentedSprites;
+
+    // Anroparen måste hålla LockObject
+    private List<SpriteRenderState> BuildSpriteStates()
+    {
+        var states = new List<SpriteRenderState>();
+        foreach (var (_, s) in _sprites.OrderBy(kv => kv.Key))
+        {
+            if (!s.Visible) continue;
+            var baseBitmap = s.GetBaseBitmap(_imageBank);
+            if (baseBitmap == null) continue;
+
+            states.Add(new SpriteRenderState(
+                s, baseBitmap, s.Effects.Where(e => e.RequiresGpuContext).ToList(),
+                s.X, s.Y, s.Width, s.Height,
+                s.Angle, s.ZoomX, s.ZoomY, s.Alpha, s.Layer));
+        }
+
+        return states;
+    }
+
+    public List<SpriteRenderState> GetSpriteRenderStates()
+    {
+        lock (LockObject)
+        {
+            return _presentedSprites ?? BuildSpriteStates();
+        }
+    }
+
+    public void AddSpriteEffect(int id, SpriteEffect effect)
+    {
+        var s = GetSprite(id);
+        lock (LockObject)
+        {
+            s.Effects.Add(effect);
+            s.InvalidateEffectCache();
+        }
+    }
+
+    public void ClearSpriteEffects(int id)
+    {
+        var s = GetSprite(id);
+        lock (LockObject)
+        {
+            s.Effects.Clear();
+            s.InvalidateEffectCache();
+        }
+    }
     private readonly Dictionary<string, HashSet<int>> _groups = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<int, Font> _fonts = new();
 
@@ -1725,11 +1765,13 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
     // null = programmet använder inte WAIT VBL, rita live-listan.
     private List<QueuedFontText>? _presentedFontTexts;
 
-    public void PresentFontTexts()
+    // Anropas vid WAIT VBL: lås fast det som ska visas för den här framen
+    public void PresentFrame()
     {
         lock (LockObject)
         {
             _presentedFontTexts = _fontTexts.ToList();
+            _presentedSprites = BuildSpriteStates();
         }
     }
 
@@ -1749,6 +1791,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
         {
             _sprites.Clear();
             _groups.Clear();
+            _presentedSprites = null;
             _imageBank.Clear();
             _tiles.Clear();
             _tilesInWidth = 0;
@@ -1768,6 +1811,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
         {
             _sprites.Clear();
             _groups.Clear();
+            _presentedSprites = null;
         }
     }
 
@@ -3051,7 +3095,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
     {
         var f = CreateEmptyBitmap(w, h);
         var sprite = new Sprite(w, h, f);
-        _sprites[id] = sprite;
+        lock (LockObject) _sprites[id] = sprite;
         SpriteClear(id, Colors.Magenta);
     }
 
@@ -3120,7 +3164,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
             CreateSprite(id, frameW, frameH);
             var s = GetSprite(id);
 
-            s.Frames.Clear();
+            lock (LockObject) s.Frames.Clear();
 
             for (int i = 0; i < count; i++)
             {
@@ -3151,7 +3195,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
                     }
                 }
 
-                s.Frames.Add(f);
+                lock (LockObject) s.Frames.Add(f);
             }
 
             s.CurrentFrame = 0;
@@ -3211,7 +3255,7 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
             }
         }
 
-        s.Frames.Add(f);
+        lock (LockObject) s.Frames.Add(f);
     }
 
     public void SetSpriteFrame(int id, int idx)
@@ -3484,8 +3528,8 @@ public WriteableBitmap GetBitmap(Dictionary<int, ImageBankEntry> imageBank)
         if (!_sprites.TryGetValue(id1, out var s1) || !_sprites.TryGetValue(id2, out var s2)) return false;
         if (!s1.Visible || !s2.Visible) return false;
 
-        var bmp1 = s1.GetBitmap(_imageBank);
-        var bmp2 = s2.GetBitmap(_imageBank);
+        var bmp1 = s1.GetBaseBitmap(_imageBank);
+        var bmp2 = s2.GetBaseBitmap(_imageBank);
         if (bmp1 == null || bmp2 == null) return false;
 
         int x1 = s1.X - s1.HandleX, y1 = s1.Y - s1.HandleY;

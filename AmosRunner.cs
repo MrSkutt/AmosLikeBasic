@@ -1966,7 +1966,7 @@ public static class AmosRunner
                                 await WaitNextFrameAsync(token);
 
                                 // 4. Lås fast framens texter och signalera att UI ska uppdateras
-                                graphics.PresentFontTexts();
+                                graphics.PresentFrame();
                                 onGraphicsChanged();
 
                                 // 5. Börja rita på nya inactive frame
@@ -2902,7 +2902,6 @@ public static class AmosRunner
                                         // SPRITE EFFECT ADD id, type, param1, param2, ...
                                         id = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
                                         string effectType = ss[3].ToUpperInvariant();
-                                        var sprite = graphics.GetSprite(id.Value);
                                         
                                         switch (effectType)
                                         {
@@ -2910,7 +2909,7 @@ public static class AmosRunner
                                                 if (ss.Count >= 5)
                                                 {
                                                     float radius = (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics);
-                                                    sprite.Effects.Add(new SpriteBlurEffect { Radius = radius });
+                                                    graphics.AddSpriteEffect(id.Value, new SpriteBlurEffect { Radius = radius });
                                                 }
                                                 break;
     
@@ -2930,7 +2929,7 @@ public static class AmosRunner
                                                     // ✅ Auto-sätt phaseY till pi/2 (90 grader) för organisk rörelse
                                                     float phaseY = amplitudeY > 0 ? 1.57f : 0f;  // pi/2 ≈ 1.57
         
-                                                    sprite.Effects.Add(new WaveEffect { 
+                                                    graphics.AddSpriteEffect(id.Value, new WaveEffect { 
                                                         AmplitudeX = amplitudeX,
                                                         FrequencyX = frequencyX,
                                                         AmplitudeY = amplitudeY,
@@ -2946,7 +2945,7 @@ public static class AmosRunner
                                                     float brightness = (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics);
                                                     float contrast = (float)EvalDouble(ss[5], vars, ln, getInkey, isKeyDown, graphics);
                                                     float saturation = (float)EvalDouble(ss[6], vars, ln, getInkey, isKeyDown, graphics);
-                                                    sprite.Effects.Add(new ColorGradeEffect {
+                                                    graphics.AddSpriteEffect(id.Value, new ColorGradeEffect {
                                                         Brightness = brightness,
                                                         Contrast = contrast,
                                                         Saturation = saturation
@@ -2956,15 +2955,12 @@ public static class AmosRunner
     
 
                                         }
-                                        sprite.InvalidateEffectCache();
                                     }
                                     else if (effectSub == "CLEAR" && ss.Count >= 3)
                                     {
                                         // SPRITE EFFECT CLEAR id
                                         id = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
-                                        var sprite = graphics.GetSprite(id.Value);
-                                        sprite.Effects.Clear();
-                                        sprite.InvalidateEffectCache();
+                                        graphics.ClearSpriteEffects(id.Value);
                                     }
                                     else if (effectSub == "UPDATE" && ss.Count >= 6)
                                     {
