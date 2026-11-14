@@ -18,7 +18,6 @@ namespace AmosLikeBasic;
 public sealed class GpuLayer
 {
     public WriteableBitmap Bitmap { get; init; } = null!;
-    public WriteableBitmap? CompositeBitmap { get; set; }
     
     public Point Offset { get; set; }
     public double Opacity { get; set; } = 1.0;
@@ -41,17 +40,26 @@ public sealed class GpuLayer
 }
 
 
-// Denna klass sköter själva Skia-ritningen
-public class ShaderDrawOperation : ICustomDrawOperation
+// Ritar ett lager: komponerar bitmap + texter + sprites på en Skia-yta (på GPU:n när en
+// finns) och kör sedan lagrets shader med ytan som inputTexture. Allt sker på render-tråden,
+// utan att något läses tillbaka till CPU:n.
+public sealed class LayerDrawOperation : ICustomDrawOperation
 {
-    private readonly GpuLayer _layer;
-    private readonly Rect _destRect;
+    private static readonly SKSamplingOptions Sampling = new(SKFilterMode.Linear, SKMipmapMode.None);
 
-    public ShaderDrawOperation(Rect bounds, GpuLayer layer, Rect destRect)
+    private readonly AmosGraphics _graphics;
+    private readonly GpuLayer _layer;
+    private readonly List<AmosGraphics.QueuedFontText> _texts;
+    private readonly List<AmosGraphics.SpriteRenderState> _sprites;
+
+    public LayerDrawOperation(Rect bounds, AmosGraphics graphics, GpuLayer layer,
+        List<AmosGraphics.QueuedFontText> texts, List<AmosGraphics.SpriteRenderState> sprites)
     {
         Bounds = bounds;
+        _graphics = graphics;
         _layer = layer;
-        _destRect = destRect;
+        _texts = texts;
+        _sprites = sprites;
     }
 
     public Rect Bounds { get; }
@@ -65,15 +73,44 @@ public class ShaderDrawOperation : ICustomDrawOperation
 
     public void Render(ImmediateDrawingContext context)
     {
-        var lease = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
-        if (lease == null) return;
+        var leaseFeature = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
+        if (leaseFeature == null) return;
 
-        using var skia = lease.Lease();
-        var canvas = skia.SkCanvas;
+        using var lease = leaseFeature.Lease();
+        var canvas = lease.SkCanvas;
 
-        
-        // Kompilera om när koden ändrats (t.ex. RASTER SPACE). Även misslyckade försök
-        // kommer ihåg koden så att en trasig shader inte kompileras om varje frame.
+        var effect = GetOrCompileEffect();
+        if (effect == null) return;
+
+        try
+        {
+            var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
+                SKColorType.Bgra8888, SKAlphaType.Premul);
+
+            using var surface = (lease.GrContext != null ? SKSurface.Create(lease.GrContext, true, info) : null)
+                                ?? SKSurface.Create(info);
+            DrawLayerContent(surface.Canvas);
+            using var composite = surface.Snapshot();
+
+            using var input = CreateInputShader(composite);
+            var children = new SKRuntimeEffectChildren(effect);
+            if (effect.Children.Contains("inputTexture"))
+                children.Add("inputTexture", input);
+
+            using var shader = effect.ToShader(CreateUniforms(effect), children);
+            using var paint = new SKPaint { Shader = shader };
+            canvas.DrawRect(new SKRect((float)Bounds.X, (float)Bounds.Y, (float)Bounds.Right, (float)Bounds.Bottom), paint);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine("Shader Render Crash: " + ex.Message);
+        }
+    }
+
+    // Kompilera om när koden ändrats (t.ex. RASTER SPACE). Även misslyckade försök
+    // kommer ihåg koden så att en trasig shader inte kompileras om varje frame.
+    private SKRuntimeEffect? GetOrCompileEffect()
+    {
         var code = _layer.SkSlCode;
         if (!string.IsNullOrEmpty(code) && code != _layer.CompiledSkSlCode)
         {
@@ -86,123 +123,231 @@ public class ShaderDrawOperation : ICustomDrawOperation
             }
         }
 
-        var effect = _layer.CachedEffect;
-        if (effect != null)
+        return _layer.CachedEffect;
+    }
+
+    private SKShader CreateInputShader(SKImage composite)
+    {
+        var input = composite.ToShader();
+        if (_layer.Opacity >= 0.999) return input;
+
+        // Skala alla förmultiplicerade kanaler (även alpha) med opacity: fade mot svart/genomskinligt
+        byte a = (byte)Math.Round(Math.Clamp(_layer.Opacity, 0, 1) * 255);
+        using var fade = SKColorFilter.CreateBlendMode(new SKColor(0, 0, 0, a), SKBlendMode.DstIn);
+        using (input)
+            return input.WithColorFilter(fade);
+    }
+
+    private void DrawLayerContent(SKCanvas c)
+    {
+        c.Clear(SKColors.Transparent);
+
+        // Rita layer.Bitmap (bakgrund, tiles, PLOT/LINE)
+        using (var bg = ToSkImage(_layer.Bitmap))
+            c.DrawImage(bg, 0, 0);
+
+        foreach (var qt in _texts)
+            DrawText(c, qt);
+
+        foreach (var sprite in _sprites)
+            DrawSprite(c, sprite);
+    }
+
+    private void DrawText(SKCanvas c, AmosGraphics.QueuedFontText qt)
+    {
+        var f = _graphics.GetFont(qt.FontId);
+        if (f == null) return;
+
+        var textEffects = qt.GetEffects(_graphics);
+        if (textEffects.Count > 0)
         {
-            try
-            {
-                var bitmapToUse = _layer.CompositeBitmap ?? _layer.Bitmap;
-                using var fb = bitmapToUse.Lock();
-                var info = new SKImageInfo(_layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height,
-                    SKColorType.Bgra8888, SKAlphaType.Premul);
-                using var skBitmap = new SKBitmap();
-                skBitmap.InstallPixels(info, fb.Address, fb.RowBytes);
-                using var image = SKImage.FromBitmap(skBitmap);
+            // MED EFFEKTER: hela texten som en bild, roteras/zoomas runt sin mittpunkt
+            var processedBmp = qt.GetProcessedBitmap(_graphics, textEffects);
+            if (processedBmp == null) return;
 
-                var children = new SKRuntimeEffectChildren(effect);
-                if (effect.Children.Contains("inputTexture"))
-                    children.Add("inputTexture", image.ToShader());
-
-                var uniforms = new SKRuntimeEffectUniforms(effect);
-            
-                if (effect.Uniforms.Contains("iResolution"))
-                    uniforms.Add("iResolution", new float[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
-
-                // Lägg till denna för att shadern ska veta skärmens storlek separat från bildens storlek
-                if (effect.Uniforms.Contains("iScreenResolution"))
-                    uniforms.Add("iScreenResolution", new float[] { (float)_destRect.Width, (float)_destRect.Height });
-
-                if (effect.Uniforms.Contains("iTime"))
-                    uniforms.Add("iTime", _layer.Timer);
-
-                if (effect.Uniforms.Contains("uParams")) 
-                {
-                    int slotCount = _layer.ShaderValues.Length;
-                    float[] uParamData = new float[slotCount * 4]; // varje Vector4 = 4 floats
-
-                    for (int i = 0; i < slotCount; i++)
-                    {
-                        Vector4 v = _layer.ShaderValues[i];
-                        int baseIndex = i * 4;
-                        uParamData[baseIndex + 0] = v.X;
-                        uParamData[baseIndex + 1] = v.Y;
-                        uParamData[baseIndex + 2] = v.Z;
-                        uParamData[baseIndex + 3] = v.W;
-                    }
-
-                    uniforms.Add("uParams", uParamData);
-                }
-                    
-                // Säkerställ att uPositions och uHeights är exakt 50 element
-                if (effect.Uniforms.Contains("uPositions")) 
-                {
-                    float[] p50 = new float[50];
-                    if (_layer.ShaderParams != null) 
-                        Array.Copy(_layer.ShaderParams, p50, Math.Min(_layer.ShaderParams.Length, 50));
-                    uniforms.Add("uPositions", p50);
-                }
-
-                if (effect.Uniforms.Contains("uHeights")) 
-                {
-                    float[] h50 = new float[50];
-                    if (_layer.ShaderHeights != null) 
-                        Array.Copy(_layer.ShaderHeights, h50, Math.Min(_layer.ShaderHeights.Length, 50));
-                    uniforms.Add("uHeights", h50);
-                }
-
-                if (effect.Uniforms.Contains("uColors")) 
-                {
-                    float[] cFrom = new float[50 * 4];
-                    float[] cTo = new float[50 * 4];
-        
-                    var shaderColors = _layer.ShaderColors;
-                    int colorCount = (shaderColors != null) ? Math.Min(50, shaderColors.Length) : 0;
-        
-                    for (int i = 0; i < 50; i++) 
-                    {
-                        if (i < colorCount) {
-                            cFrom[i * 4 + 0] = shaderColors![i].Red / 255f;
-                            cFrom[i * 4 + 1] = shaderColors![i].Green / 255f;
-                            cFrom[i * 4 + 2] = shaderColors![i].Blue / 255f;
-                            cFrom[i * 4 + 3] = shaderColors![i].Alpha / 255f;
-
-                            cTo[i * 4 + 0] = _layer.ShaderColorsTo[i].Red / 255f;
-                            cTo[i * 4 + 1] = _layer.ShaderColorsTo[i].Green / 255f;
-                            cTo[i * 4 + 2] = _layer.ShaderColorsTo[i].Blue / 255f;
-                            cTo[i * 4 + 3] = _layer.ShaderColorsTo[i].Alpha / 255f;
-                        } else {
-                            // Standardvärden (Svart transparent)
-                            cFrom[i * 4 + 3] = 0.0f;
-                            cTo[i * 4 + 3] = 0.0f;
-                        }
-                    }
-                    uniforms.Add("uColors", cFrom);
-                    uniforms.Add("uColorsTo", cTo);
-                }
-
-
-                using var shader = effect.ToShader(uniforms, children);
-                using var paint = new SKPaint { Shader = shader };
-                canvas.DrawRect(new SKRect((float)_destRect.X, (float)_destRect.Y, (float)_destRect.Right, (float)_destRect.Bottom), paint);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine("Shader Render Crash: " + ex.Message);
-            }
+            var pad = qt.GetTotalPadding(textEffects);
+            using var img = ToSkImage(processedBmp);
+            DrawTransformed(c, img, qt.X - pad.left, qt.Y - pad.top, img.Width, img.Height,
+                qt.Angle, qt.ZoomX, qt.ZoomY, null);
+            return;
         }
+
+        // UTAN EFFEKTER: tecken för tecken, hela texten roteras/zoomas runt sin mittpunkt
+        double totalW = qt.Text.Length * f.CharWidth;
+        float cX = (float)(totalW / 2.0);
+        float cY = f.CharHeight / 2f;
+
+        c.Save();
+        c.Translate(cX + qt.X, cY + qt.Y);
+        c.RotateDegrees((float)qt.Angle);
+        c.Scale((float)qt.ZoomX, (float)qt.ZoomY);
+        c.Translate(-cX, -cY);
+
+        for (int i = 0; i < qt.Text.Length; i++)
+        {
+            char ch = qt.Text[i];
+            if (ch == ' ') continue;
+            var charBmp = _graphics.GetFontChar(f, ch);
+            if (charBmp == null) continue;
+
+            using var img = ToSkImage(charBmp);
+            c.DrawImage(img, new SKRect(0, 0, img.Width, img.Height),
+                SKRect.Create(i * f.CharWidth, 0, f.CharWidth, f.CharHeight), Sampling);
+        }
+
+        c.Restore();
+    }
+
+    private static void DrawSprite(SKCanvas c, AmosGraphics.SpriteRenderState sprite)
+    {
+        using var paint = new SKPaint
+        {
+            Color = SKColors.White.WithAlpha((byte)Math.Round(Math.Clamp(sprite.Alpha, 0f, 1f) * 255))
+        };
+
+        if (sprite.Effects.Count > 0)
+        {
+            // MED EFFEKTER: bilden har padding runt sig, ritas i naturlig storlek
+            var processedBmp = sprite.Sprite.GetEffectBitmap(sprite.BaseBitmap, sprite.Effects);
+            var pad = AmosGraphics.Sprite.GetTotalPadding(sprite.Effects);
+
+            using var img = ToSkImage(processedBmp);
+            DrawTransformed(c, img, sprite.X - pad.left, sprite.Y - pad.top, img.Width, img.Height,
+                sprite.Angle, sprite.ZoomX, sprite.ZoomY, paint);
+        }
+        else
+        {
+            // UTAN EFFEKT - sprite.X är VÄNSTER KANT, bilden skalas till spritens storlek
+            using var img = ToSkImage(sprite.BaseBitmap);
+            DrawTransformed(c, img, sprite.X, sprite.Y, sprite.Width, sprite.Height,
+                sprite.Angle, sprite.ZoomX, sprite.ZoomY, paint, img.Width / 2f, img.Height / 2f);
+        }
+    }
+
+    // Rita bilden i (x, y, w, h), roterad och zoomad runt pivot (standard: mitten av w/h)
+    private static void DrawTransformed(SKCanvas c, SKImage img, double x, double y, double w, double h,
+        double angle, double zoomX, double zoomY, SKPaint? paint, float? pivotX = null, float? pivotY = null)
+    {
+        float cX = pivotX ?? (float)(w / 2.0);
+        float cY = pivotY ?? (float)(h / 2.0);
+
+        c.Save();
+        c.Translate((float)x + cX, (float)y + cY);
+        c.RotateDegrees((float)angle);
+        c.Scale((float)zoomX, (float)zoomY);
+        c.Translate(-cX, -cY);
+        c.DrawImage(img, new SKRect(0, 0, img.Width, img.Height), new SKRect(0, 0, (float)w, (float)h), Sampling, paint);
+        c.Restore();
+    }
+
+    // Bytes i våra WriteableBitmaps ligger i plattformens ordning (PNG kopieras rakt in, PLOT skriver
+    // RGBA), oavsett vad PixelFormat säger. Den gamla vägen via RenderTargetBitmap visade dem så,
+    // så vi tolkar dem likadant. Sätts av AmosGpuView på UI-tråden innan första ritningen.
+    internal static SKColorType BitmapColorType = SKColorType.Bgra8888;
+
+    private static SKImage ToSkImage(WriteableBitmap bmp)
+    {
+        using var fb = bmp.Lock();
+        var info = new SKImageInfo(fb.Size.Width, fb.Size.Height, BitmapColorType, SKAlphaType.Premul);
+        return SKImage.FromPixelCopy(info, fb.Address, fb.RowBytes);
+    }
+
+    private SKRuntimeEffectUniforms CreateUniforms(SKRuntimeEffect effect)
+    {
+        var uniforms = new SKRuntimeEffectUniforms(effect);
+
+        if (effect.Uniforms.Contains("iResolution"))
+            uniforms.Add("iResolution", new[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
+
+        // Skärmens storlek separat från bildens storlek
+        if (effect.Uniforms.Contains("iScreenResolution"))
+            uniforms.Add("iScreenResolution", new[] { (float)Bounds.Width, (float)Bounds.Height });
+
+        if (effect.Uniforms.Contains("iTime"))
+            uniforms.Add("iTime", _layer.Timer);
+
+        if (effect.Uniforms.Contains("uParams"))
+        {
+            var values = _layer.ShaderValues;
+            float[] uParamData = new float[values.Length * 4]; // varje Vector4 = 4 floats
+            for (int i = 0; i < values.Length; i++)
+            {
+                uParamData[i * 4 + 0] = values[i].X;
+                uParamData[i * 4 + 1] = values[i].Y;
+                uParamData[i * 4 + 2] = values[i].Z;
+                uParamData[i * 4 + 3] = values[i].W;
+            }
+
+            uniforms.Add("uParams", uParamData);
+        }
+
+        // Säkerställ att uPositions och uHeights är exakt 50 element
+        if (effect.Uniforms.Contains("uPositions"))
+        {
+            float[] p50 = new float[50];
+            Array.Copy(_layer.ShaderParams, p50, Math.Min(_layer.ShaderParams.Length, 50));
+            uniforms.Add("uPositions", p50);
+        }
+
+        if (effect.Uniforms.Contains("uHeights"))
+        {
+            float[] h50 = new float[50];
+            Array.Copy(_layer.ShaderHeights, h50, Math.Min(_layer.ShaderHeights.Length, 50));
+            uniforms.Add("uHeights", h50);
+        }
+
+        if (effect.Uniforms.Contains("uColors"))
+        {
+            float[] cFrom = new float[50 * 4];
+            float[] cTo = new float[50 * 4];
+            int colorCount = Math.Min(50, Math.Min(_layer.ShaderColors.Length, _layer.ShaderColorsTo.Length));
+
+            // Slots utan färg blir svart transparent (nollor)
+            for (int i = 0; i < colorCount; i++)
+            {
+                var from = _layer.ShaderColors[i];
+                var to = _layer.ShaderColorsTo[i];
+                cFrom[i * 4 + 0] = from.Red / 255f;
+                cFrom[i * 4 + 1] = from.Green / 255f;
+                cFrom[i * 4 + 2] = from.Blue / 255f;
+                cFrom[i * 4 + 3] = from.Alpha / 255f;
+                cTo[i * 4 + 0] = to.Red / 255f;
+                cTo[i * 4 + 1] = to.Green / 255f;
+                cTo[i * 4 + 2] = to.Blue / 255f;
+                cTo[i * 4 + 3] = to.Alpha / 255f;
+            }
+
+            uniforms.Add("uColors", cFrom);
+            uniforms.Add("uColorsTo", cTo);
+        }
+
+        return uniforms;
     }
 }
 
 
 public sealed class AmosGpuView : Control
 {
-    private ScreenWindow? _screenWindow;
-
     public AmosGraphics Graphics { get; set; } = null!;
-    private RenderTargetBitmap? _framebuffer;
-    string RasterShaderCode = Shader.RasterShaderCode;
-    string RasterShaderCode2 = Shader.RasterShaderCode2;
-    string RasterShaderCode3 = Shader.RasterShaderCode3;
+    private static readonly string RasterShaderCode = Shader.RasterShaderCode;
+    private static bool _colorTypeDetected;
+
+    // Rita en röd pixel och se i vilken ordning plattformen lagrar den (RGBA på macOS, BGRA på Windows)
+    private static SKColorType DetectPlatformColorType()
+    {
+        using var rtb = new RenderTargetBitmap(new PixelSize(1, 1));
+        using (var c = rtb.CreateDrawingContext())
+            c.FillRectangle(Brushes.Red, new Rect(0, 0, 1, 1));
+
+        var px = new byte[4];
+        unsafe
+        {
+            fixed (byte* p = px)
+                rtb.CopyPixels(new PixelRect(0, 0, 1, 1), (nint)p, px.Length, 4);
+        }
+
+        return px[0] == 255 ? SKColorType.Rgba8888 : SKColorType.Bgra8888;
+    }
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -210,361 +355,40 @@ public sealed class AmosGpuView : Control
         return new Size(640, 480);
     }
 
-    private void EnsureFramebuffer(int w, int h)
-    {
-        if (_framebuffer != null &&
-            _framebuffer.PixelSize.Width == w &&
-            _framebuffer.PixelSize.Height == h)
-            return;
-
-        _framebuffer = new RenderTargetBitmap(
-            new PixelSize(w, h),
-            new Vector(96, 96)); // upplösning 96 DPI
-    }
-
     public override void Render(DrawingContext ctx)
     {
         if (Graphics == null) return;
 
-        EnsureFramebuffer(Graphics.Width, Graphics.Height);
-
-        using (var fbCtx = _framebuffer!.CreateDrawingContext())
+        if (!_colorTypeDetected)
         {
-            List<GpuLayer> layersCopy;
-            List<AmosGraphics.QueuedFontText> fontTextsCopy;
-            List<AmosGraphics.SpriteRenderState> spritesCopy;
-
-            lock (Graphics.LockObject)
-            {
-                var amosRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
-                fbCtx.DrawRectangle(Brushes.Transparent, null, amosRect);
-
-                layersCopy = new List<GpuLayer>(Graphics.ActiveFrame);
-                fontTextsCopy = Graphics.GetQueuedTexts().ToList();
-                spritesCopy = Graphics.GetSpriteRenderStates();
-            }
-
-            // RITA GPU-LAGER MED SHADER
-            foreach (var layer in layersCopy)
-            {
-                if (layer.Bitmap == null) continue;
-                if (!layer.Visible) continue;
-                var bmpSize = layer.Bitmap.Size;
-                var offset = layer.Offset;
-
-                int w = (int)bmpSize.Width;
-                int h = (int)bmpSize.Height;
-
-                // Skapa CompositeBitmap om den saknas
-                if (layer.CompositeBitmap == null ||
-                    layer.CompositeBitmap.PixelSize != layer.Bitmap.PixelSize)
-                {
-                    layer.CompositeBitmap = new WriteableBitmap(
-                        layer.Bitmap.PixelSize,
-                        new Vector(96, 96),
-                        PixelFormat.Bgra8888,
-                        AlphaFormat.Premul);
-                }
-
-                if (layer.SkSlCode is null)
-                    layer.SkSlCode = RasterShaderCode;
-                // Skapa en RenderTargetBitmap och rita allt dit via Avalonia
-                var compositeRtb = new RenderTargetBitmap(
-                    layer.Bitmap.PixelSize,
-                    new Vector(96, 96));
-
-                using (var compCtx = compositeRtb.CreateDrawingContext())
-                {
-                    var bmpSize2 = layer.Bitmap.Size;
-
-                    // Rita layer.Bitmap (bakgrund, tiles, PLOT/LINE)
-                    compCtx.DrawImage(layer.Bitmap, new Rect(bmpSize2), new Rect(bmpSize2));
-
-                    int layerIndex = layersCopy.IndexOf(layer);
-
-                    // Rita font-texter
-                    foreach (var qt in fontTextsCopy)
-                    {
-                        var f = Graphics.GetFont(qt.FontId);
-                        if (f == null) continue;
-                        if (qt.Layer != -1 && qt.Layer != layerIndex) continue;
-
-                        var textEffects = qt.GetEffects(Graphics);
-                        if (textEffects.Count > 0)
-                        {
-                            // ✅ MED EFFEKTER: Använd processed bitmap
-                            var processedBmp = qt.GetProcessedBitmap(Graphics, textEffects);
-                            if (processedBmp == null) continue;
-
-                            var totalPadding = qt.GetTotalPadding(textEffects);
-                            double drawX = qt.X - totalPadding.left;
-                            double drawY = qt.Y - totalPadding.top;
-
-                            // ✅ NYTT: Applicera rotation/zoom VIA TRANSFORM
-                            if (qt.Angle != 0 || qt.ZoomX != 1.0 || qt.ZoomY != 1.0)
-                            {
-                                double cX = processedBmp.Size.Width / 2.0;
-                                double cY = processedBmp.Size.Height / 2.0;
-                                double angleRad = qt.Angle * Math.PI / 180.0;
-
-                                var transform =
-                                    Matrix.CreateTranslation(-cX, -cY)
-                                    * Matrix.CreateScale(qt.ZoomX, qt.ZoomY)
-                                    * Matrix.CreateRotation(angleRad)
-                                    * Matrix.CreateTranslation(drawX + cX, drawY + cY);
-
-                                using (compCtx.PushPostTransform(transform))
-                                {
-                                    compCtx.DrawImage(
-                                        processedBmp,
-                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height),
-                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height));
-                                }
-                            }
-                            else
-                            {
-                                // Ingen rotation/zoom - rita direkt
-                                compCtx.DrawImage(
-                                    processedBmp,
-                                    new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height),
-                                    new Rect(drawX, drawY, processedBmp.Size.Width, processedBmp.Size.Height));
-                            }
-                        }
-                        else
-                        {
-                            // ✅ UTAN EFFEKTER: Rita som vanligt med rotation/zoom
-                            double totalW = qt.Text.Length * f.CharWidth;
-                            double cX = totalW / 2.0;
-                            double cY = f.CharHeight / 2.0;
-                            double angleRad = qt.Angle * Math.PI / 180.0;
-
-                            for (int i = 0; i < qt.Text.Length; i++)
-                            {
-                                char c = qt.Text[i];
-                                if (c == ' ') continue;
-                                var charBmp = Graphics.GetFontChar(f, c);
-                                if (charBmp == null) continue;
-
-                                var transform =
-                                    Matrix.CreateTranslation(i * f.CharWidth, 0)
-                                    * Matrix.CreateTranslation(-cX, -cY)
-                                    * Matrix.CreateScale(qt.ZoomX, qt.ZoomY)
-                                    * Matrix.CreateRotation(angleRad)
-                                    * Matrix.CreateTranslation(cX + qt.X, cY + qt.Y);
-
-                                using (compCtx.PushPostTransform(transform))
-                                    compCtx.DrawImage(charBmp, new Rect(charBmp.Size),
-                                        new Rect(0, 0, f.CharWidth, f.CharHeight));
-                            }
-                        }
-                    }
-
-                    // Print sprites
-                    foreach (var sprite in spritesCopy)
-                    {
-                        if (sprite.Layer != -1 && sprite.Layer != layerIndex) continue;
-
-                        if (sprite.Effects.Count > 0)
-                        {
-                            var processedBmp = sprite.Sprite.GetEffectBitmap(sprite.BaseBitmap, sprite.Effects);
-                            var totalPadding = AmosGraphics.Sprite.GetTotalPadding(sprite.Effects);
-
-                            double drawX = sprite.X - totalPadding.left;
-                            double drawY = sprite.Y - totalPadding.top;
-
-                            // ✅ NYTT: Applicera rotation/zoom VIA TRANSFORM
-                            if (sprite.Angle != 0 || sprite.ZoomX != 1.0 || sprite.ZoomY != 1.0)
-                            {
-                                double cX = processedBmp.Size.Width / 2.0;
-                                double cY = processedBmp.Size.Height / 2.0;
-                                double angleRad = sprite.Angle * Math.PI / 180.0;
-
-                                var transform =
-                                    Matrix.CreateTranslation(-cX, -cY)
-                                    * Matrix.CreateScale(sprite.ZoomX, sprite.ZoomY)
-                                    * Matrix.CreateRotation(angleRad)
-                                    * Matrix.CreateTranslation(drawX + cX, drawY + cY);
-
-                                using (compCtx.PushPostTransform(transform))
-                                using (compCtx.PushOpacity(sprite.Alpha))
-                                {
-                                    compCtx.DrawImage(
-                                        processedBmp,
-                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height),
-                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height));
-                                }
-                            }
-                            else
-                            {
-                                // Ingen rotation/zoom
-                                using (compCtx.PushOpacity(sprite.Alpha))
-                                {
-                                    compCtx.DrawImage(
-                                        processedBmp,
-                                        new Rect(0, 0, processedBmp.Size.Width, processedBmp.Size.Height),
-                                        new Rect(drawX, drawY, processedBmp.Size.Width, processedBmp.Size.Height));
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // ✅ UTAN EFFEKT - sprite.X är VÄNSTER KANT
-                            var baseBmp = sprite.BaseBitmap;
-                            double cX = baseBmp.Size.Width / 2.0;
-                            double cY = baseBmp.Size.Height / 2.0;
-                            double angleRad = sprite.Angle * Math.PI / 180.0;
-
-                            var transform =
-                                Matrix.CreateTranslation(-cX, -cY)
-                                * Matrix.CreateScale(sprite.ZoomX, sprite.ZoomY)
-                                * Matrix.CreateRotation(angleRad)
-                                * Matrix.CreateTranslation(cX + sprite.X, cY + sprite.Y);
-
-                            using (compCtx.PushPostTransform(transform))
-                            using (compCtx.PushOpacity(sprite.Alpha))
-                                compCtx.DrawImage(baseBmp, new Rect(baseBmp.Size),
-                                    new Rect(0, 0, sprite.Width, sprite.Height));
-                        }
-                    }
-
-                    // Kopiera RenderTargetBitmap → CompositeBitmap
-                    var pixels = new byte[
-                        layer.CompositeBitmap.PixelSize.Width *
-                        layer.CompositeBitmap.PixelSize.Height * 4];
-
-                    unsafe
-                    {
-                        fixed (byte* p = pixels)
-                        {
-                            compositeRtb.CopyPixels(
-                                new PixelRect(layer.CompositeBitmap.PixelSize),
-                                (nint)p,
-                                pixels.Length,
-                                layer.CompositeBitmap.PixelSize.Width * 4);
-
-                            // ✅ APPLICERA OPACITY PÅ VARJE PIXEL (endast om opacity < 1.0)
-                            float opacity = (float)layer.Opacity;
-                            if (opacity < 0.999f) // Optimera - skippa om nästan helt synlig
-                            {
-                                int pixelCount = layer.CompositeBitmap.PixelSize.Width *
-                                                 layer.CompositeBitmap.PixelSize.Height;
-
-                                for (int i = 0; i < pixelCount; i++)
-                                {
-                                    int idx = i * 4;
-                                    // BGRA format: [B][G][R][A]
-
-                                    // FADE BÅDE FÄRG OCH ALPHA för mjuk övergång från svart
-                                    byte b = p[idx + 0];
-                                    byte g = p[idx + 1];
-                                    byte r = p[idx + 2];
-                                    byte a = p[idx + 3];
-
-                                    // Dämpa RGB proportionellt (fade mot svart)
-                                    p[idx + 0] = (byte)(b * opacity);
-                                    p[idx + 1] = (byte)(g * opacity);
-                                    p[idx + 2] = (byte)(r * opacity);
-                                    p[idx + 3] = (byte)(a * opacity);
-                                }
-                            }
-                            // Om opacity >= 0.999, gör INGENTING - använd pixlarna som de är
-                        }
-                    }
-
-                    using (var fb = layer.CompositeBitmap.Lock())
-                        System.Runtime.InteropServices.Marshal.Copy(
-                            pixels, 0, fb.Address, pixels.Length);
-
-                    var screenRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
-                    var drawOp = new ShaderDrawOperation(screenRect, layer, screenRect);
-                    ctx.Custom(drawOp); // Opacity redan applicerad på pixlarna
-                }
-            }
-
-            // Rita framebuffer till skärmen
-            ctx.DrawImage(
-                _framebuffer!,
-                new Rect(_framebuffer.Size),
-                new Rect(0, 0, Bounds.Width, Bounds.Height));
-        }
-    }
-
-
-    public class SpriteShaderDrawOperation : ICustomDrawOperation
-    {
-        private readonly Rect _bounds;
-        private readonly WriteableBitmap _input;
-        private readonly SpriteEffect _effect;
-        private readonly double _offsetX;
-        private readonly double _offsetY;
-
-        public SpriteShaderDrawOperation(
-            Rect bounds,
-            WriteableBitmap input,
-            SpriteEffect effect,
-            double offsetX,
-            double offsetY)
-        {
-            _bounds = bounds;
-            _input = input;
-            _effect = effect;
-            _offsetX = offsetX;
-            _offsetY = offsetY;
+            LayerDrawOperation.BitmapColorType = DetectPlatformColorType();
+            _colorTypeDetected = true;
         }
 
-        public Rect Bounds => _bounds;
+        List<GpuLayer> layersCopy;
+        List<AmosGraphics.QueuedFontText> fontTextsCopy;
+        List<AmosGraphics.SpriteRenderState> spritesCopy;
 
-        public void Dispose()
+        lock (Graphics.LockObject)
         {
+            layersCopy = new List<GpuLayer>(Graphics.ActiveFrame);
+            fontTextsCopy = Graphics.GetQueuedTexts().ToList();
+            spritesCopy = Graphics.GetSpriteRenderStates();
         }
 
-        public bool Equals(ICustomDrawOperation? other) => false;
-        public bool HitTest(Point p) => false;
+        var screenRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
 
-        public void Render(ImmediateDrawingContext context)
+        // Ett draw-anrop per lager; själva ritningen sker på render-tråden i LayerDrawOperation
+        for (int layerIndex = 0; layerIndex < layersCopy.Count; layerIndex++)
         {
-            var lease = context.TryGetFeature<ISkiaSharpApiLeaseFeature>();
-            if (lease == null) return;
+            var layer = layersCopy[layerIndex];
+            if (layer.Bitmap == null || !layer.Visible) continue;
 
-            try
-            {
-                using var skia = lease.Lease();
-                var canvas = skia.SkCanvas;
+            layer.SkSlCode ??= RasterShaderCode;
 
-                using var fb = _input.Lock();
-                var info = new SKImageInfo(
-                    _input.PixelSize.Width,
-                    _input.PixelSize.Height,
-                    SKColorType.Bgra8888,
-                    SKAlphaType.Premul);
-
-                using var skBitmap = new SKBitmap();
-                skBitmap.InstallPixels(info, fb.Address, fb.RowBytes);
-                using var image = SKImage.FromBitmap(skBitmap);
-
-                var paint = _effect.GetShaderPaint(_input, image);
-
-                if (paint != null)
-                {
-                    try
-                    {
-                        canvas.Save();
-                        canvas.Translate((float)_offsetX, (float)_offsetY);
-                        canvas.DrawRect(
-                            new SKRect(0, 0, (float)_bounds.Width, (float)_bounds.Height),
-                            paint);
-                        canvas.Restore();
-                    }
-                    finally
-                    {
-                        paint.Dispose();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"   ❌ Render error: {ex.Message}");
-            }
+            var texts = fontTextsCopy.Where(qt => qt.Layer == -1 || qt.Layer == layerIndex).ToList();
+            var sprites = spritesCopy.Where(s => s.Layer == -1 || s.Layer == layerIndex).ToList();
+            ctx.Custom(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites));
         }
     }
 }
@@ -888,7 +712,7 @@ public sealed class AmosGraphics
         public int EffectsVersion;
 
         // Text + statiska effekter (BLUR/COLOR) per textsträng, så de inte räknas om varje frame.
-        // Används bara från UI-tråden (AmosGpuView.Render).
+        // Används bara från render-tråden (LayerDrawOperation).
         public Dictionary<string, WriteableBitmap> StaticCache { get; } = new();
         public int StaticCacheVersion = -1;
     }
@@ -1406,7 +1230,7 @@ public sealed class AmosGraphics
             return Frames.Count > 0 ? Frames[Math.Clamp(CurrentFrame, 0, Frames.Count - 1)] : null;
         }
 
-// Kör effektkedjan. Anropas BARA från UI-tråden (AmosGpuView.Render), som äger cache-fälten.
+// Kör effektkedjan. Anropas BARA från render-tråden (LayerDrawOperation), som äger cache-fälten.
 public WriteableBitmap GetEffectBitmap(WriteableBitmap baseBitmap, List<SpriteEffect> allEffects)
 {
     // Rotation/zoom görs INTE här - det sköts av AmosGpuView.Render med en transform
