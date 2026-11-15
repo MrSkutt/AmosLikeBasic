@@ -288,6 +288,26 @@ En trackerlåt använder syntens kanal 1 – 4. Kanal 5 – 8 är lediga för `P
 
 Projektet `Projects/trackerdemo.amosproj` spelar Skogsvisa, samma låt som i Skogshopp men skriven för trackern.
 
+### Trackern i utvecklingsmiljön
+
+Knappen **TRACKER** öppnar ett fönster där du skriver låtarna. I mitten är mönstret med de fyra kanalerna, till vänster ordningslistan och till höger instrumenten.
+
+**Skriva noter.** Tangentbordet fungerar som ett piano, som i ProTracker. Den nedre bokstavsraden (`Z S X D C V G B H N J M`) är en oktav och den övre (`Q 2 W 3 E R 5 T 6 Y 7 U I`) nästa. Noten får instrumentet som är valt i listan, och du hör den medan du håller in tangenten. `1` släpper tonen (`===`). Efter varje not flyttas markören ned så många rader som **Step** säger. **Octave** väljer vilken oktav pianot börjar på, och `F1` och `F2` byter oktav.
+
+**Instrument och effekter.** Med pilarna går markören till instrument- och effektkolumnerna. Där skriver du siffror och bokstäver direkt: `0`–`9` och `A`–`F` för hexsiffror, och i effektens första kolumn även `G`, `H` och `I`. `Delete` eller `Backspace` tömmer det markören står på.
+
+**Spela.** `F5` spelar låten från platsen som är vald i ordningslistan. `F6` spelar mönstret om och om igen, `F7` spelar mönstret från markörens rad och `Esc` stoppar. Med **Follow** följer mönstret med när låten spelar. Klicka på en kanalrubrik för att tysta kanalen, och högerklicka för att bara höra den kanalen.
+
+**Edit.** `Space` slår av och på edit-läget. När det är av kan du spela på pianotangenterna utan att något skrivs i mönstret, till exempel för att prova ett instrument. Markörraden är röd när edit är på. Spelar låten stoppar `Space` den i stället.
+
+**Markera och ändra.** Håll in `Shift` och flytta markören, eller dra med musen, för att markera ett block. `Cmd+C`, `Cmd+X` och `Cmd+V` kopierar, klipper ut och klistrar in (`Ctrl` på Windows). `Cmd+↑` och `Cmd+↓` flyttar noterna en halvton, med `Shift` en oktav. `Cmd+I` (eller `Insert`) skjuter in en tom rad och `Cmd+Backspace` tar bort raden, i markörens kanal eller med `Shift` i alla kanaler. `Cmd+Z` ångrar och `Cmd+Shift+Z` gör om.
+
+**Ordningslistan.** **INS** lägger till en plats efter den valda, **DEL** tar bort den. **PAT -** och **PAT +** byter vilket mönster platsen spelar; efter det sista mönstret gör **PAT +** ett nytt tomt. **CLONE PATTERN** kopierar mönstret till ett nytt, så att du kan göra en variant utan att ändra originalet. **Rows** är hur många rader mönstret har.
+
+**Instrumentpanelen.** Allt du ändrar hörs direkt, även medan låten spelar. Tabellen skrivs med ett steg per rad, och rutan blir röd om ett steg är fel. En ny låt har sex färdiga instrument att börja med: melodi, bas, ackord, bastrumma, virvel och hihat.
+
+**Spara.** **SAVE** sparar låten som en `.amostrk`-fil, helst i `Sound/Tracker` i projektmappen. Statusraden visar sedan raden som laddar låten, till exempel `TRACK LOAD "Sound/Tracker/minlat.amostrk"`. Exporterar du spelet följer filen med, eftersom namnet står inom citattecken i programmet.
+
 ### Hur en låt är uppbyggd
 
 En låt består av tre delar:

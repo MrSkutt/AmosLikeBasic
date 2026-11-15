@@ -84,6 +84,32 @@ Trumljud på en kanal med `PLAY WAVE kanal, "Drums"`:
 | `F12` | spelfönstret i helskärm eller fönster |
 | `PgUp`, `PgDown` | bläddrar en sida i editorn |
 
+## Tangenter i trackern
+
+| Tangent | Gör |
+|---|---|
+| `Z S X D C V G B H N J M` | noter, en oktav |
+| `Q 2 W 3 E R 5 T 6 Y 7 U I` | noter, oktaven över |
+| `1` | släpp tonen (`===`) |
+| `0`–`9`, `A`–`F` | hexsiffror i instrument- och effektkolumnerna |
+| `Delete`, `Backspace` | tömmer det markören står på, eller markeringen |
+| `Space` | edit-läget på eller av; stoppar om låten spelar |
+| `F1`, `F2` | oktav ned eller upp |
+| `F5` | spela låten från vald plats i ordningslistan |
+| `F6`, `F7` | spela mönstret från början eller från markören |
+| `Esc` | stoppa |
+| `Tab`, `Shift+Tab` | nästa eller förra kanal |
+| `PgUp`, `PgDown`, `Home`, `End` | 16 rader upp eller ned, första eller sista raden |
+| `Shift` + pilar | markera |
+| `Cmd+C`, `Cmd+X`, `Cmd+V` | kopiera, klipp ut, klistra in |
+| `Cmd+A` | markera hela mönstret |
+| `Cmd+↑`, `Cmd+↓` | flytta noterna en halvton (med `Shift` en oktav) |
+| `Cmd+I`, `Cmd+Backspace` | skjut in eller ta bort en rad (med `Shift` i alla kanaler); `Insert` fungerar också |
+| `Cmd+Z`, `Cmd+Shift+Z` | ångra, gör om |
+| `Cmd+S` | spara |
+
+På Windows är `Cmd` i stället `Ctrl`.
+
 ## Vanliga fallgropar
 
 **`&` och `+` är lika starka.** `"Summa: " & 2 + 3` blir `Summa: 23`. Sätt parentes: `"Summa: " & (2 + 3)`.

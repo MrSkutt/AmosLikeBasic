@@ -35,6 +35,7 @@ När du startar AMOS Like Basic ser du editorn, där du skriver programmet. Öve
 | **PAUSE** / **STEP** | Pausar programmet och kör det sedan en rad i taget. Bra för att hitta fel. |
 | **SPRITES** | Öppnar sprite-editorn, där du ritar figurer pixel för pixel. |
 | **MAP** | Öppnar karteditorn, där du bygger banor av tiles. |
+| **TRACKER** | Öppnar trackern, där du skriver musik i mönster med noter och effekter. |
 | **LOAD** / **SAVE** | Öppnar och sparar projekt (filer som slutar på `.amosproj`). |
 
 Klickar du i marginalen till vänster om en rad sätter du en **brytpunkt**. Programmet stannar då när det kommer till den raden, och du kan se värdet på alla variabler i variabelrutan (tryck **F1** för att visa eller dölja den).

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
@@ -69,6 +70,7 @@ namespace AmosLikeBasic
         private sealed class TrackChannel
         {
             public TrackInstrument? Inst;
+            public int InstNumber;         // för att hitta instrumentet igen när låten uppdateras
             public bool Active;
             public double Note;            // halvtoner, MIDI-skala, kan vara bråkdel under glidning
             public double PortaTarget;
@@ -97,6 +99,10 @@ namespace AmosLikeBasic
         private static int _trackJumpOrder, _trackBreakRow;
         private static int _trackPosOrder, _trackPosRow;
         private static double _trackVolume = 1.0;
+        private static bool _trackPreview;   // editorn provspelar noter utan att en låt spelar
+
+        // Ändringar från editorn som ljudtråden gör vid nästa sampel
+        private static readonly ConcurrentQueue<Action> _trackCommands = new();
         private static readonly bool[] _trackMute = new bool[TrackerSong.ChannelCount];
 
         // ════════════════════════════════════════════════════════════════
@@ -110,6 +116,66 @@ namespace AmosLikeBasic
             order = Math.Clamp(order, 0, data.Order.Length - 1);
             Volatile.Write(ref _trackPending, new TrackRequest(data, order, Math.Max(0, row), loop));
             EnsureStarted();
+        }
+
+        // Spelar ett enda mönster om och om igen, för editorn
+        public static void TrackPlayPattern(TrackerSong song, int pattern, int row = 0)
+        {
+            var data = CompileSong(song, pattern);
+            Volatile.Write(ref _trackPending, new TrackRequest(data, 0, Math.Max(0, row), true));
+            EnsureStarted();
+        }
+
+        // Byter till en ändrad version av låten utan att börja om. Med pattern spelas bara det mönstret.
+        public static void TrackUpdate(TrackerSong song, int? pattern = null)
+        {
+            var data = CompileSong(song, pattern);
+            _trackCommands.Enqueue(() => ApplyTrackUpdate(data));
+        }
+
+        // Provspelar en not med ett instrument (från 1) på en kanal (1 – 4), tills TrackPreviewRelease
+        public static void TrackPreview(TrackerSong song, int instrument, int note, int channel)
+        {
+            if (channel < 1 || channel > TrackerSong.ChannelCount) return;
+            var inst = instrument >= 1 && instrument <= song.Instruments.Count
+                ? CompileInstrument(song.Instruments[instrument - 1], instrument) : DefaultInstrument;
+            int tempo = Math.Clamp(song.Tempo, 32, 255);
+            _trackCommands.Enqueue(() =>
+            {
+                int c = channel - 1;
+                var ch = _trackChannels[c];
+                if (_track == null)
+                {
+                    _trackPreview = true;
+                    _trackTempo = tempo;
+                    _trackTick = 0;
+                }
+                ch.Inst = inst;
+                ch.InstNumber = instrument;
+                ch.Vol = 64;
+                ch.Effect = '\0';
+                ch.Cutoff = ch.Resonance = ch.PulseWidth = null;
+                TriggerTrackNote(c, note);
+            });
+            EnsureStarted();
+        }
+
+        public static void TrackPreviewRelease(int channel)
+        {
+            if (channel < 1 || channel > TrackerSong.ChannelCount) return;
+            _trackCommands.Enqueue(() => ReleaseTrackVoice(channel - 1));
+        }
+
+        // Släpper kanalerna efter provspelning, så att PLAY-kommandona får dem igen
+        public static void TrackPreviewStop()
+        {
+            _trackCommands.Enqueue(() =>
+            {
+                if (!_trackPreview) return;
+                _trackPreview = false;
+                for (int c = 0; c < TrackerSong.ChannelCount; c++) _trackChannels[c].Active = false;
+                ReleaseTrackVoices();
+            });
         }
 
         public static void TrackStop()
@@ -140,13 +206,15 @@ namespace AmosLikeBasic
         //  Bygga låten
         // ════════════════════════════════════════════════════════════════
 
-        private static TrackData CompileSong(TrackerSong song)
+        // Med onlyPattern blir ordningslistan bara det mönstret
+        private static TrackData CompileSong(TrackerSong song, int? onlyPattern = null)
         {
             var data = new TrackData
             {
                 Speed = Math.Clamp(song.Speed, 1, 31),
                 Tempo = Math.Clamp(song.Tempo, 32, 255),
-                Order = song.Order.Count > 0 ? song.Order.ToArray() : new[] { 0 },
+                Order = onlyPattern != null ? new[] { onlyPattern.Value }
+                    : song.Order.Count > 0 ? song.Order.ToArray() : new[] { 0 },
                 Patterns = new TrackerCell[song.Patterns.Count][][],
                 Instruments = new TrackInstrument[song.Instruments.Count]
             };
@@ -171,6 +239,10 @@ namespace AmosLikeBasic
                 data.Instruments[i] = CompileInstrument(song.Instruments[i], i + 1);
             return data;
         }
+
+        // Ger FormatException om instrumentet har ett felaktigt tabellsteg
+        public static void ValidateInstrument(TrackerInstrument instrument, int number) =>
+            CompileInstrument(instrument, number);
 
         private static TrackInstrument CompileInstrument(TrackerInstrument src, int number)
         {
@@ -239,7 +311,8 @@ namespace AmosLikeBasic
                 Interlocked.CompareExchange(ref _trackPending, null, req);
                 StartTrack(req);
             }
-            if (_track == null) return;
+            while (_trackCommands.TryDequeue(out var cmd)) cmd();
+            if (_track == null && !_trackPreview) return;
 
             _trackTickLeft--;
             if (_trackTickLeft > 0) return;
@@ -265,6 +338,7 @@ namespace AmosLikeBasic
                 if (v.Stage != EnvStage.Idle) v.Stage = EnvStage.Release;
                 var ch = _trackChannels[c];
                 ch.Inst = null;
+                ch.InstNumber = 0;
                 ch.Active = false;
                 ch.Vol = 64;
                 ch.Effect = '\0';
@@ -273,6 +347,7 @@ namespace AmosLikeBasic
                 ch.Cutoff = ch.Resonance = ch.PulseWidth = null;
             }
 
+            _trackPreview = false;
             _trackLoop = req.Loop;
             _trackSpeed = req.Data.Speed;
             _trackTempo = req.Data.Tempo;
@@ -282,6 +357,24 @@ namespace AmosLikeBasic
             _trackTickLeft = 0;
             _trackJump = false;
             Volatile.Write(ref _track, req.Data);
+        }
+
+        private static void ApplyTrackUpdate(TrackData data)
+        {
+            var old = _track;
+            if (old == null) return;
+            if (data.Speed != old.Speed) _trackSpeed = data.Speed;
+            if (data.Tempo != old.Tempo) _trackTempo = data.Tempo;
+            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            {
+                var ch = _trackChannels[c];
+                if (ch.InstNumber > 0)
+                    ch.Inst = ch.InstNumber <= data.Instruments.Length ? data.Instruments[ch.InstNumber - 1] : DefaultInstrument;
+            }
+            if (_trackOrder >= data.Order.Length) _trackOrder = 0;
+            if (_trackRow >= data.Patterns[data.Order[_trackOrder]].Length) _trackRow = 0;
+            if (_trackJump && _trackJumpOrder >= data.Order.Length) _trackJumpOrder = 0;
+            Volatile.Write(ref _track, data);
         }
 
         private static void ReleaseTrackVoices()
@@ -295,7 +388,13 @@ namespace AmosLikeBasic
 
         private static void TrackTick()
         {
-            var d = _track!;
+            var d = _track;
+            if (d == null)
+            {
+                // Bara provspelning: instrumentens tabeller ska gå ändå
+                for (int c = 0; c < TrackerSong.ChannelCount; c++) UpdateTrackVoice(c);
+                return;
+            }
             if (_trackTick == 0) ReadRow(d);
             else
                 for (int c = 0; c < TrackerSong.ChannelCount; c++) TickEffects(c);
@@ -331,6 +430,7 @@ namespace AmosLikeBasic
                     var inst = cell.Instrument <= d.Instruments.Length ? d.Instruments[cell.Instrument - 1] : DefaultInstrument;
                     if (inst != ch.Inst) ch.Cutoff = ch.Resonance = ch.PulseWidth = null;
                     ch.Inst = inst;
+                    ch.InstNumber = cell.Instrument;
                     ch.Vol = 64;
                 }
 

@@ -997,6 +997,21 @@ public partial class MainWindow : Window
         win.Show();
     }
 
+    // Bara ett trackerfönster åt gången, eftersom de delar syntens kanaler
+    private TrackerWindow? _trackerWindow;
+
+    private void TrackerButton_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_trackerWindow != null)
+        {
+            _trackerWindow.Activate();
+            return;
+        }
+        _trackerWindow = new TrackerWindow();
+        _trackerWindow.Closed += (_, _) => _trackerWindow = null;
+        _trackerWindow.Show();
+    }
+
     private void ToggleConsole_OnClick(object? sender, RoutedEventArgs e)
     {
         LogBox.Clear();

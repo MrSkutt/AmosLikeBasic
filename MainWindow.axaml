@@ -82,6 +82,7 @@
                 <Separator Background="#7FB2FF" Width="2"/>
                 <Button x:Name="SpriteButton" Classes="amos-button" Content="SPRITES" Click="SpritesButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Button x:Name="MapButton" Classes="amos-button" Content="MAP" Click="MapButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
+                <Button x:Name="TrackerButton" Classes="amos-button" Content="TRACKER" Click="TrackerButton_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
                 <Separator Background="#7FB2FF" Width="2"/>
                 <Button x:Name="ClearLogs" Classes="amos-button" Content="CLEAR LOGS" Click="ToggleConsole_OnClick" Background="#0A2D8F" Foreground="White" Focusable="False"/>
             </StackPanel>

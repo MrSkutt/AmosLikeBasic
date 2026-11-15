@@ -232,6 +232,7 @@ namespace AmosLikeBasic
             _bpm = 120;
             _trackVolume = 1.0;
             Array.Clear(_trackMute);
+            TrackPreviewStop();
         }
 
         public static void SetWave(int channel, string wave)
