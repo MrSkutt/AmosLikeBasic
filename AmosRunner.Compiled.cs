@@ -14,8 +14,8 @@ namespace AmosLikeBasic;
 // ParseFactor) och använder samma Tokenizer, så resultaten blir desamma.
 //
 // Inbyggda funktioner (SIN, MID$, KEYSTATE ...) körs fortfarande av den gamla tolken,
-// men bara på själva anropet. Den gamla tolken (EvalValueInterpreted/
-// EvalConditionInterpreted) finns kvar och används också för att jämföra i tester.
+// men bara på själva anropet. Den gamla uttryckstolken (EvalValueInterpreted) finns kvar
+// som reserv för uttryck som kompilatorn inte förstår.
 public static partial class AmosRunner
 {
     // Det en nod behöver för att räknas ut
@@ -625,7 +625,7 @@ public static partial class AmosRunner
 
     private static readonly string[] CompareOps = { "<>", "<=", ">=", "=", "<", ">" };
 
-    // Samma uppdelning som EvalConditionInterpreted: OR, sedan AND, sedan NOT, sedan jämförelse
+    // Villkor delas upp i OR, sedan AND, sedan NOT, sedan jämförelse
     private static CondNode CompileCondition(string c)
     {
         c = StripOuterParens(c.Trim());

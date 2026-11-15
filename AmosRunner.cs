@@ -3964,50 +3964,6 @@ public static partial class AmosRunner
         res.Add(l[s..].Trim()); return res;
     }
     
-    // Den ursprungliga villkorstolken (se CompileCondition i AmosRunner.Compiled.cs)
-    private static bool EvalConditionInterpreted(string c, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
-    {
-        c = StripOuterParens(c.Trim());
-
-        // 1. Hantera OR (Lägst prioritet, kollas först). Bara utanför parenteser och strängar,
-        //    så att t.ex. (A=1 OR B=1) AND C=1 fungerar.
-        var orIdx = TopLevelIndexOf(c, "OR", isWord: true);
-        if (orIdx >= 0) {
-            return EvalConditionInterpreted(c[..orIdx], v, ln, gk, ikd, g) || 
-                   EvalConditionInterpreted(c[(orIdx + 2)..], v, ln, gk, ikd, g);
-        }
-
-        // 2. Hantera AND
-        var andIdx = TopLevelIndexOf(c, "AND", isWord: true);
-        if (andIdx >= 0) {
-            return EvalConditionInterpreted(c[..andIdx], v, ln, gk, ikd, g) && 
-                   EvalConditionInterpreted(c[(andIdx + 3)..], v, ln, gk, ikd, g);
-        }
-
-        // NOT (binder hårdare än AND/OR)
-        if (c.StartsWith("NOT ", StringComparison.OrdinalIgnoreCase) ||
-            c.StartsWith("NOT(", StringComparison.OrdinalIgnoreCase))
-        {
-            return !EvalConditionInterpreted(c.Substring(3), v, ln, gk, ikd, g);
-        }
-
-        // 3. Jämförelser (=, <, >, etc.) på toppnivå
-        var ops = new[] { "<>", "<=", ">=", "=", "<", ">" };
-        if (ops.All(op => TopLevelIndexOf(c, op, isWord: false) < 0)) {
-            // Konvertera till double: allt utom exakt 0.0 räknas som sant
-            return Math.Abs(Convert.ToDouble(EvalValueInterpreted(c, v, ln, gk, ikd, g))) > 0.000001;
-        }
-
-        foreach (var op in ops) {
-            var i = TopLevelIndexOf(c, op, isWord: false); if (i < 0) continue;
-            var lV = EvalValueInterpreted(c[..i].Trim(), v, ln, gk, ikd, g); 
-            var rV = EvalValueInterpreted(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
-                
-            return CompareValues(op, lV, rV);
-        }
-        return false;
-    }
-
     private static string StripComments(string l) {
         bool q = false;
         for (int i = 0; i < l.Length; i++) {
