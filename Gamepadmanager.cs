@@ -97,7 +97,7 @@ public static class GamepadManager
         _pollThread = new Thread(PollLoop) { IsBackground = true, Name = "GamepadPollThread" };
         _pollThread.Start();
 
-        Debug.WriteLine("[GamepadManager] Initierad, tråd startad");
+        Debug.WriteLine("[GamepadManager] Initialised, thread started");
     }
 
     public static void Stop()
@@ -131,7 +131,7 @@ public static class GamepadManager
 
     private static void PollLoop()
     {
-        Debug.WriteLine("[GamepadManager.PollLoop] Tråd startad");
+        Debug.WriteLine("[GamepadManager.PollLoop] Thread started");
 
         int loopCount = 0;
 
@@ -192,7 +192,7 @@ public static class GamepadManager
             Thread.Sleep(16);
         }
 
-        Debug.WriteLine("[GamepadManager.PollLoop] Tråd avslutad");
+        Debug.WriteLine("[GamepadManager.PollLoop] Thread finished");
     }
 
     // ── BASIC API ───────────────────────────────────────────────
@@ -259,7 +259,7 @@ public static class GamepadManager
 
             SDL_GameControllerClose(_controllers[i]);
             _controllers[i] = IntPtr.Zero;
-            Debug.WriteLine($"[GamepadManager] Pad {i + 1} frånkopplad");
+            Debug.WriteLine($"[GamepadManager] Pad {i + 1} disconnected");
             break;
         }
 

@@ -1,15 +1,15 @@
-# Tiles och banor
+# Tiles and levels
 
-En spelbana i ett plattformsspel är ofta tusentals punkter bred. Att rita den som en enda bild vore opraktiskt. I stället byggs den av **tiles**: små fyrkantiga bitar, som gräs, sten och lådor, som läggs ut i ett rutnät. Rutnätet kallas en **karta** (*map*).
+A level in a platform game is often thousands of dots wide. Drawing it as a single image would be impractical. Instead it is built from **tiles**: small square pieces, such as grass, stone and crates, laid out in a grid. The grid is called a **map**.
 
-Ett tileset är en bild med alla bitar bredvid varandra, precis som en font. Bitarna numreras från 0, radvis från vänster.
+A tileset is an image with all the pieces next to each other, just like a font. The pieces are numbered from 0, row by row from the left.
 
-## Bygga en bana
+## Building a level
 
 ```basic
 SCREEN SELECT 1
 TILE MAP 40, 15
-TILE LOAD "Graphics/Skogshopp/tiles.png", 32, 32
+TILE LOAD "Graphics/ForestHop/tiles.png", 32, 32
 FOR X = 0 TO 39
   TILE SET X, 13, 0
   TILE SET X, 14, 1
@@ -20,36 +20,36 @@ TILE SET 12, 9, 3
 TILE DRAW 0, 0
 ```
 
-| Kommando | Gör |
+| Command | Does |
 |---|---|
-| `TILE MAP bredd, höjd` | skapar en tom karta, mätt i rutor, i det valda lagret |
-| `TILE LOAD "fil", bredd, höjd` | laddar tilesetet med rutornas storlek i punkter |
-| `TILE SET x, y, nummer` | lägger tile `nummer` på ruta x, y (–1 = tomt) |
-| `TILE DRAW x, y` | ritar ut hela kartan i lagret |
+| `TILE MAP width, height` | makes an empty map, measured in cells, in the selected layer |
+| `TILE LOAD "file", width, height` | loads the tileset with the cell size in dots |
+| `TILE SET x, y, number` | puts tile `number` in cell x, y (–1 = empty) |
+| `TILE DRAW x, y` | draws the whole map into the layer |
 
-`TILE MAP` gör lagret lika stort som hela kartan, här 40 × 32 = 1280 punkter brett. Det är bredare än skärmen, så du scrollar lagret för att se resten:
-
-```basic nocheck
-SCROLL 1, KAMERA_X, 0
-```
-
-> **Obs:** Använd tiles på 32 × 32 punkter. Funktionen `TILE()` nedan räknar alltid med den storleken.
-
-`TILE DRAW` ritar bara de rutor som har en tile och skriver inte över rutor som är tomma. Byter du en tile mot en annan, som när ett bonusblock blir tomt i Skogshopp, sätter du den nya och ritar om: `TILE SET X, Y, 4` och sedan `TILE DRAW 0, 0`.
-
-## Vad finns på en plats?
-
-`TILE(lager, x, y)` ger numret på den tile som finns på punkten x, y i banan, eller –1 om rutan är tom. Det är grunden för kollisioner i ett plattformsspel: står det en sten under fötterna, ska figuren inte falla.
+`TILE MAP` makes the layer as big as the whole map, here 40 × 32 = 1280 dots wide. That is wider than the screen, so you scroll the layer to see the rest:
 
 ```basic nocheck
-IF TILE(1, SPELARE_X + 16, SPELARE_Y + 32) >= 0 THEN STAR_PA_MARKEN = 1
+SCROLL 1, CAMERA_X, 0
 ```
 
-(Det första värdet, lagret, används inte än men måste finnas med.)
+> **Note:** Use tiles of 32 × 32 dots. The `TILE()` function below always assumes that size.
 
-## Karteditorn
+`TILE DRAW` only draws the cells that have a tile and does not paint over empty cells. If you change one tile for another, as when a bonus block becomes empty in Forest Hop, set the new one and draw again: `TILE SET X, Y, 4` and then `TILE DRAW 0, 0`.
 
-Knappen **MAP** i utvecklingsmiljön öppnar karteditorn, där du ritar banan med musen i stället för med `TILE SET`. Ladda ett tileset med **Load Tileset...**, välj tiles i paletten och klicka ut dem på kartan. Spara med **Save Map...**. Banan laddas sedan i ditt program med `MAP LOAD`:
+## What is at a place?
+
+`TILE(layer, x, y)` gives the number of the tile at the point x, y in the level, or –1 if the cell is empty. That is the basis of collisions in a platform game: if there is stone under the feet, the figure should not fall.
+
+```basic nocheck
+IF TILE(1, PLAYER_X + 16, PLAYER_Y + 32) >= 0 THEN ON_GROUND = 1
+```
+
+(The first value, the layer, is not used yet but must be there.)
+
+## The map editor
+
+The **MAP** button in the editor opens the map editor, where you draw the level with the mouse instead of with `TILE SET`. Load a tileset with **Load Tileset...**, choose tiles in the palette and click them onto the map. Save with **Save Map...**. The level is then loaded in your program with `MAP LOAD`:
 
 ```basic nocheck
 SCREEN SELECT 1
@@ -58,26 +58,26 @@ MAP LOAD "Graphics/test.amosmap"
 TILE DRAW 0, 0
 ```
 
-## Banor i DATA
+## Levels in DATA
 
-Ett annat sätt, som Skogshopp använder, är att rita banan med bokstäver i `DATA`-rader. Varje bokstav står för en tile:
+Another way, which Forest Hop uses, is to draw the level with letters in `DATA` lines. Each letter stands for a tile:
 
 ```basic
 SCREEN SELECT 1
 TILE MAP 20, 5
-TILE LOAD "Graphics/Skogshopp/tiles.png", 32, 32
-TECKEN$ = "GDBQ"
-RESTORE Bana
+TILE LOAD "Graphics/ForestHop/tiles.png", 32, 32
+CHARS$ = "GDBQ"
+RESTORE Level
 FOR Y = 0 TO 4
-  READ RAD$
+  READ ROW$
   FOR X = 0 TO 19
-    TILE SET X, Y, INSTR(TECKEN$, MID$(RAD$, X + 1, 1)) - 1
+    TILE SET X, Y, INSTR(CHARS$, MID$(ROW$, X + 1, 1)) - 1
   NEXT X
 NEXT Y
 TILE DRAW 0, 0
 END
 
-Bana:
+Level:
 DATA "...................."
 DATA "......QBQ..........."
 DATA "...................."
@@ -85,6 +85,6 @@ DATA "GGGGGGGGGG...GGGGGGG"
 DATA "DDDDDDDDDD...DDDDDDD"
 ```
 
-`INSTR` ger positionen för tecknet i `TECKEN$`, och `- 1` gör om den till tile-nummer: `G` blir 0 (gräs), `D` 1 (jord), `B` 2 (sten), `Q` 3 (bonusblock), och `.` som inte finns blir –1, alltså tomt. Det gör det lätt att se och ändra banan direkt i koden.
+`INSTR` gives the position of the character in `CHARS$`, and `- 1` turns it into a tile number: `G` becomes 0 (grass), `D` 1 (dirt), `B` 2 (stone), `Q` 3 (bonus block), and `.`, which is not there, becomes –1, so empty. That makes it easy to see and change the level right in the code.
 
-> **Prova själv:** Lägg till en rad med `B` som ett tak högst upp och en grop mitt i banan.
+> **Try it:** Add a row of `B` as a ceiling at the top and a pit in the middle of the level.

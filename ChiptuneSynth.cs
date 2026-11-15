@@ -464,7 +464,7 @@ namespace AmosLikeBasic
                 }
                 else sb.Append(c);
             }
-            if (inBraces) throw new FormatException("PLAY MUSIC: '{' utan '}'");
+            if (inBraces) throw new FormatException("PLAY MUSIC: '{' without '}'");
             if (sb.Length > 0) tokens.Add(sb.ToString());
             return tokens;
         }
@@ -481,13 +481,13 @@ namespace AmosLikeBasic
                 if (i >= words.Length) return fallback;
                 if (double.TryParse(words[i], System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture, out var d)) return d;
-                throw new FormatException($"PLAY MUSIC: '{words[i]}' är inget tal i {{{text.Trim()}}}");
+                throw new FormatException($"PLAY MUSIC: '{words[i]}' is not a number in {{{text.Trim()}}}");
             }
             void Need(int count)
             {
                 if (words.Length - 1 < count)
-                    throw new FormatException($"PLAY MUSIC: {{{text.Trim()}}} behöver " +
-                                              (count == 1 ? "ett värde" : $"{count} värden"));
+                    throw new FormatException($"PLAY MUSIC: {{{text.Trim()}}} needs " +
+                                              (count == 1 ? "a value" : $"{count} values"));
             }
 
             switch (name)
@@ -623,7 +623,7 @@ namespace AmosLikeBasic
                     return v => v.SyncSource = idx;
                 }
                 default:
-                    throw new FormatException($"PLAY MUSIC: okänd effekt {{{text.Trim()}}}");
+                    throw new FormatException($"PLAY MUSIC: unknown effect {{{text.Trim()}}}");
             }
         }
 

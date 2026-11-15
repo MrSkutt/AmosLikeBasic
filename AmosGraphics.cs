@@ -3545,7 +3545,7 @@ public sealed class AmosGraphics
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine(
-                    $"[SpriteHitGroup] fel vid SpriteHit({id},{otherId}): {ex.Message}\n{ex.StackTrace}");
+                    $"[SpriteHitGroup] error in SpriteHit({id},{otherId}): {ex.Message}\n{ex.StackTrace}");
             }
         }
 
@@ -3562,7 +3562,7 @@ public sealed class AmosGraphics
 
             if (!_sprites.TryGetValue(otherId, out var s2))
             {
-                System.Diagnostics.Debug.WriteLine($"[HitBoxGroup] sprite {otherId} finns inte i _sprites!");
+                System.Diagnostics.Debug.WriteLine($"[HitBoxGroup] sprite {otherId} is not in _sprites!");
                 continue;
             }
 

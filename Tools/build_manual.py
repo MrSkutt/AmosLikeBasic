@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
-"""Bygger manualen till PDF (och HTML) av Markdown-filerna i Documentation/Manual.
+"""Builds the manual as PDF (and HTML) from the Markdown files in Documentation/Manual.
 
     python3 Tools/build_manual.py
 
-Resultat:
+Output:
     Documentation/AMOS Like Basic - Manual.pdf
-    Documentation/Manual/build/manual.html   (samma sak som webbsida)
+    Documentation/Manual/build/manual.html   (the same as a web page)
 
-Kapitlen läses i filnamnsordning. Varje fil börjar med en rubrik "# Kapitelnamn".
-En fil som bara innehåller "# Del: Namn" blir en avdelningssida.
+The chapters are read in file name order. Every file starts with a heading
+"# Chapter name". A file that only contains "# Part: Name" becomes a part page.
 
-Markdown som stöds:
-    # / ## / ###           rubriker (# = nytt kapitel på ny sida)
-    **fet**, *kursiv*, `kod`, [länk](url), ![bild](sökväg)
-    ```basic ... ```       kodexempel med färgad BASIC (```text för vanlig text)
-    - punkt, 1. punkt      listor
-    | a | b |              tabeller
-    > **Tips:** text       faktaruta (Tips, Obs, Prova)
-    ---                    linje
+Supported Markdown:
+    # / ## / ###           headings (# = a new chapter on a new page)
+    **bold**, *italic*, `code`, [link](url), ![image](path)
+    ```basic ... ```       code examples with coloured BASIC (```text for plain text)
+    - item, 1. item        lists
+    | a | b |              tables
+    > **Tip:** text        a box (Tip, Note, Try it, Good to know)
+    ---                    a line
 
-PDF:en skrivs ut med Google Chrome (eller Chromium/Edge) utan fönster.
+The PDF is printed with Google Chrome (or Chromium/Edge) without a window.
 """
 import glob
 import html
@@ -158,8 +158,8 @@ def markdown_to_html(md, toc, used_ids):
         if m:
             flush_para()
             level, title = len(m.group(1)), m.group(2).strip()
-            if level == 1 and title.lower().startswith("del:"):
-                name = title[4:].strip()
+            if level == 1 and title.lower().startswith("part:"):
+                name = title[5:].strip()
                 hid = slug(name, used_ids)
                 toc.append((0, name, hid))
                 out.append(f'<section class="part" id="{hid}"><div class="part-title">{inline(name)}</div></section>')
@@ -185,9 +185,9 @@ def markdown_to_html(md, toc, used_ids):
                 i += 1
             text = " ".join(quote)
             kind = "note"
-            m2 = re.match(r"\*\*(Tips|Obs|Prova|Prova själv|Bra att veta)\b", text)
+            m2 = re.match(r"\*\*(Tip|Note|Try it|Good to know)\b", text)
             if m2:
-                kind = {"Tips": "tip", "Obs": "warn"}.get(m2.group(1), "try")
+                kind = {"Tip": "tip", "Note": "warn"}.get(m2.group(1), "try")
             out.append(f'<div class="box {kind}">{inline(text)}</div>')
             continue
 
@@ -300,14 +300,14 @@ img { max-width: 100%; border: 1px solid #c5cde6; margin: 2mm 0; }
 def build():
     files = sorted(glob.glob(os.path.join(SRC, "*.md")))
     if not files:
-        sys.exit(f"Inga kapitel hittades i {SRC}")
+        sys.exit(f"No chapters found in {SRC}")
 
     toc, used, chapters = [], set(), []
     for f in files:
         with open(f, encoding="utf-8") as fh:
             chapters.append(markdown_to_html(fh.read(), toc, used))
 
-    toc_html = ['<nav class="toc"><h1>Innehåll</h1><ol>']
+    toc_html = ['<nav class="toc"><h1>Contents</h1><ol>']
     for level, title, hid in toc:
         if level == 3:
             continue
@@ -317,14 +317,14 @@ def build():
 
     cover = """<section class="cover">
 <div class="title">AMOS LIKE BASIC</div>
-<div class="subtitle">Lär dig programmera spel och grafik i BASIC</div>
+<div class="subtitle">Learn to program games and graphics in BASIC</div>
 <div class="rainbow"></div>
-<div class="subtitle">Handbok och referens</div>
-<div class="small">För macOS och Windows</div>
+<div class="subtitle">Guide and reference</div>
+<div class="small">For macOS and Windows</div>
 </section>"""
 
     page = f"""<!doctype html>
-<html lang="sv"><head><meta charset="utf-8">
+<html lang="en"><head><meta charset="utf-8">
 <title>AMOS Like Basic – Manual</title>
 <style>{CSS}</style></head>
 <body>
@@ -341,7 +341,7 @@ def build():
 
     chrome = find_chrome()
     if not chrome:
-        print("!! Hittar ingen Chrome/Chromium/Edge, så ingen PDF skapades. Öppna HTML-filen och skriv ut den som PDF.")
+        print("!! No Chrome/Chromium/Edge found, so no PDF was made. Open the HTML file and print it to PDF.")
         return
     subprocess.run([chrome, "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
                     f"--print-to-pdf={PDF}", "file://" + html_path],

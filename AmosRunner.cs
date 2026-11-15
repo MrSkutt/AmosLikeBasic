@@ -45,7 +45,7 @@ public static partial class AmosRunner
         
 
         try { return Color.Parse(s); }
-        catch (Exception ex) { throw new FormatException($"Ogiltigt färgvärde: '{s}'", ex); }
+        catch (Exception ex) { throw new FormatException($"Invalid colour: '{s}'", ex); }
     }
     
     private static Color PaperValueToColor(object v)
@@ -1254,22 +1254,22 @@ public static partial class AmosRunner
                                 // PRINT #channel, data
                                 int commaIdx2 = printArg.IndexOf(',');
                                 if (commaIdx2 < 0)
-                                    throw new Exception("PRINT #: Syntax är PRINT #channel, data");
+                                    throw new Exception("PRINT #: The syntax is PRINT #channel, data");
 
                                 string channelExpr = printArg[1..commaIdx2].Trim(); // Ta bort # och läs kanalnummer
                                 int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
 
                                 if (!_openFiles.ContainsKey(channel))
-                                    throw new Exception($"PRINT #: Kanal {channel} är inte öppen");
+                                    throw new Exception($"PRINT #: Channel {channel} is not open");
 
                                 var fileChannel = _openFiles[channel];
 
                                 if (fileChannel.Mode == FileMode.Input)
                                     throw new Exception(
-                                        $"PRINT #: Kanal {channel} är öppnad för läsning, inte skrivning");
+                                        $"PRINT #: Channel {channel} is open for reading, not writing");
 
                                 if (fileChannel.Writer == null)
-                                    throw new Exception($"PRINT #: Kanal {channel} har ingen writer");
+                                    throw new Exception($"PRINT #: Channel {channel} has no writer");
 
                                 // Läs data att skriva
                                 string dataExpr = printArg[(commaIdx2 + 1)..].Trim();
@@ -1386,21 +1386,21 @@ public static partial class AmosRunner
                                 // INPUT #channel, variable
                                 int commaIdx = inputArg.IndexOf(',');
                                 if (commaIdx < 0)
-                                    throw new Exception("INPUT #: Syntax är INPUT #channel, variabel");
+                                    throw new Exception("INPUT #: The syntax is INPUT #channel, variable");
 
                                 string channelExpr = inputArg[1..commaIdx].Trim();
                                 int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
 
                                 if (!_openFiles.ContainsKey(channel))
-                                    throw new Exception($"INPUT #: Kanal {channel} är inte öppen");
+                                    throw new Exception($"INPUT #: Channel {channel} is not open");
 
                                 var fileChannel = _openFiles[channel];
 
                                 if (fileChannel.Mode != FileMode.Input)
-                                    throw new Exception($"INPUT #: Kanal {channel} är inte öppnad för läsning");
+                                    throw new Exception($"INPUT #: Channel {channel} is not open for reading");
 
                                 if (fileChannel.Reader == null)
-                                    throw new Exception($"INPUT #: Kanal {channel} har ingen reader");
+                                    throw new Exception($"INPUT #: Channel {channel} has no reader");
 
                                 string varName = inputArg[(commaIdx + 1)..].Trim();
 
@@ -3173,7 +3173,7 @@ public static partial class AmosRunner
                                 case "PLAY":
                                 {
                                     if (_trackSong == null)
-                                        throw new Exception($"TRACK PLAY: ingen låt är laddad, använd TRACK LOAD först at line {ln}");
+                                        throw new Exception($"TRACK PLAY: no song is loaded, use TRACK LOAD first at line {ln}");
                                     int pos = tA.Count > 0 && tA[0].Trim().Length > 0
                                         ? EvalInt(tA[0], vars, ln, getInkey, isKeyDown, graphics) : 0;
                                     ChiptuneSynth.TrackPlay(_trackSong, pos, 0, _trackLoop);
@@ -3214,7 +3214,7 @@ public static partial class AmosRunner
                                     break;
                                 }
                                 default:
-                                    throw new Exception($"TRACK: okänt kommando '{trackSub}' at line {ln}");
+                                    throw new Exception($"TRACK: unknown command '{trackSub}' at line {ln}");
                             }
                             break;
                         }
@@ -3856,7 +3856,7 @@ public static partial class AmosRunner
                             // Läs mode (IN/OUT/APPEND)
                             string[] parts = openArg.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
                             if (parts.Length < 2)
-                                throw new Exception("OPEN: Syntax är OPEN IN/OUT/APPEND channel, \"filename\"");
+                                throw new Exception("OPEN: The syntax is OPEN IN/OUT/APPEND channel, \"filename\"");
 
                             string modeStr = parts[0].ToUpperInvariant();
                             FileMode mode;
@@ -3868,13 +3868,13 @@ public static partial class AmosRunner
                             else if (modeStr == "APPEND")
                                 mode = FileMode.Append;
                             else
-                                throw new Exception($"OPEN: Okänd mode '{modeStr}'. Använd IN, OUT eller APPEND");
+                                throw new Exception($"OPEN: Unknown mode '{modeStr}'. Use IN, OUT or APPEND");
 
                             // Hitta kommat mellan channel och filename
                             string restArg = parts[1];
                             int commaIdx2 = restArg.IndexOf(',');
                             if (commaIdx2 < 0)
-                                throw new Exception("OPEN: Syntax är OPEN mode channel, \"filename\"");
+                                throw new Exception("OPEN: The syntax is OPEN mode channel, \"filename\"");
 
                             // Läs kanalnummer
                             string channelExpr = restArg[..commaIdx2].Trim();
@@ -3882,10 +3882,10 @@ public static partial class AmosRunner
 
                             if (channel < 1 || channel > MaxChannels)
                                 throw new Exception(
-                                    $"OPEN: Kanal {channel} utanför giltigt intervall (1-{MaxChannels})");
+                                    $"OPEN: Channel {channel} is out of range (1-{MaxChannels})");
 
                             if (_openFiles.ContainsKey(channel))
-                                throw new Exception($"OPEN: Kanal {channel} är redan öppen");
+                                throw new Exception($"OPEN: Channel {channel} is already open");
 
                             // Läs filnamn
                             string fileExpr = restArg[(commaIdx2 + 1)..].Trim();
@@ -3907,7 +3907,7 @@ public static partial class AmosRunner
                                 {
                                     case FileMode.Input:
                                         if (!File.Exists(filePath))
-                                            throw new FileNotFoundException($"Filen '{filePath}' hittades inte");
+                                            throw new FileNotFoundException($"The file '{filePath}' was not found");
                                         fileChannel.Reader = new StreamReader(filePath, Encoding.UTF8);
                                         break;
 
@@ -3933,7 +3933,7 @@ public static partial class AmosRunner
                             }
                             catch (Exception ex)
                             {
-                                throw new Exception($"OPEN: Kunde inte öppna fil '{filePath}': {ex.Message}");
+                                throw new Exception($"OPEN: Could not open the file '{filePath}': {ex.Message}");
                             }
                         }
                             break;
@@ -3965,7 +3965,7 @@ public static partial class AmosRunner
                             }
                             catch (Exception ex)
                             {
-                                throw new Exception($"CLOSE: Fel vid stängning av kanal {channel}: {ex.Message}");
+                                throw new Exception($"CLOSE: Error while closing channel {channel}: {ex.Message}");
                             }
                         }
                             break;
@@ -4892,7 +4892,7 @@ public static partial class AmosRunner
                     // Kolla att det är en läskanal
                     if (fileChannel.Mode != FileMode.Input)
                     {
-                        throw new Exception($"EOF: Kanal {channel} är inte öppnad för läsning");
+                        throw new Exception($"EOF: Channel {channel} is not open for reading");
                     }
     
                     if (fileChannel.Reader == null)
@@ -5071,22 +5071,22 @@ public static partial class AmosRunner
     {
         var bank = _sfxBank ?? _trackSong;
         if (bank == null)
-            throw new Exception($"TRACK SFX: inga ljud är laddade, använd TRACK SFX LOAD först at line {ln}");
+            throw new Exception($"TRACK SFX: no sounds are loaded, use TRACK SFX LOAD first at line {ln}");
         if (args.Count < 2)
-            throw new Exception($"TRACK SFX: skriv TRACK SFX instrument, not at line {ln}");
+            throw new Exception($"TRACK SFX: write TRACK SFX instrument, note at line {ln}");
 
         object instValue = EvalValue(args[0], vars, ln, getInkey, isKeyDown, graphics);
         int number;
         if (instValue is string name)
         {
             number = bank.Instruments.FindIndex(i => i.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) + 1;
-            if (number == 0) throw new Exception($"TRACK SFX: det finns inget instrument som heter '{name}' at line {ln}");
+            if (number == 0) throw new Exception($"TRACK SFX: there is no instrument called '{name}' at line {ln}");
         }
         else
         {
             number = (int)Math.Round(Convert.ToDouble(instValue, CultureInfo.InvariantCulture));
             if (number < 1 || number > bank.Instruments.Count)
-                throw new Exception($"TRACK SFX: instrument {number} finns inte (1 – {bank.Instruments.Count}) at line {ln}");
+                throw new Exception($"TRACK SFX: instrument {number} does not exist (1 - {bank.Instruments.Count}) at line {ln}");
         }
 
         object noteValue = EvalValue(args[1], vars, ln, getInkey, isKeyDown, graphics);
@@ -5097,7 +5097,7 @@ public static partial class AmosRunner
             if (text.Length == 2) text = text[0] + "-" + text[1];   // "C5" → "C-5"
             try { note = TrackerCell.ParseNote(text); }
             catch (FormatException fe) { throw new Exception($"TRACK SFX: {fe.Message} at line {ln}"); }
-            if (note < 0) throw new Exception($"TRACK SFX: '{noteValue}' är ingen not at line {ln}");
+            if (note < 0) throw new Exception($"TRACK SFX: '{noteValue}' is not a note at line {ln}");
         }
         else
             note = Math.Clamp((int)Math.Round(Convert.ToDouble(noteValue, CultureInfo.InvariantCulture)), 0, 119);

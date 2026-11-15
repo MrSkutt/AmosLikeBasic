@@ -19,7 +19,7 @@ public sealed class AudioEngine : IDisposable
         
         if (!Bass.Init(-1, 44100))
         {
-            throw new Exception($"Kunde inte initiera BASS: {Bass.LastError}");
+            throw new Exception($"Could not initialise BASS: {Bass.LastError}");
         }
 
         _mixer = BassMix.CreateMixerStream(44100, 2, BassFlags.Default | BassFlags.Float);
@@ -33,7 +33,7 @@ public sealed class AudioEngine : IDisposable
         // Läs in filen till minnet i C# först (kringgår filsystemsproblem i BASS på Mac)
         if (!File.Exists(fullPath))
         {
-            Console.WriteLine($"Fil saknas: {fullPath}");
+            Console.WriteLine($"File missing: {fullPath}");
             return;
         }
 
@@ -65,17 +65,17 @@ public sealed class AudioEngine : IDisposable
                 }
                 else
                 {
-                    Console.WriteLine($"Mixer-fel: {Bass.LastError}");
+                    Console.WriteLine($"Mixer error: {Bass.LastError}");
                 }
             }
             else
             {
-                Console.WriteLine($"Kunde inte ladda MOD-fil ({Bass.LastError})");
+                Console.WriteLine($"Could not load the MOD file ({Bass.LastError})");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Fel vid inläsning av MOD: {ex.Message}");
+            Console.WriteLine($"Error while loading the MOD: {ex.Message}");
         }
     }
 

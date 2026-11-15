@@ -1,27 +1,27 @@
 # Sprites
 
-En **sprite** är en figur som kan flyttas fritt över skärmen utan att du behöver sudda och rita om bakgrunden. Spelaren, fienderna, skotten och mynten i ett spel är nästan alltid sprites. De ritas av grafikkortet, så du kan ha hundratals samtidigt.
+A **sprite** is a figure that can move freely over the screen without you having to clear and redraw the background. The player, the enemies, the shots and the coins in a game are nearly always sprites. They are drawn by the graphics card, so you can have hundreds at once.
 
-Varje sprite har ett nummer som du själv väljer. Numret avgör också ordningen: sprites med högre nummer ritas ovanpå dem med lägre.
+Every sprite has a number that you choose yourself. The number also decides the order: sprites with higher numbers are drawn on top of those with lower ones.
 
-## Ladda och visa en sprite
+## Loading and showing a sprite
 
 ```basic
-SPRITE LOAD 1, "Graphics/Skogshopp/gem.png"
+SPRITE LOAD 1, "Graphics/ForestHop/gem.png"
 SPRITE POS 1, 300, 200
 SPRITE ON 1
 ```
 
-`SPRITE LOAD` laddar en bild till sprite 1, `SPRITE POS` sätter positionen (spritens övre vänstra hörn) och `SPRITE ON` gör den synlig. `SPRITE OFF` döljer den igen.
+`SPRITE LOAD` loads an image into sprite 1, `SPRITE POS` sets the position (the sprite's top left corner) and `SPRITE ON` makes it visible. `SPRITE OFF` hides it again.
 
-> **Tips:** Svarta pixlar (`0,0,0`) i bilden blir genomskinliga, liksom genomskinliga pixlar i PNG-filer.
+> **Tip:** Black pixels (`0,0,0`) in the image become transparent, just like transparent pixels in PNG files.
 
-## Flytta en sprite
+## Moving a sprite
 
-Precis som med bollen i grafikkapitlet ändrar du positionen lite i varje bild:
+Just like the ball in the graphics chapter, you change the position a little every frame:
 
 ```basic
-SPRITE LOAD 1, "Graphics/Skogshopp/bagge.png", 32, 32, 3
+SPRITE LOAD 1, "Graphics/ForestHop/beetle.png", 32, 32, 3
 SPRITE ON 1
 X = 0
 Loop:
@@ -32,20 +32,20 @@ Loop:
 GOTO Loop
 ```
 
-`SPRITE MOVE nr, dx, dy` flyttar en sprite ett stycke från där den är.
+`SPRITE MOVE no, dx, dy` moves a sprite some distance from where it is.
 
-## Animation: bildark
+## Animation: sprite sheets
 
-En animerad figur består av flera bilder efter varandra, ofta lagda bredvid varandra i en enda fil, ett så kallat **bildark** (*sprite sheet*). Ange bredd, höjd och antal bilder när du laddar:
+An animated figure is made of several pictures in a row, often placed next to each other in a single file, a so-called **sprite sheet**. Give the width, height and number of pictures when you load it:
 
 ```basic nocheck
-SPRITE LOAD 1, "Graphics/Skogshopp/kotte.png", 32, 32, 6
+SPRITE LOAD 1, "Graphics/ForestHop/pinecone.png", 32, 32, 6
 ```
 
-`kotte.png` innehåller sex bilder på 32 × 32 punkter: stå, tre gångbilder, hopp och skadad. Med `SPRITE FRAME nr, bild` väljer du vilken som visas (bilderna räknas från 0):
+`pinecone.png` holds six pictures of 32 × 32 dots: standing, three walking pictures, jumping and hurt. With `SPRITE FRAME no, picture` you choose which one is shown (the pictures count from 0):
 
 ```basic
-SPRITE LOAD 1, "Graphics/Skogshopp/kotte.png", 32, 32, 6
+SPRITE LOAD 1, "Graphics/ForestHop/pinecone.png", 32, 32, 6
 SPRITE POS 1, 300, 220
 SPRITE ZOOM 1, 300
 SPRITE ON 1
@@ -57,47 +57,47 @@ Loop:
 GOTO Loop
 ```
 
-`INT(T / 8) MOD 3` räknar 0, 1, 2, 0, 1, 2 ... och byter bild var åttonde skärmbild. `1 +` gör att det blir gångbilderna 1, 2 och 3.
+`INT(T / 8) MOD 3` counts 0, 1, 2, 0, 1, 2 ... and changes picture every eighth frame. The `1 +` makes it the walking pictures 1, 2 and 3.
 
-> **Tips:** Innehåller filnamnet storleken, som `Anim_Beast_W32_H56_B11.png` (bredd 32, höjd 56, 11 bilder), räcker `SPRITE LOAD 1, "Anim_Beast_W32_H56_B11.png"`.
+> **Tip:** If the file name contains the size, like `Anim_Beast_W32_H56_B11.png` (width 32, height 56, 11 pictures), `SPRITE LOAD 1, "Anim_Beast_W32_H56_B11.png"` is enough.
 
-### ANIM: animation som sköter sig själv
+### ANIM: animation that runs itself
 
-Med `ANIM` beskriver du en animation en gång, och sedan sköts den automatiskt vid varje `WAIT VBL`. Sekvensen skrivs som `(bild, tid)` där tiden är antal skärmbilder:
+With `ANIM` you describe an animation once, and then it runs by itself at every `WAIT VBL`. The sequence is written as `(picture, time)` where the time is a number of frames:
 
 ```basic
-SPRITE LOAD 1, "Graphics/Skogshopp/kotte.png", 32, 32, 6
+SPRITE LOAD 1, "Graphics/ForestHop/pinecone.png", 32, 32, 6
 SPRITE POS 1, 300, 220
 SPRITE ZOOM 1, 300
 SPRITE ON 1
-ANIM DEF 1, "stå", (0,30), LOOP
-ANIM DEF 1, "gå", (1,8)(2,8)(3,8)(2,8), LOOP
-ANIM DEF 1, "hopp", (4,20), ONCE, "stå"
-ANIM SET 1, "gå"
+ANIM DEF 1, "idle", (0,30), LOOP
+ANIM DEF 1, "walk", (1,8)(2,8)(3,8)(2,8), LOOP
+ANIM DEF 1, "jump", (4,20), ONCE, "idle"
+ANIM SET 1, "walk"
 T = 0
 Loop:
   T = T + 1
-  IF T = 180 THEN ANIM SET 1, "hopp"
+  IF T = 180 THEN ANIM SET 1, "jump"
   WAIT VBL
 GOTO Loop
 ```
 
-`LOOP` betyder att animationen börjar om, `ONCE` att den körs en gång. Efter `ONCE` kan du ange vilken animation som ska ta vid när den är klar, här `"stå"`. `ANIM STOP nr` stoppar animationen.
+`LOOP` means the animation starts again, `ONCE` that it runs once. After `ONCE` you can give the animation that takes over when it has finished, here `"idle"`. `ANIM STOP no` stops the animation.
 
-## Storlek, vridning och spegling
+## Size, rotation and mirroring
 
-| Kommando | Gör |
+| Command | Does |
 |---|---|
-| `SPRITE ZOOM nr, procent` | ändrar storleken, 100 = normal, 200 = dubbelt så stor |
-| `SPRITE ZOOM nr, x, y` | olika i bredd och höjd |
-| `SPRITE ROTATE nr, grader` | vrider spriten runt sin mittpunkt |
-| `SPRITE ALPHA nr, värde` | genomskinlighet, 0 – 255 |
-| `SPRITE FADE nr, mål, bilder` | tonar mjukt till målvärdet |
+| `SPRITE ZOOM no, percent` | changes the size, 100 = normal, 200 = twice as big |
+| `SPRITE ZOOM no, x, y` | different in width and height |
+| `SPRITE ROTATE no, degrees` | turns the sprite around its centre |
+| `SPRITE ALPHA no, value` | transparency, 0 – 255 |
+| `SPRITE FADE no, target, frames` | fades smoothly to the target value |
 
-En negativ zoom speglar spriten. Det är så man gör en figur som kan gå åt båda hållen med samma bilder:
+A negative zoom mirrors the sprite. That is how you make a figure that can walk both ways with the same pictures:
 
 ```basic
-SPRITE LOAD 1, "Graphics/Skogshopp/kotte.png", 32, 32, 6
+SPRITE LOAD 1, "Graphics/ForestHop/pinecone.png", 32, 32, 6
 SPRITE ZOOM 1, 200
 SPRITE ON 1
 X = 100 : DX = 3
@@ -110,12 +110,12 @@ Loop:
 GOTO Loop
 ```
 
-## Bildbanker
+## Image banks
 
-Ska många sprites använda samma bilder, till exempel tjugo mynt, är det slöseri att ladda filen tjugo gånger. Ladda den i stället en gång till en **bildbank** med `IMAGE LOAD`, och låt sprites hämta bilder därifrån med `SPRITE IMAGE nr, bank, bild`:
+If many sprites use the same pictures, for example twenty coins, it is wasteful to load the file twenty times. Instead load it once into an **image bank** with `IMAGE LOAD`, and let the sprites take pictures from there with `SPRITE IMAGE no, bank, picture`:
 
 ```basic
-IMAGE LOAD 1, "Graphics/Skogshopp/gem.png", 20, 20, 4
+IMAGE LOAD 1, "Graphics/ForestHop/gem.png", 20, 20, 4
 FOR I = 0 TO 9
   SPRITE IMAGE 10 + I, 1, 0
   SPRITE POS 10 + I, 60 + I * 55, 240
@@ -133,25 +133,25 @@ Loop:
 GOTO Loop
 ```
 
-Tio ädelstenar som snurrar i takt. En sprite som använder en bildbank byter bild med `SPRITE IMAGE`, inte med `SPRITE FRAME`.
+Ten gems spinning in step. A sprite that uses an image bank changes picture with `SPRITE IMAGE`, not with `SPRITE FRAME`.
 
-## Sprites i lager
+## Sprites in layers
 
-En sprite ritas i lager 0 om du inte säger något annat. `SPRITE LAYER nr, lager` flyttar den till ett annat lager. Spritens position räknas då i det lagrets koordinater, så om lagret scrollas följer spriten med. I ett plattformsspel lägger man därför fiender och mynt i samma lager som banan: de stannar på sina platser på banan medan den scrollar förbi.
+A sprite is drawn in layer 0 unless you say otherwise. `SPRITE LAYER no, layer` moves it to another layer. The sprite's position then counts in that layer's coordinates, so if the layer scrolls, the sprite follows. In a platform game you therefore put enemies and coins in the same layer as the level: they stay in their places on the level while it scrolls past.
 
-## Kollisioner
+## Collisions
 
-För att veta om spelaren nuddar en fiende eller ett mynt finns kollisionsfunktioner. De ger 1 om spritarna överlappar och 0 annars:
+To find out whether the player touches an enemy or a coin there are collision functions. They give 1 if the sprites overlap and 0 otherwise:
 
-| Funktion | Testar |
+| Function | Tests |
 |---|---|
-| `HITBOX(a, b)` | om spritarnas rektanglar överlappar (snabbast) |
-| `HITCIRCLE(a, b)` | om två cirklar överlappar (bra för runda saker) |
-| `HIT(a, b)` | om några synliga pixlar överlappar (exaktast) |
+| `HITBOX(a, b)` | whether the sprites' rectangles overlap (fastest) |
+| `HITCIRCLE(a, b)` | whether two circles overlap (good for round things) |
+| `HIT(a, b)` | whether any visible pixels overlap (most exact) |
 
 ```basic
-SPRITE LOAD 1, "Graphics/Skogshopp/kotte.png", 32, 32, 6
-SPRITE LOAD 2, "Graphics/Skogshopp/gem.png", 20, 20, 4
+SPRITE LOAD 1, "Graphics/ForestHop/pinecone.png", 32, 32, 6
+SPRITE LOAD 2, "Graphics/ForestHop/gem.png", 20, 20, 4
 SPRITE POS 2, 400, 300
 SPRITE ON 1 : SPRITE ON 2
 X = 100
@@ -163,33 +163,33 @@ Loop:
 GOTO Loop
 ```
 
-### Grupper
+### Groups
 
-Har du många fiender är det bekvämt att samla dem i en **grupp**. `HITGROUP(nr, "grupp")` ger numret på den första spriten i gruppen som `nr` krockar med, eller 0:
+With many enemies it is convenient to gather them in a **group**. `HITGROUP(no, "group")` gives the number of the first sprite in the group that `no` collides with, or 0:
 
 ```basic nocheck
 FOR I = 10 TO 19
-  SPRITE GROUP I, "fiender"
+  SPRITE GROUP I, "enemies"
 NEXT I
-TRAFF = HITBOXGROUP(1, "fiender")
-IF TRAFF > 0 THEN SPRITE OFF TRAFF
+TOUCHED = HITBOXGROUP(1, "enemies")
+IF TOUCHED > 0 THEN SPRITE OFF TOUCHED
 ```
 
-`HITBOXGROUP` och `HITCIRCLEGROUP` fungerar på samma sätt med rektangel- och cirkeltest. `SPRITE UNGROUP nr, "grupp"` tar bort en sprite ur en grupp.
+`HITBOXGROUP` and `HITCIRCLEGROUP` work the same way with the rectangle and circle tests. `SPRITE UNGROUP no, "group"` takes a sprite out of a group.
 
-## Effekter
+## Effects
 
-Sprites kan få effekter som räknas ut av grafikkortet:
+Sprites can get effects that are worked out by the graphics card:
 
-| Kommando | Effekt |
+| Command | Effect |
 |---|---|
-| `SPRITE EFFECT ADD nr, BLUR, radie` | gör spriten suddig |
-| `SPRITE EFFECT ADD nr, WAVE, ampX, frekX, ampY, frekY` | får spriten att bölja |
-| `SPRITE EFFECT ADD nr, COLOR, ljus, kontrast, mättnad` | ändrar färgerna (1 = oförändrat) |
-| `SPRITE EFFECT CLEAR nr` | tar bort alla effekter |
+| `SPRITE EFFECT ADD no, BLUR, radius` | makes the sprite blurry |
+| `SPRITE EFFECT ADD no, WAVE, ampX, freqX, ampY, freqY` | makes the sprite ripple |
+| `SPRITE EFFECT ADD no, COLOR, brightness, contrast, saturation` | changes the colours (1 = unchanged) |
+| `SPRITE EFFECT CLEAR no` | removes all effects |
 
 ```basic
-SPRITE LOAD 1, "Graphics/Skogshopp/bagge.png", 32, 32, 3
+SPRITE LOAD 1, "Graphics/ForestHop/beetle.png", 32, 32, 3
 SPRITE POS 1, 300, 220
 SPRITE ZOOM 1, 400
 SPRITE ON 1
@@ -199,8 +199,8 @@ Loop:
 GOTO Loop
 ```
 
-Vågen rör sig av sig själv. Med `SPRITE EFFECT UPDATE nr, index, parameter, värde` ändrar du en effekt medan programmet kör, till exempel `SPRITE EFFECT UPDATE 1, 0, AMPLITUDEX, 10`. Effekterna numreras från 0 i den ordning de lades till.
+The wave moves by itself. With `SPRITE EFFECT UPDATE no, index, parameter, value` you change an effect while the program runs, for example `SPRITE EFFECT UPDATE 1, 0, AMPLITUDEX, 10`. The effects are numbered from 0 in the order they were added.
 
-> **Prova själv:** Gör en sprite som du styr med piltangenterna (se kapitlet om inmatning) och som speglas åt det håll den går.
+> **Try it:** Make a sprite that you steer with the arrow keys (see the chapter on input) and that mirrors itself in the direction it walks.
 
-> **Prova själv:** Strö ut tio ädelstenar på slumpmässiga platser och låt spelaren plocka upp dem. Räkna hur många som är kvar.
+> **Try it:** Scatter ten gems at random places and let the player pick them up. Count how many are left.

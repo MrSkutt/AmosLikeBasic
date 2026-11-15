@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Exporterar ett BASIC-program som en fristående app för Mac och/eller Windows.
+"""Exports a BASIC program as a stand-alone app for Mac and/or Windows.
 
-    python3 Tools/export_app.py Projects/skogshopp.amosproj --name Skogshopp
-    python3 Tools/export_app.py Projects/skogshopp.amosproj --name Skogshopp --platform win
+    python3 Tools/export_app.py Projects/foresthop.amosproj --name ForestHop
+    python3 Tools/export_app.py Projects/foresthop.amosproj --name ForestHop --platform win
 
-Appen är AmosLikeBasic i spelarläge: den hittar game.amosproj bredvid sig och kör
-spelet direkt, utan editor. .NET följer med (self-contained), så mottagaren behöver
-inte installera något. Bara de bilder och ljud som programmet använder följer med.
+The app is AmosLikeBasic in player mode: it finds game.amosproj next to itself and
+runs the game straight away, without the editor. .NET is included (self-contained),
+so the person who gets the app does not need to install anything. Only the images
+and sounds that the program uses are included.
 
-Resultat i Export/:
-    Mac:     <Namn>.app  och  <Namn>-mac.zip
-    Windows: <Namn>-win/<Namn>.exe  och  <Namn>-win.zip
+Output in Export/:
+    Mac:     <Name>.app  and  <Name>-mac.zip
+    Windows: <Name>-win/<Name>.exe  and  <Name>-win.zip
 
-Kräver .NET SDK. Mac-appen måste byggas på en Mac (för codesign). Den signeras bara
-"ad hoc", så första gången behöver mottagaren högerklicka och välja Öppna.
-Windows-versionen går att bygga från en Mac.
+Needs the .NET SDK. The Mac app has to be built on a Mac (for codesign). It is only
+signed "ad hoc", so the first time the receiver needs to right-click and choose Open.
+The Windows version can be built on a Mac.
 """
 import argparse
 import json
@@ -55,7 +56,7 @@ def find_assets(program, extra):
         elif os.path.isfile(full):
             assets.add(item.replace("\\", "/"))
         else:
-            sys.exit(f"Hittar inte --include {item}")
+            sys.exit(f"Cannot find --include {item}")
     return sorted(assets)
 
 
@@ -133,7 +134,7 @@ def build_mac(args, program, assets, work):
         # Apple Silicon kör bara signerade program; ad hoc-signatur räcker för egen dator
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-", app], check=True)
     else:
-        print("!! codesign saknas (bygg på en Mac), appen kommer inte att starta på Apple Silicon")
+        print("!! codesign is missing (build on a Mac), the app will not start on Apple Silicon")
 
     zip_path = os.path.join(args.out, f"{args.name}-mac.zip")
     if os.path.exists(zip_path):
@@ -183,14 +184,14 @@ def zip_dir(src, zip_path):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("project", help="programmet, t.ex. Projects/skogshopp.amosproj")
-    p.add_argument("--name", help="appens namn (standard: filnamnet)")
+    p.add_argument("project", help="the program, e.g. Projects/foresthop.amosproj")
+    p.add_argument("--name", help="name of the app (default: the file name)")
     p.add_argument("--platform", choices=["mac", "win", "both"], default="both")
-    p.add_argument("--out", default=os.path.join(ROOT, "Export"), help="utkatalog (standard: Export/)")
+    p.add_argument("--out", default=os.path.join(ROOT, "Export"), help="output folder (default: Export/)")
     p.add_argument("--include", action="append", default=[],
-                   help="extra fil eller mapp att ta med, om programmet bygger filnamn i koden")
-    p.add_argument("--icon", help="PNG att göra Mac-ikon av (helst 1024x1024)")
-    p.add_argument("--bundle-id", help="Mac bundle identifier (standard: se.amoslikebasic.<namn>)")
+                   help="extra file or folder to include, if the program builds file names in code")
+    p.add_argument("--icon", help="PNG to make the Mac icon from (ideally 1024x1024)")
+    p.add_argument("--bundle-id", help="Mac bundle identifier (default: se.amoslikebasic.<name>)")
     p.add_argument("--version", default="1.0")
     args = p.parse_args()
 
@@ -198,12 +199,12 @@ def main():
     args.name = args.name or os.path.splitext(os.path.basename(args.project))[0]
     args.out = os.path.abspath(args.out)
     if not re.fullmatch(r"[\w .-]+", args.name):
-        sys.exit("--name får bara innehålla bokstäver, siffror, mellanslag, punkt och bindestreck")
+        sys.exit("--name may only contain letters, digits, spaces, dots and hyphens")
 
     with open(args.project, encoding="utf-8") as f:
         program = json.load(f)["ProgramText"]
     assets = find_assets(program, args.include)
-    print(f"== {len(assets)} filer följer med:")
+    print(f"== {len(assets)} files are included:")
     for a in assets:
         print("   " + a)
 

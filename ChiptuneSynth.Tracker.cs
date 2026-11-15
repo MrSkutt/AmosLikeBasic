@@ -407,7 +407,7 @@ namespace AmosLikeBasic
                 else if (word.ToUpperInvariant() is "SQUARE" or "PULSE" or "TRIANGLE" or "SAWTOOTH" or "SAW" or "SINE" or "NOISE")
                     wave = ParseWave(word);
                 else
-                    throw new FormatException($"Instrument {instrument:X2}: '{text}' är inget tabellsteg");
+                    throw new FormatException($"Instrument {instrument:X2}: '{text}' is not a table step");
             }
             return new TableStep(wave, offset, pulse);
         }

@@ -60,10 +60,10 @@ namespace AmosLikeBasic
         {
             SongFile? file;
             try { file = JsonSerializer.Deserialize<SongFile>(json, JsonOptions); }
-            catch (JsonException e) { throw new FormatException($"Trackerfilen är inte giltig JSON: {e.Message}"); }
-            if (file == null) throw new FormatException("Trackerfilen är tom");
+            catch (JsonException e) { throw new FormatException($"The tracker file is not valid JSON: {e.Message}"); }
+            if (file == null) throw new FormatException("The tracker file is empty");
             if (file.Version > FormatVersion)
-                throw new FormatException($"Trackerfilen är version {file.Version}, den här versionen kan läsa {FormatVersion}");
+                throw new FormatException($"The tracker file is version {file.Version}, this version can read {FormatVersion}");
 
             var song = new TrackerSong
             {
@@ -78,7 +78,7 @@ namespace AmosLikeBasic
             {
                 var rows = file.Patterns![p] ?? new();
                 if (rows.Count > MaxRows)
-                    throw new FormatException($"Mönster {p} har {rows.Count} rader, högst {MaxRows} går");
+                    throw new FormatException($"Pattern {p} has {rows.Count} rows, the most allowed is {MaxRows}");
                 var pattern = new TrackerPattern(Math.Max(1, rows.Count));
                 for (int r = 0; r < rows.Count; r++)
                     pattern.SetRow(r, ParseRow(rows[r], p, r));
@@ -88,7 +88,7 @@ namespace AmosLikeBasic
             if (song.Order.Count == 0) song.Order.Add(0);
             foreach (int o in song.Order)
                 if (o < 0 || o >= song.Patterns.Count)
-                    throw new FormatException($"Ordningslistan pekar på mönster {o}, som inte finns");
+                    throw new FormatException($"The order list points to pattern {o}, which does not exist");
             foreach (var inst in song.Instruments) inst.Table ??= new();
             return song;
         }
@@ -122,7 +122,7 @@ namespace AmosLikeBasic
                 try { cells[c] = TrackerCell.Parse(parts[c]); }
                 catch (FormatException e)
                 {
-                    throw new FormatException($"Mönster {pattern}, rad {row}, kanal {c + 1}: {e.Message}");
+                    throw new FormatException($"Pattern {pattern}, row {row}, channel {c + 1}: {e.Message}");
                 }
             }
             return cells;
@@ -246,9 +246,9 @@ namespace AmosLikeBasic
             if (text is "---" or "..." or "") return NoNote;
             if (text is "===" or "OFF" or "^^^") return NoteOff;
             if (text.Length != 3 || !char.IsDigit(text[2]))
-                throw new FormatException($"'{text}' är ingen not (skriv till exempel C-4 eller C#4)");
+                throw new FormatException($"'{text}' is not a note (write for example C-4 or C#4)");
             int semi = Array.IndexOf(NoteNames, text[..2]);
-            if (semi < 0) throw new FormatException($"'{text}' är ingen not (skriv till exempel C-4 eller C#4)");
+            if (semi < 0) throw new FormatException($"'{text}' is not a note (write for example C-4 or C#4)");
             return (text[2] - '0' + 1) * 12 + semi;
         }
 
@@ -260,7 +260,7 @@ namespace AmosLikeBasic
             int inst = 0;
             if (parts.Length > 1 && parts[1].Trim('.', '-').Length > 0 &&
                 !int.TryParse(parts[1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out inst))
-                throw new FormatException($"'{parts[1]}' är inget instrumentnummer (två hexsiffror)");
+                throw new FormatException($"'{parts[1]}' is not an instrument number (two hex digits)");
 
             char effect = '\0';
             int param = 0;
@@ -269,7 +269,7 @@ namespace AmosLikeBasic
                 string e = parts[2].ToUpperInvariant();
                 if (e.Length != 3 || !char.IsLetterOrDigit(e[0]) ||
                     !int.TryParse(e[1..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out param))
-                    throw new FormatException($"'{parts[2]}' är ingen effekt (en bokstav eller siffra och två hexsiffror)");
+                    throw new FormatException($"'{parts[2]}' is not an effect (a letter or digit and two hex digits)");
                 effect = e[0];
                 if (effect == '0' && param == 0) effect = '\0';
             }

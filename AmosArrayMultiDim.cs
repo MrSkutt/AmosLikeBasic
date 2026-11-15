@@ -32,7 +32,7 @@ public sealed class AmosNumericArray : IAmosArray
     public AmosNumericArray(params int[] dimensions)
     {
         if (dimensions == null || dimensions.Length == 0)
-            throw new ArgumentException("Array måste ha minst en dimension");
+            throw new ArgumentException("An array needs at least one dimension");
             
         Dimensions = dimensions.Select(d => d).ToArray(); // +1 för AMOS 0-indexering (0 till N inklusivt)
         
@@ -54,7 +54,7 @@ public sealed class AmosNumericArray : IAmosArray
     {
         if (indices.Length != Dimensions.Length)
             throw new IndexOutOfRangeException(
-                $"Fel antal dimensioner: förväntade {Dimensions.Length}, fick {indices.Length}");
+                $"Wrong number of dimensions: expected {Dimensions.Length}, got {indices.Length}");
         
         int index = 0;
         int multiplier = 1;
@@ -64,7 +64,7 @@ public sealed class AmosNumericArray : IAmosArray
         {
             if (indices[i] < 0 || indices[i] >= Dimensions[i])
                 throw new IndexOutOfRangeException(
-                    $"Index {i} utanför gränserna: {indices[i]} (max: {Dimensions[i] - 1})");
+                    $"Index {i} out of range: {indices[i]} (max: {Dimensions[i] - 1})");
                 
             index += indices[i] * multiplier;
             multiplier *= Dimensions[i];
@@ -104,7 +104,7 @@ public sealed class AmosStringArray : IAmosArray
     public AmosStringArray(params int[] dimensions)
     {
         if (dimensions == null || dimensions.Length == 0)
-            throw new ArgumentException("Array måste ha minst en dimension");
+            throw new ArgumentException("An array needs at least one dimension");
             
         Dimensions = dimensions.Select(d => d).ToArray();
         
@@ -121,7 +121,7 @@ public sealed class AmosStringArray : IAmosArray
     {
         if (indices.Length != Dimensions.Length)
             throw new IndexOutOfRangeException(
-                $"Fel antal dimensioner: förväntade {Dimensions.Length}, fick {indices.Length}");
+                $"Wrong number of dimensions: expected {Dimensions.Length}, got {indices.Length}");
         
         int index = 0;
         int multiplier = 1;
@@ -130,7 +130,7 @@ public sealed class AmosStringArray : IAmosArray
         {
             if (indices[i] < 0 || indices[i] >= Dimensions[i])
                 throw new IndexOutOfRangeException(
-                    $"Index {i} utanför gränserna: {indices[i]} (max: {Dimensions[i] - 1})");
+                    $"Index {i} out of range: {indices[i]} (max: {Dimensions[i] - 1})");
                 
             index += indices[i] * multiplier;
             multiplier *= Dimensions[i];
