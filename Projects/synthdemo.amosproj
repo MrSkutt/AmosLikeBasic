@@ -1,0 +1,10 @@
+{
+  "Version": 2,
+  "ProgramText": "; Syntdemo: fyra kanaler i stil med C64\nPLAY BPM 140\n\n; Kanal 1: melodi med pulsbreddsmodulering och vibrato\nPLAY WAVE 1, \"Pulse\"\nPLAY PULSE 1, 30, 15, 1.5\nPLAY ADSR 1, 5, 120, 70, 150\nPLAY VIBRATO 1, 20, 5\nPLAY GLIDE 1, 25\nPLAY VOLUME 1, 0.25\n\n; Kanal 2: bas med filter-envelope, \"wah\" på varje not\nPLAY WAVE 2, \"Sawtooth\"\nPLAY ADSR 2, 2, 0, 100, 60\nPLAY FILTER 2, \"LOW\", 150, 65\nPLAY FILTERENV 2, 2500, 2, 180\nPLAY VOLUME 2, 0.28\n\n; Kanal 3: ackord som snabbt arpeggio\nPLAY WAVE 3, \"Pulse\"\nPLAY PULSE 3, 25\nPLAY ARP 3, \"0 7 12\", 50\nPLAY ADSR 3, 10, 300, 40, 200\nPLAY VOLUME 3, 0.12\n\n; Kanal 4: trummor\nPLAY WAVE 4, \"Drums\"\nPLAY VOLUME 4, 0.3\n\nM1$ = \"E5:8 A5 C6 B5 A5:4 E5 F5:8 A5 C6 A5 G5:4 F5 E5:8 G5 C6 D6 E6:4 D6:8 C6\"\nMELODI$ = M1$ & \" B5:4. A5:8 G5:2 \" & M1$ & \" B5:4 G5 A5:2\"\nBAS$ = \"A2:8 A2 A3 A2 A2 A3 A2 A3 F2 F2 F3 F2 F2 F3 F2 F3 C3 C3 C4 C3 C3 C4 C3 C4 G2 G2 G3 G2 G2 G3 G2 G3\"\n\nPLAY MUSIC 1, MELODI$\nPLAY MUSIC 2, BAS$ & \" \" & BAS$\nPLAY MUSIC 3, \"A4:1 F4 C5 G4 A4 F4 C5 G4\"\nPLAY LOOP 4, \"BD:8 HH SD HH BD BD SD HH\"\n\nPRINT \"Spelar... basens filter öppnas sakta under låten\"\n\n; Basens grundfrekvens höjs medan musiken spelar\nF = 150\nWHILE PLAYING(1)\n  F = F + 1\n  PLAY FILTER 2, \"LOW\", F, 65\n  WAIT VBL\nWEND\n\nPLAY STOP\nPRINT \"Klart!\"\n",
+  "ScreenWidth": null,
+  "ScreenHeight": null,
+  "Sprites": null,
+  "MapWidth": null,
+  "MapHeight": null,
+  "MapData": null
+}

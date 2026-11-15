@@ -441,6 +441,7 @@ PLAY ADSR kanal, attack, decay, sustain, release
 PLAY GATE kanal, procent
 PLAY PULSE kanal, bredd [, djup, fart]
 PLAY FILTER kanal, "typ", frekvens, resonans
+PLAY FILTERENV kanal, djup [, attack, decay]
 PLAY VIBRATO kanal, djup, fart
 PLAY GLIDE kanal, millisekunder
 PLAY BEND kanal, halvtoner
@@ -464,6 +465,7 @@ Synten har åtta kanaler, 1 – 8. Allt utom `MUSIC`, `LOOP` och `STOP` är inst
 | `PLAY GATE` | hur stor del av notlängden tonen hålls, 5 – 100 (standard 90) |
 | `PLAY PULSE` | pulsbredd i procent för `Pulse` (standard 25), och pulsbreddsmodulering: djup i procent, fart i Hz |
 | `PLAY FILTER` | `"LOW"`, `"HIGH"`, `"BAND"` eller `"OFF"`; frekvens 20 – 18 000 Hz, resonans 0 – 100 |
+| `PLAY FILTERENV` | filtret öppnas med upp till djup Hz vid varje not; attack och decay i millisekunder (standard 5 och 200); djup 0 stänger av |
 | `PLAY VIBRATO` | djup i hundradels halvton, fart i Hz; djup 0 stänger av |
 | `PLAY GLIDE` | glidning mellan noter; 0 stänger av |
 | `PLAY BEND` | flyttar tonhöjden ett antal halvtoner; 0 är normalt |

@@ -68,6 +68,7 @@ namespace AmosLikeBasic
             public double Attack = 0.02, Decay = 0.05, Sustain = 0.7, Release = 0.1;
             public FilterMode Filter = FilterMode.Off;
             public double Cutoff = 2000, Resonance;
+            public double FilterEnvDepth, FilterEnvAttack = 0.005, FilterEnvDecay = 0.2;   // Hz, sekunder
             public double VibratoDepth, VibratoRate = 6;   // djup i halvtoner
             public int[] Arp = Array.Empty<int>();
             public double ArpRate = 50;
@@ -97,6 +98,8 @@ namespace AmosLikeBasic
             public float[]? Drum;
             public int DrumPos;
             public double Ic1, Ic2, SmoothCutoff = 2000;
+            public double FilterEnv;
+            public bool FilterEnvRising;
 
             public void ResetSettings()
             {
@@ -105,6 +108,7 @@ namespace AmosLikeBasic
                 PulseWidth = 0.25; PwmDepth = 0; PwmRate = 0;
                 Attack = 0.02; Decay = 0.05; Sustain = 0.7; Release = 0.1;
                 Filter = FilterMode.Off; Cutoff = 2000; Resonance = 0;
+                FilterEnvDepth = 0; FilterEnvAttack = 0.005; FilterEnvDecay = 0.2;
                 VibratoDepth = 0; VibratoRate = 6;
                 Arp = Array.Empty<int>(); ArpRate = 50;
                 Glide = 0; Bend = 0;
@@ -262,6 +266,16 @@ namespace AmosLikeBasic
             };
             v.Cutoff = Math.Clamp(cutoffHz, 20, 18000);
             v.Resonance = Math.Clamp(resonancePercent / 100.0, 0, 0.98);
+        }
+
+        // Filtret öppnas med upp till djup Hz vid varje ny not och stängs sedan igen.
+        // Attack och decay i millisekunder. Negativt djup stänger filtret i stället.
+        public static void SetFilterEnvelope(int channel, double depthHz, double attackMs, double decayMs)
+        {
+            var v = _voices[ChIdx(channel)];
+            v.FilterEnvDepth = Math.Clamp(depthHz, -18000, 18000);
+            v.FilterEnvAttack = Math.Max(0, attackMs) / 1000.0;
+            v.FilterEnvDecay = Math.Max(1, decayMs) / 1000.0;
         }
 
         // Djup i hundradels halvton (cent), fart i Hz
@@ -484,7 +498,7 @@ namespace AmosLikeBasic
             }
 
             if (v.Filter != FilterMode.Off)
-                sample = ApplyFilter(v, sample);
+                sample = ApplyFilter(v, sample, NextFilterEnvelope(v, dt));
 
             return sample;
         }
@@ -572,11 +586,27 @@ namespace AmosLikeBasic
             return v.Env;
         }
 
-        // Tillståndsvariabelfilter (TPT), stabilt även när brytfrekvensen ändras hela tiden
-        private static double ApplyFilter(Voice v, double x)
+        // Filtrets egen envelope: stiger linjärt under attack, avtar sedan exponentiellt
+        private static double NextFilterEnvelope(Voice v, double dt)
+        {
+            if (v.FilterEnvDepth == 0) return 0;
+            if (v.FilterEnvRising)
+            {
+                v.FilterEnv += v.FilterEnvAttack > 0 ? dt / v.FilterEnvAttack : 1;
+                if (v.FilterEnv >= 1) { v.FilterEnv = 1; v.FilterEnvRising = false; }
+            }
+            else
+                v.FilterEnv *= Math.Exp(-3.0 * dt / v.FilterEnvDecay);
+            return v.FilterEnv * v.FilterEnvDepth;
+        }
+
+        // Tillståndsvariabelfilter (TPT), stabilt även när brytfrekvensen ändras hela tiden.
+        // envOffset (Hz) kommer från filtrets envelope och jämnas inte ut, så att attacken blir snabb.
+        private static double ApplyFilter(Voice v, double x, double envOffset)
         {
             v.SmoothCutoff += (v.Cutoff - v.SmoothCutoff) * 0.005;
-            double g = Math.Tan(Math.PI * Math.Min(v.SmoothCutoff, SampleRate * 0.45) / SampleRate);
+            double cutoff = Math.Clamp(v.SmoothCutoff + envOffset, 20, SampleRate * 0.45);
+            double g = Math.Tan(Math.PI * cutoff / SampleRate);
             double k = 2.0 - 2.0 * v.Resonance;
             double a1 = 1.0 / (1.0 + g * (g + k));
             double a2 = g * a1;
@@ -643,6 +673,7 @@ namespace AmosLikeBasic
 
             if (e.Drum != null)
             {
+                v.FilterEnvRising = true;
                 v.Drum = e.Drum;
                 v.DrumPos = 0;
                 v.GateLeft = 0;
@@ -652,6 +683,7 @@ namespace AmosLikeBasic
                 if (v.Glide <= 0 || v.Stage == EnvStage.Idle) v.Freq = e.Freq;
                 v.TargetFreq = e.Freq;
                 v.Stage = EnvStage.Attack;   // startar från nuvarande nivå, utan klick
+                v.FilterEnvRising = true;
                 v.ArpIndex = 0;
                 v.ArpCounter = 0;
                 v.GateLeft = noteSamples * v.Gate;

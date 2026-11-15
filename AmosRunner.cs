@@ -3232,6 +3232,13 @@ public static partial class AmosRunner
                                         pS.Count >= 5 ? EvalDouble(pS[4], vars, ln, getInkey, isKeyDown, graphics) : 0);
                                     break;
 
+                                case "FILTERENV":
+                                    ChiptuneSynth.SetFilterEnvelope(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics),
+                                        pS.Count >= 4 ? EvalDouble(pS[3], vars, ln, getInkey, isKeyDown, graphics) : 5,
+                                        pS.Count >= 5 ? EvalDouble(pS[4], vars, ln, getInkey, isKeyDown, graphics) : 200);
+                                    break;
+
                                 case "VIBRATO":
                                     ChiptuneSynth.SetVibrato(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics),

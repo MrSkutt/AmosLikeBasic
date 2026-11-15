@@ -151,6 +151,23 @@ GOTO Loop
 
 Basen öppnar och stänger sig i en jämn våg, som i ett gammalt syntspel.
 
+### Filter-envelope
+
+Ska filtret i stället öppnas och stängas av sig självt för varje not använder du `PLAY FILTERENV kanal, djup, attack, decay`. Vid varje ny not öppnas filtret med upp till `djup` hertz över frekvensen i `PLAY FILTER`, på `attack` millisekunder, och stängs sedan igen under ungefär `decay` millisekunder. Det ger det klassiska "wah"-ljudet i basen:
+
+```basic
+PLAY WAVE 1, "Sawtooth"
+PLAY ADSR 1, 2, 0, 100, 60
+PLAY FILTER 1, "LOW", 150, 65
+PLAY FILTERENV 1, 2500, 2, 180
+PLAY MUSIC 1, "A2:8 A2 A3 A2 F2 F2 F3 F2 C3 C3 C4 C3 G2 G2 G3 G2"
+WAIT MUSIC
+```
+
+Ett negativt djup stänger filtret i stället, och `PLAY FILTERENV 1, 0` stänger av. Filtret måste vara på med `PLAY FILTER` för att envelopen ska höras.
+
+> **Tips:** Projektet `Projects/synthdemo.amosproj` är en kort låt som använder det mesta i det här avsnittet: PWM, vibrato, filter-envelope, arpeggio och trummor.
+
 ### Vibrato, glidning och bend
 
 | Kommando | Gör |
