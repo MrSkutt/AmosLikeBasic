@@ -99,5 +99,3 @@ Trumljud på en kanal med `PLAY WAVE kanal, "Drums"`:
 **Funktioner kan inte rita.** I en `FUNCTION` fungerar bara tilldelning, `IF`, `FOR`, `WHILE`, `INC`, `DEC` och `RETURN`. Använd en `PROC` för allt annat.
 
 **Fonttext ligger kvar.** Text från `FONT PRINT` ritas om varje bild tills den tas bort med `FONT CLEAR`. Text som ändras måste därför börja med `FONT CLEAR` varje varv.
-
-**Det finns inget SWAP.** Byt plats på två värden med en hjälpvariabel: `T = A : A = B : B = T`.

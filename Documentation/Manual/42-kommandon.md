@@ -677,6 +677,23 @@ Om filnamnet i `SPRITE LOAD` innehåller storleken, som `gubbe_W32_H48_B8.png`, 
 
 Effekterna numreras från 0 i den ordning de läggs till. Med `EFFECT UPDATE` kan parametrarna `RADIUS`, `AMPLITUDEX`, `FREQUENCYX`, `AMPLITUDEY`, `FREQUENCYY`, `PHASEX`, `PHASEY`, `TIME`, `BRIGHTNESS`, `CONTRAST` och `SATURATION` ändras.
 
+### SWAP
+
+```text
+SWAP variabel, variabel
+```
+
+Byter plats på värdena i två variabler eller arrayplatser av samma sort.
+
+```basic
+A = 1 : B = 2
+SWAP A, B
+PRINT A & " " & B
+DIM T(3) = [10, 20, 30]
+SWAP T(0), T(2)
+PRINT JOIN$(T, ",")
+```
+
 ## T
 
 ### TEXT

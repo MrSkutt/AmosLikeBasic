@@ -2510,6 +2510,18 @@ public static partial class AmosRunner
                             break;
                         }
 
+                        case "SWAP":
+                        {
+                            // SWAP A, B eller SWAP A(I), A(J): båda värdena läses innan något skrivs
+                            var sw = SplitTopLevelCsv(arg);
+                            if (sw.Count != 2)
+                                throw new Exception($"Syntax Error in SWAP: expected two variables at line {ln}");
+                            var first = EvalValue(sw[0].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                            var second = EvalValue(sw[1].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                            AssignValueToTarget(sw[0], second, ln);
+                            AssignValueToTarget(sw[1], first, ln);
+                            break;
+                        }
                         case "INC":
                             setVar(arg, GetDoubleVar(arg, vars, ln) + 1.0);
                             break;
