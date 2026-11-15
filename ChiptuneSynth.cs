@@ -7,12 +7,12 @@ using ManagedBass;
 
 namespace AmosLikeBasic
 {
-    // Realtidssynt i stil med C64:ans SID och NES:ens ljudkrets.
+    // Real-time synth in the style of the C64's SID and the NES sound chip.
     //
-    // Alla röster räknas ut sampel för sampel i en enda ljudström. Sequencern (PLAY MUSIC)
-    // körs i samma ljudtråd, så kanalerna går exakt i takt. Inställningarna (vågform,
-    // pulsbredd, filter, envelope, vibrato ...) läses för varje sampel, så de kan ändras
-    // från BASIC medan ljudet spelar och hörs direkt.
+    // All voices are worked out sample by sample in a single audio stream. The sequencer (PLAY MUSIC)
+    // runs in the same audio thread, so the channels stay exactly in step. The settings (waveform,
+    // pulse width, filter, envelope, vibrato ...) are read for every sample, so they can be changed
+    // from BASIC while the sound plays and are heard straight away.
     public partial class ChiptuneSynth
     {
         public const int SampleRate = 44100;
@@ -29,13 +29,13 @@ namespace AmosLikeBasic
             Off, Low, High, Band
         }
 
-        // ── Sequencerns händelser ─────────────────────────────────────
+        // ── Sequencer events ──────────────────────────────────────────
         private readonly struct NoteEvent
         {
             public readonly double Freq;       // 0 = paus
-            public readonly float[]? Drum;     // trumljud på en trumkanal
-            public readonly double Length;     // del av helnot, 0.25 = fjärdedel
-            public readonly Action<Voice>? Effect;   // {effekt} i notsträngen, tar ingen tid
+            public readonly float[]? Drum;     // drum sound on a drum channel
+            public readonly double Length;     // fraction of a whole note, 0.25 = a quarter
+            public readonly Action<Voice>? Effect;   // {effect} in the note string, takes no time
 
             public NoteEvent(double freq, float[]? drum, double length)
             {
@@ -61,17 +61,17 @@ namespace AmosLikeBasic
             public Sequence(NoteEvent[] events, bool loop) { Events = events; Loop = loop; }
         }
 
-        // Skickas som "ny sekvens" för att stoppa en kanal
+        // Sent as a "new sequence" to stop a channel
         private static readonly Sequence StopSequence = new(Array.Empty<NoteEvent>(), false);
 
         private enum EnvStage { Idle, Attack, Decay, Sustain, Release }
 
-        // ── En röst ──────────────────────────────────────────────────
-        // Fälten under "Inställningar" skrivs av BASIC-tråden och läses av ljudtråden.
-        // Resten ägs av ljudtråden.
+        // ── A voice ──────────────────────────────────────────────────
+        // The fields under "Settings" are written by the BASIC thread and read by the audio thread.
+        // The rest is owned by the audio thread.
         private sealed class Voice
         {
-            // Inställningar
+            // Settings
             public WaveformType Wave = WaveformType.Square;
             public double Volume = 0.3;
             public double PulseWidth = 0.25, PwmDepth, PwmRate;
@@ -79,15 +79,15 @@ namespace AmosLikeBasic
             public FilterMode Filter = FilterMode.Off;
             public double Cutoff = 2000, Resonance;
             public double FilterEnvDepth, FilterEnvAttack = 0.005, FilterEnvDecay = 0.2;   // Hz, sekunder
-            public double VibratoDepth, VibratoRate = 6;   // djup i halvtoner
+            public double VibratoDepth, VibratoRate = 6;   // depth in semitones
             public int[] Arp = Array.Empty<int>();
             public double ArpRate = 50;
             public double Glide;                           // sekunder
             public double Bend;                            // halvtoner
             public int RingSource = -1, SyncSource = -1;
-            public double Gate = 0.9;                      // del av notlängden som tonen hålls
+            public double Gate = 0.9;                      // fraction of the note length the note is held
 
-            // Glidningar från {SWEEP} och {FADE}: ändring per sampel och antal sampel kvar
+            // Slides from {SWEEP} and {FADE}: change per sample and number of samples left
             public double CutoffSlide, VolumeSlide;
             public int CutoffSlideLeft, VolumeSlideLeft;
 
@@ -97,7 +97,7 @@ namespace AmosLikeBasic
             public int SeqIndex;
             public double SamplesLeft, GateLeft;
 
-            // Ljudtillstånd
+            // Sound state
             public double Phase, Freq, TargetFreq;
             public bool Wrapped;
             public int Lfsr = 1;
@@ -115,7 +115,7 @@ namespace AmosLikeBasic
             public double FilterEnv;
             public bool FilterEnvRising;
 
-            // Kopia av inställningarna, så att en ljudeffekt kan låna kanalen och lämna tillbaka den
+            // A copy of the settings, so that a sound effect can borrow the channel and give it back
             public Voice CopySettings() => (Voice)MemberwiseClone();
 
             public void RestoreSettings(Voice s)
@@ -149,7 +149,7 @@ namespace AmosLikeBasic
             }
         }
 
-        // Ljudeffekter (PLAY COIN ...) är färdiga ljudklipp som mixas in
+        // Sound effects (PLAY COIN ...) are ready-made sound clips that are mixed in
         private sealed class SfxSlot
         {
             public float[]? Buffer;
@@ -171,16 +171,16 @@ namespace AmosLikeBasic
         private static int ChIdx(int channel) => Math.Clamp(channel - 1, 0, Channels - 1);
 
         // ════════════════════════════════════════════════════════════════
-        //  Utgång: BASS-ström, eller en tyst klocka om det inte finns ljud
+        //  Output: a BASS stream, or a silent clock if there is no sound
         // ════════════════════════════════════════════════════════════════
 
         private static readonly object _startLock = new();
         private static bool _started;
         private static int _stream;
-        private static StreamProcedure? _streamProc;   // hålls kvar så att GC inte tar den
+        private static StreamProcedure? _streamProc;   // kept so that the GC does not take it
         private static float[] _renderBuffer = new float[4096];
 
-        // Sätts av tester som själva anropar Render
+        // Set by tests that call Render themselves
         public static bool ManualRendering { get; set; }
 
         private static void EnsureStarted()
@@ -195,14 +195,14 @@ namespace AmosLikeBasic
                 _stream = Bass.CreateStream(SampleRate, 1, BassFlags.Float, _streamProc, IntPtr.Zero);
                 if (_stream != 0)
                 {
-                    // Ingen extra buffring: ändringar från BASIC hörs inom några millisekunder
+                    // No extra buffering: changes from BASIC are heard within a few milliseconds
                     Bass.ChannelSetAttribute(_stream, ChannelAttribute.Buffer, 0);
                     Bass.ChannelPlay(_stream);
                 }
                 else
                 {
-                    // Inget ljudkort (eller BASS ej startat): låt sequencern gå ändå,
-                    // så att PLAYING och WAIT MUSIC fungerar som vanligt
+                    // No sound card (or BASS not started): let the sequencer run anyway,
+                    // so that PLAYING and WAIT MUSIC work as usual
                     var t = new Thread(SilentClock) { IsBackground = true, Name = "Chiptune clock" };
                     t.Start();
                 }
@@ -236,12 +236,12 @@ namespace AmosLikeBasic
         }
 
         // ════════════════════════════════════════════════════════════════
-        //  Inställningar från BASIC
+        //  Settings from BASIC
         // ════════════════════════════════════════════════════════════════
 
         public static void SetBpm(int bpm) => _bpm = Math.Max(1, bpm);
 
-        // Nollställer alla kanalers inställningar, när ett nytt program startar
+        // Resets the settings of all channels, when a new program starts
         public static void Reset()
         {
             StopMusic();
@@ -282,7 +282,7 @@ namespace AmosLikeBasic
             v.Volume = Math.Clamp(volume, 0.0, 1.0);
         }
 
-        // Pulsbredd i procent, och valfri pulsbreddsmodulering (djup i procent, fart i Hz)
+        // Pulse width in percent, and optional pulse width modulation (depth in percent, rate in Hz)
         public static void SetPulse(int channel, double widthPercent, double pwmDepthPercent = 0, double pwmRate = 0)
         {
             var v = _voices[ChIdx(channel)];
@@ -291,7 +291,7 @@ namespace AmosLikeBasic
             v.PwmRate = Math.Max(0, pwmRate);
         }
 
-        // Attack, decay och release i millisekunder, sustain 0 – 100
+        // Attack, decay and release in milliseconds, sustain 0 – 100
         public static void SetAdsr(int channel, double attackMs, double decayMs, double sustainPercent, double releaseMs)
         {
             var v = _voices[ChIdx(channel)];
@@ -318,8 +318,8 @@ namespace AmosLikeBasic
             _ => FilterMode.Off
         };
 
-        // Filtret öppnas med upp till djup Hz vid varje ny not och stängs sedan igen.
-        // Attack och decay i millisekunder. Negativt djup stänger filtret i stället.
+        // The filter opens by up to depth Hz on every new note and then closes again.
+        // Attack and decay in milliseconds. A negative depth closes the filter instead.
         public static void SetFilterEnvelope(int channel, double depthHz, double attackMs, double decayMs)
         {
             var v = _voices[ChIdx(channel)];
@@ -328,7 +328,7 @@ namespace AmosLikeBasic
             v.FilterEnvDecay = Math.Max(1, decayMs) / 1000.0;
         }
 
-        // Djup i hundradels halvton (cent), fart i Hz
+        // Depth in hundredths of a semitone (cents), rate in Hz
         public static void SetVibrato(int channel, double depthCents, double rate)
         {
             var v = _voices[ChIdx(channel)];
@@ -336,7 +336,7 @@ namespace AmosLikeBasic
             v.VibratoRate = Math.Max(0, rate);
         }
 
-        // Halvtonssteg, t.ex. "0 4 7" för ett durackord, och hur många steg per sekund
+        // Semitone steps, e.g. "0 4 7" for a major chord, and how many steps per second
         public static void SetArpeggio(int channel, string offsets, double rate)
         {
             var list = new List<int>();
@@ -354,7 +354,7 @@ namespace AmosLikeBasic
         public static void SetGate(int channel, double percent) =>
             _voices[ChIdx(channel)].Gate = Math.Clamp(percent / 100.0, 0.05, 1.0);
 
-        // Ringmodulering och hård synk mot en annan kanal (0 stänger av), som på SID-kretsen
+        // Ring modulation and hard sync with another channel (0 turns it off), as on the SID chip
         public static void SetRing(int channel, int sourceChannel) =>
             _voices[ChIdx(channel)].RingSource = sourceChannel <= 0 ? -1 : ChIdx(sourceChannel);
 
@@ -373,7 +373,7 @@ namespace AmosLikeBasic
             EnsureStarted();
         }
 
-        // Stoppar all syntmusik, även trackerlåten
+        // Stops all synth music, the tracker song too
         public static void StopMusic()
         {
             TrackStop();
@@ -401,9 +401,9 @@ namespace AmosLikeBasic
             return false;
         }
 
-        // "C5:8 E5 G5:4. R:4 BD SD" → händelser. Längden gäller tills en ny anges,
-        // och en punkt efter längden gör noten en halv gång längre.
-        // Inom klamrar står effekter som ändrar ljudet just där i melodin: "{CUT 400; ARP 0 4 7} C4:8 E4"
+        // "C5:8 E5 G5:4. R:4 BD SD" → events. The length applies until a new one is given,
+        // and a dot after the length makes the note half as long again.
+        // Inside braces are effects that change the sound right there in the melody: "{CUT 400; ARP 0 4 7} C4:8 E4"
         private static NoteEvent[] ParseSequence(string sequence, bool drums)
         {
             var result = new List<NoteEvent>();
@@ -439,7 +439,7 @@ namespace AmosLikeBasic
             return result.ToArray();
         }
 
-        // Delar vid mellanslag och komman, men håller ihop allt inom {}
+        // Splits at spaces and commas, but keeps everything inside {} together
         private static List<string> SplitSequence(string text)
         {
             var tokens = new List<string>();
@@ -469,8 +469,8 @@ namespace AmosLikeBasic
             return tokens;
         }
 
-        // En effekt som "CUT 800" eller "ADSR 5, 80, 60, 200". Samma namn och värden som
-        // PLAY-kommandona, fast utan kanalnummer. Körs i ljudtråden när melodin kommer dit.
+        // An effect such as "CUT 800" or "ADSR 5, 80, 60, 200". The same names and values as the
+        // PLAY commands, but without the channel number. Runs in the audio thread when the melody gets there.
         private static Action<Voice> ParseEffect(string text)
         {
             var words = text.Split(new[] { ' ', ',', '\t' }, StringSplitOptions.RemoveEmptyEntries);
@@ -546,7 +546,7 @@ namespace AmosLikeBasic
                 }
                 case "SWEEP":
                 {
-                    // Filtret glider till en ny brytfrekvens under ett antal millisekunder
+                    // The filter glides to a new cutoff frequency over a number of milliseconds
                     Need(2);
                     double target = Math.Clamp(Num(1, 2000), 20, 18000);
                     int samples = Math.Max(1, (int)(Num(2, 0) / 1000.0 * SampleRate));
@@ -558,7 +558,7 @@ namespace AmosLikeBasic
                 }
                 case "FADE":
                 {
-                    // Volymen glider till ett nytt värde under ett antal millisekunder
+                    // The volume glides to a new value over a number of milliseconds
                     Need(2);
                     double target = Math.Clamp(Num(1, 0), 0, 1);
                     int samples = Math.Max(1, (int)(Num(2, 0) / 1000.0 * SampleRate));
@@ -583,7 +583,7 @@ namespace AmosLikeBasic
                 }
                 case "ARP":
                 {
-                    // {ARP 0 4 7} spelar ackord, {ARP} eller {ARP 0} stänger av
+                    // {ARP 0 4 7} plays a chord, {ARP} or {ARP 0} turns it off
                     var steps = new List<int>();
                     for (int i = 1; i < words.Length; i++) steps.Add((int)Num(i, 0));
                     var arp = steps.Count > 1 ? steps.ToArray() : Array.Empty<int>();
@@ -638,7 +638,7 @@ namespace AmosLikeBasic
             ["B"] = 11,
         };
 
-        // Utan oktav används samma oktav som förra noten
+        // Without an octave, the octave of the previous note is used
         private static double NoteNameToFreq(string note, ref int octave)
         {
             int digits = note.Length;
@@ -650,7 +650,7 @@ namespace AmosLikeBasic
         }
 
         // ════════════════════════════════════════════════════════════════
-        //  Ljudtråden
+        //  The audio thread
         // ════════════════════════════════════════════════════════════════
 
         public static void Render(Span<float> output)
@@ -674,7 +674,7 @@ namespace AmosLikeBasic
             }
         }
 
-        // Rör inte normala nivåer, men rundar av toppar i stället för att klippa dem hårt
+        // Leaves normal levels alone, but rounds off peaks instead of clipping them hard
         private static double SoftClip(double x)
         {
             double a = Math.Abs(x);
@@ -706,7 +706,7 @@ namespace AmosLikeBasic
 
             double dt = 1.0 / SampleRate;
 
-            // Volym utan knaster när den ändras
+            // Volume without crackle when it changes
             v.Gain += (v.Volume - v.Gain) * 0.002;
 
             double sample;
@@ -718,7 +718,7 @@ namespace AmosLikeBasic
             }
             else
             {
-                // Glidning mellan toner
+                // Gliding between notes
                 if (v.Glide > 0 && v.Freq > 0)
                     v.Freq *= Math.Pow(v.TargetFreq / v.Freq, Math.Min(1.0, 4.0 * dt / v.Glide));
                 else
@@ -787,7 +787,7 @@ namespace AmosLikeBasic
                     return Math.Sin(2 * Math.PI * t);
                 case WaveformType.Noise:
                 {
-                    // 15-bitars skiftregister som på NES, klockat i takt med tonhöjden
+                    // 15-bit shift register as on the NES, clocked in step with the pitch
                     v.NoiseClock += inc * 16;
                     while (v.NoiseClock >= 1)
                     {
@@ -803,7 +803,7 @@ namespace AmosLikeBasic
             }
         }
 
-        // Pulsvåg med mjukade kanter (PolyBLEP), så att höga toner inte låter fula
+        // Pulse wave with smoothed edges (PolyBLEP), so that high notes do not sound ugly
         private static double PulseWave(double t, double inc, double width)
         {
             double s = t < width ? 1.0 : -1.0;
@@ -834,7 +834,7 @@ namespace AmosLikeBasic
                     if (v.Env <= v.Sustain) { v.Env = v.Sustain; v.Stage = EnvStage.Sustain; }
                     break;
                 case EnvStage.Sustain:
-                    // Följer med om sustain ändras medan tonen hålls
+                    // Follows along if the sustain changes while the note is held
                     v.Env += (v.Sustain - v.Env) * 0.002;
                     break;
                 case EnvStage.Release:
@@ -845,7 +845,7 @@ namespace AmosLikeBasic
             return v.Env;
         }
 
-        // Filtrets egen envelope: stiger linjärt under attack, avtar sedan exponentiellt
+        // The filter's own envelope: rises linearly during the attack, then falls off exponentially
         private static double NextFilterEnvelope(Voice v, double dt)
         {
             if (v.FilterEnvDepth == 0) return 0;
@@ -859,8 +859,8 @@ namespace AmosLikeBasic
             return v.FilterEnv * v.FilterEnvDepth;
         }
 
-        // Tillståndsvariabelfilter (TPT), stabilt även när brytfrekvensen ändras hela tiden.
-        // envOffset (Hz) kommer från filtrets envelope och jämnas inte ut, så att attacken blir snabb.
+        // State variable filter (TPT), stable even when the cutoff changes all the time.
+        // envOffset (Hz) comes from the filter envelope and is not smoothed, so that the attack is fast.
         private static double ApplyFilter(Voice v, double x, double envOffset)
         {
             v.SmoothCutoff += (v.Cutoff - v.SmoothCutoff) * 0.005;
@@ -916,8 +916,8 @@ namespace AmosLikeBasic
             v.SamplesLeft--;
             if (v.SamplesLeft > 0) return;
 
-            // Effekter tar ingen tid, så kör dem alla fram till nästa not.
-            // Räknaren hindrar en evig loop om en loopad melodi bara har effekter.
+            // Effects take no time, so run them all up to the next note.
+            // The counter prevents an endless loop if a looping melody only has effects.
             NoteEvent e;
             int guard = seq.Events.Length + 1;
             while (true)
@@ -941,7 +941,7 @@ namespace AmosLikeBasic
                 }
             }
             double noteSamples = SampleRate * 60.0 / _bpm * 4.0 * e.Length;
-            v.SamplesLeft += noteSamples;   // behåller bråkdelen, så takten inte glider
+            v.SamplesLeft += noteSamples;   // keeps the fraction, so the rhythm does not drift
 
             if (e.Drum != null)
             {
@@ -954,7 +954,7 @@ namespace AmosLikeBasic
             {
                 if (v.Glide <= 0 || v.Stage == EnvStage.Idle) v.Freq = e.Freq;
                 v.TargetFreq = e.Freq;
-                v.Stage = EnvStage.Attack;   // startar från nuvarande nivå, utan klick
+                v.Stage = EnvStage.Attack;   // starts from the current level, without a click
                 v.FilterEnvRising = true;
                 v.ArpIndex = 0;
                 v.ArpCounter = 0;
@@ -994,7 +994,7 @@ namespace AmosLikeBasic
             }
         }
 
-        // Räknar ut ett trumljud: shape(andel av ljudet, fas, brus) med tonhöjd freq(andel)
+        // Works out a drum sound: shape(fraction of the sound, phase, noise) with the pitch freq(fraction)
         private static float[] Drum(double seconds, Func<double, double, double, double> shape, Func<double, double> freq)
         {
             var rnd = new Random(1);
@@ -1032,7 +1032,7 @@ namespace AmosLikeBasic
             return 1;
         }
 
-        // Ljud där tonhöjden går från start till slut, med en enkel envelope
+        // Sound where the pitch goes from start to end, with a simple envelope
         private static float[] Effect(double seconds, double volume, Func<double, double> freqAt,
             Func<double, double, double> wave, double attack, double decay, double sustain, double release)
         {

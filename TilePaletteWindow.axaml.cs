@@ -15,7 +15,7 @@ public partial class TilePaletteWindow : Window
     {
         InitializeComponent();
             
-        // Säkerhetskontroll: tilesInWidth får inte vara 0 eller mindre
+        // Safety check: tilesInWidth must not be 0 or less
         if (tilesInWidth <= 0) tilesInWidth = 1;
 
         int rows = (int)Math.Ceiling((double)tiles.Count / tilesInWidth);
@@ -26,7 +26,7 @@ public partial class TilePaletteWindow : Window
         PaletteCanvas.Width = tilesInWidth * tileSide;
         PaletteCanvas.Height = Math.Ceiling(tiles.Count / (double)tilesInWidth) * tileSide;
 
-        // Vi placerar ut varje tile manuellt på sin exakta plats
+        // We place every tile by hand at its exact position
         for (int i = 0; i < tiles.Count; i++)
         {
             int row = i / tilesInWidth;
@@ -37,10 +37,10 @@ public partial class TilePaletteWindow : Window
                 Source = tiles[i],
                 Width = tileSide,
                 Height = tileSide,
-                DataContext = i // Spara indexet här
+                DataContext = i // Keep the index here
             };
 
-            // Vi lägger bilden i en knapp för att kunna klicka
+            // We put the image in a button so that it can be clicked
             var btn = new Button
             {
                 Padding = new Thickness(0),

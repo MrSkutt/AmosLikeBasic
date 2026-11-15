@@ -17,7 +17,7 @@ namespace AmosLikeBasic;
 
 public static partial class AmosRunner
 {
-    // Lägg till i din klass
+    // Add to your class
     private static Dictionary<int, FileChannel> _openFiles = new Dictionary<int, FileChannel>();
     private const int MaxChannels = 15;
     private static DateTime _programStartTime = DateTime.MinValue;
@@ -111,7 +111,7 @@ public static partial class AmosRunner
     
     private static async Task EmitPrintAsync(Func<string, Task> appendLineAsync, string text)
     {
-        // Normalisera newlines och skriv som flera @@PRINT-rader
+        // Normalise newlines and write as several @@PRINT lines
         text = (text ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
         var parts = text.Split('\n');
 
@@ -129,16 +129,16 @@ public static partial class AmosRunner
     }
     private sealed class WhileFrame
     {
-        public required int WhilePc;     // Program counter för WHILE-raden
-        public int WendPc;                // Program counter för WEND (fylls senare)
-        public required int Line;         // Källrad (för felmeddelanden)
+        public required int WhilePc;     // Program counter for the WHILE line
+        public int WendPc;                // Program counter for the WEND (filled in later)
+        public required int Line;         // Source line (for error messages)
         public required string Condition; // WHILE-villkoret
     }
 
     private sealed class RepeatFrame
     {
         public int RepeatPc;
-        public int UntilPc;   // <-- ny
+        public int UntilPc;   // <-- new
         public int RepeatLine;
     }
 
@@ -173,27 +173,27 @@ public static partial class AmosRunner
     {
         public required string Name;
         public required List<string> Parameters;
-        public required int StartPc;  // raden efter PROC-deklarationen
-        public required int EndPc;    // raden med END PROC
+        public required int StartPc;  // the line after the PROC declaration
+        public required int EndPc;    // the line with END PROC
     }
 
     private sealed class ProcCallFrame
     {
-        public required int ReturnPc;                          // dit vi hoppar tillbaka
-        public required Dictionary<string, object> SavedVars; // parametrar att återställa
+        public required int ReturnPc;                          // where we jump back to
+        public required Dictionary<string, object> SavedVars; // parameters to restore
     }
 
     
     
     private static readonly Random _rng = new();
     private static IntPtr _currentXmpContext = IntPtr.Zero;
-    private static TrackerSong? _trackSong;   // senast laddad med TRACK LOAD
-    private static TrackerSong? _sfxBank;     // instrumenten som TRACK SFX spelar, från TRACK SFX LOAD
+    private static TrackerSong? _trackSong;   // last loaded with TRACK LOAD
+    private static TrackerSong? _sfxBank;     // the instruments TRACK SFX plays, from TRACK SFX LOAD
     private static bool _trackLoop = true;
 
-    private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
+    private static System.Diagnostics.Process? _currentMusicProcess; // The music channel
     
-    // ✅ NYTT: Hjälpfunktion för att extrahera #X prefix
+    // ✅ NEW: Helper function to extract a #X prefix
     private static (int? tempScreen, string cleanArg) ExtractScreenPrefix(string arg)
     {
         if (arg == null) return ExtractScreenPrefixUncached(arg!);
@@ -213,38 +213,38 @@ public static partial class AmosRunner
         {
             char c = arg[i];
 
-            // Växla strängläge
+            // Toggle string mode
             if (c == '"')
             {
                 inString = !inString;
                 continue;
             }
 
-            // Vi bryr oss bara om # utanför strängar
+            // We only care about # outside strings
             if (!inString && c == '#')
             {
                 int start = i;
                 int j = i + 1;
 
-                // Måste följas av minst en siffra
+                // Must be followed by at least one digit
                 while (j < arg.Length && char.IsDigit(arg[j]))
                     j++;
 
-                if (j > i + 1) // vi hittade siffror
+                if (j > i + 1) // we found digits
                 {
                     string numberStr = arg.Substring(i + 1, j - (i + 1));
 
                     if (int.TryParse(numberStr, out int screenNum))
                     {
-                        // Hoppa över eventuell whitespace
+                        // Skip any whitespace
                         while (j < arg.Length && char.IsWhiteSpace(arg[j]))
                             j++;
 
-                        // Hoppa över eventuell komma
+                        // Skip any comma
                         if (j < arg.Length && arg[j] == ',')
                             j++;
 
-                        // Ta bort prefixet
+                        // Remove the prefix
                         string cleanArg = arg.Remove(start, j - start).Trim();
 
                         return (screenNum, cleanArg);
@@ -276,9 +276,9 @@ public static partial class AmosRunner
 
     public enum FileMode
     {
-        Input,   // Läsning
-        Output,  // Skrivning (skapar ny/skriver över)
-        Append   // Lägg till i slutet
+        Input,   // Reading
+        Output,  // Writing (creates new/overwrites)
+        Append   // Append to the end
     }
 
     static List<string> SplitTopLevelCsv(string s)
@@ -341,15 +341,15 @@ public static partial class AmosRunner
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         long lastVarUpdateTime = long.MinValue / 2;
         const long updateIntervalMs = 500;
-        // En lokal hjälpfunktion för att uppdatera variabler och trigga UI
+        // A local helper function for updating variables and triggering the UI
         var setVar = (string name, object value) => {
             vars[name] = value;
                 
-            // TickCount64 är mycket billigare än DateTime.Now, som annars kostade på varje tilldelning
+            // TickCount64 is much cheaper than DateTime.Now, which otherwise cost on every assignment
             var now = Environment.TickCount64;
             if (now - lastVarUpdateTime > updateIntervalMs)
             {
-                onVariablesChanged(new Dictionary<string, object>(vars)); // Skicka en kopia
+                onVariablesChanged(new Dictionary<string, object>(vars)); // Send a copy
                 lastVarUpdateTime = now;
             }
         };
@@ -384,14 +384,14 @@ public static partial class AmosRunner
             ChiptuneSynth.StopMusic();
         });
         
-        // === EXPANDERA INLINE-IF TILL MULTI-RAD ===
+        // === EXPAND INLINE IF INTO MULTI-LINE ===
         // "IF X THEN CMD1 : CMD2"  →  "IF X THEN\nCMD1\nCMD2\nENDIF"
-        // sourceLines[pc] = radnumret i editorn (1-baserat), för debuggern och felmeddelanden
+        // sourceLines[pc] = the line number in the editor (1-based), for the debugger and error messages
         var sourceLineList = new List<int>();
         lines = ExpandInlineIf(lines, sourceLineList);
         var sourceLines = sourceLineList.ToArray();
 
-        // Hjälpfunktion (placeras som static method i klassen):
+        // Helper function (placed as a static method in the class):
         static string[] ExpandInlineIf(string[] input, List<int> origin)
         {
             var result = new List<string>();
@@ -402,20 +402,20 @@ public static partial class AmosRunner
                 var stripped = StripLeadingLineNumber(StripComments(raw)).Trim();
                 var upper = stripped.ToUpperInvariant();
 
-                // Är det en inline-IF? (dvs. har THEN följt av faktiska kommandon)
+                // Is it an inline IF? (i.e. THEN followed by actual commands)
                 if (upper.StartsWith("IF "))
                 {
                     int thenIdx = IndexOfWord(upper, "THEN");
                     if (thenIdx >= 0)
                     {
                         var afterThen = stripped[(thenIdx + 4)..].Trim();
-                        // Om det finns något efter THEN → inline-IF
+                        // If there is something after THEN → inline IF
                         if (!string.IsNullOrEmpty(afterThen))
                         {
-                            // Extrahera villkorsdelen
+                            // Extract the condition part
                             var condition = stripped[..thenIdx].Trim(); // "IF X > 5"
                     
-                            // Kolla om det finns ELSE
+                            // Check whether there is an ELSE
                             var thenCmds = afterThen;
                             string? elseCmds = null;
                     
@@ -447,15 +447,15 @@ public static partial class AmosRunner
                     }
                 }
         
-                result.Add(raw); // Alla andra rader oförändrade
+                result.Add(raw); // All other lines unchanged
                 origin.Add(lineIndex + 1);
             }
             return result.ToArray();
         }
         
         var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var ifJumps = new Dictionary<int, int>(); // PC -> PC (Vart IF hoppar om falskt)
-        var elseJumps = new Dictionary<int, int>(); // PC -> PC (Vart ELSE hoppar för att skippa till ENDIF)
+        var ifJumps = new Dictionary<int, int>(); // PC -> PC (where IF jumps if false)
+        var elseJumps = new Dictionary<int, int>(); // PC -> PC (where ELSE jumps to skip to ENDIF)
             
         var whileMap = new Dictionary<int, int>(); // WHILE pc -> WEND pc
         var wendMap  = new Dictionary<int, int>(); // WEND pc  -> WHILE pc
@@ -476,7 +476,7 @@ public static partial class AmosRunner
         
         static bool SelectValueEquals(object a, object b)
         {
-            // AMOS-likt: sträng jämförs exakt, tal jämförs med liten tolerans.
+            // AMOS-like: strings are compared exactly, numbers with a small tolerance.
             if (a is string || b is string)
                 return ValueToString(a) == ValueToString(b);
 
@@ -542,7 +542,7 @@ public static partial class AmosRunner
 
         void AssignValueToTarget(string target, object value, int ln)
         {
-            // Vi återanvänder din existerande tilldelningslogik (inkl. arrayer)
+            // We reuse the existing assignment logic (including arrays)
             var leftSide = target.Trim();
             if (string.IsNullOrWhiteSpace(leftSide))
                 throw new Exception($"Syntax Error at line {ln}: nothing to assign to");
@@ -579,14 +579,14 @@ public static partial class AmosRunner
             setVar(leftSide, value);
         }
 
-        // Bygg DATA-areas: label -> lista av värden (i ordning)
+        // Build the DATA areas: label -> list of values (in order)
         string? currentDataLabel = null;
         for (int i = 0; i < lines.Length; i++)
         {
             var rawLine = (lines[i] ?? "").Trim();
             if (string.IsNullOrWhiteSpace(rawLine)) continue;
 
-            // ta bort kommentarer + ev. radnummer
+            // remove comments + any line number
             var scan = StripLeadingLineNumber(StripComments(rawLine)).Trim();
             if (string.IsNullOrWhiteSpace(scan)) continue;
 
@@ -599,12 +599,12 @@ public static partial class AmosRunner
                 continue;
             }
 
-            // DATA ... (endast giltigt om vi är "inne" i en label)
+            // DATA ... (only valid if we are "inside" a label)
             var upper = scan.ToUpperInvariant();
             if (upper.StartsWith("DATA "))
             {
                 if (string.IsNullOrWhiteSpace(currentDataLabel))
-                    continue; // enligt din önskan: DATA ska vara efter label, så vi ignorerar "orphan DATA"
+                    continue; // by design: DATA must come after a label, so we ignore "orphan DATA"
 
                 var dataArg = scan[5..].Trim();
                 var values = ParseDataValues(dataArg);
@@ -631,7 +631,7 @@ public static partial class AmosRunner
         // ---------------------------------------------------------------------       
         
         
-        // Pre-scan: Labels, WHILE/WEND OCH IF/ELSE/ENDIF logik
+        // Pre-scan: labels, WHILE/WEND AND IF/ELSE/ENDIF logic
         for (int i = 0; i < lines.Length; i++) {
             var rawLine = lines[i].Trim();
             if (string.IsNullOrWhiteSpace(rawLine)) continue;
@@ -702,7 +702,7 @@ public static partial class AmosRunner
             {
                 procScanStack.Push(i);
 
-                var procDecl = scanLine[5..].Trim(); // efter "PROC "
+                var procDecl = scanLine[5..].Trim(); // after "PROC "
                 var parenIdx = procDecl.IndexOf('(');
 
                 string procName;
@@ -760,7 +760,7 @@ public static partial class AmosRunner
                 whileMap[whilePc] = i;
                 wendMap[i] = whilePc;
             }
-            else if (upperScan == "LOOP")  // ← NY BLOCK
+            else if (upperScan == "LOOP")  // ← NEW BLOCK
             {
                 if (whileScanStack.Count == 0)
                     throw new Exception($"LOOP without DO at line {i + 1}");
@@ -781,7 +781,7 @@ public static partial class AmosRunner
                     throw new Exception($"CASE without SELECT at line {i + 1}");
 
                 var selPc = selectScanStack.Peek();
-                var expr = scanLine[4..].Trim(); // efter "CASE"
+                var expr = scanLine[4..].Trim(); // after "CASE"
                 selectMap[selPc].Cases.Add((expr, i));
                 selectOwnerMarker[i] = selPc;
             }
@@ -804,14 +804,14 @@ public static partial class AmosRunner
                 selectOwnerMarker[i] = selPc;
             }
                 
-            // IF/ELSE/ENDIF Mapping
+            // IF/ELSE/ENDIF mapping
             if (upperScan.StartsWith("IF "))
             {
                 int thenIdx = upperScan.IndexOf("THEN");
                 if (thenIdx >= 0)
                 {
                     var afterThen = scanLine[(thenIdx + 4)..].Trim();
-                    if (!string.IsNullOrEmpty(afterThen)) continue; // Inline-IF, ignorera i stacken
+                    if (!string.IsNullOrEmpty(afterThen)) continue; // Inline IF, ignore it in the stack
                 }
                 ifStack.Push(i);
             }
@@ -836,16 +836,16 @@ public static partial class AmosRunner
         if (ifStack.Count > 0)
             throw new Exception("IF without ENDIF detected at end of program");
         
-        // Registrera functions som tillgängliga för ParseFactor
+        // Register the functions as available for ParseFactor
         vars["__functions__"] = functions;
         vars["__callFunction__"] = (Func<string, List<object>, int, object>)((funcName, args, line) => CallFunction(funcName, args, line));
             
-        // Helper för synkront funktionsanrop
-        // Ersätter hela den gamla CallFunction-metoden.
-        // Kör funktionskroppen via samma switch som main-loopen 
-        // genom att temporärt "flytta" PC till funktionen.
-        // Anropas fortfarande synkront från ParseFactor via __callFunction__.
-        // Returvärdet läggs i vars["__return_value__"] och returneras.
+        // Helper for a synchronous function call
+        // Replaces the whole old CallFunction method.
+        // Runs the function body through the same switch as the main loop
+        // by temporarily "moving" the PC to the function.
+        // Still called synchronously from ParseFactor via __callFunction__.
+        // The return value is put in vars["__return_value__"] and returned.
         object CallFunction(string funcName, List<object> argValues, int callerLine)
         {
             if (!functions.TryGetValue(funcName, out var funcDef))
@@ -856,29 +856,29 @@ public static partial class AmosRunner
                     $"Function {funcName} expects {funcDef.Parameters.Count} " +
                     $"parameters, got {argValues.Count} at line {callerLine}");
 
-            // Spara undan alla variabler som parametrarna skriver över
+            // Save all variables that the parameters overwrite
             var savedVars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             foreach (var param in funcDef.Parameters)
                 if (vars.TryGetValue(param, out var old))
                     savedVars[param] = old;
 
-            // Sätt parametrar
+            // Set the parameters
             for (int i = 0; i < funcDef.Parameters.Count; i++)
                 setVar(funcDef.Parameters[i], argValues[i]);
 
-            // Spara undan __return_value__ om den råkar finnas
+            // Save __return_value__ if it happens to exist
             object? savedReturn = vars.TryGetValue("__return_value__", out var rv) ? rv : null;
             vars["__return_value__"] = 0.0;
 
-            // === Kör funktionskroppen via en inbäddad loop som delar
-            //     samma vars, labels, ifJumps, whileMap osv. ===
+            // === Run the function body through an embedded loop that shares
+            //     the same vars, labels, ifJumps, whileMap etc. ===
             int funcPc = funcDef.StartPc;
 
             while (funcPc <= funcDef.EndPc && funcPc < lines.Length)
             {
                 var rawFuncLine = StripComments((lines[funcPc] ?? "").Trim());
 
-                // Hoppa över tomma rader och labels
+                // Skip empty lines and labels
                 if (string.IsNullOrWhiteSpace(rawFuncLine) || rawFuncLine.EndsWith(':'))
                 {
                     funcPc++;
@@ -895,7 +895,7 @@ public static partial class AmosRunner
                     if (string.IsNullOrEmpty(trimFc)) continue;
                     var (fcmd, farg) = SplitCommand(trimFc);
 
-                    // RETURN [värde] — avsluta funktionen
+                    // RETURN [value] - end the function
                     if (fcmd == "RETURN")
                     {
                         if (!string.IsNullOrWhiteSpace(farg))
@@ -904,7 +904,7 @@ public static partial class AmosRunner
                         goto func_done;
                     }
 
-                    // IF i funktionskroppen — använd ifJumps-kartan som byggdes i pre-scan
+                    // IF in the function body - use the ifJumps map built in the pre-scan
                     if (fcmd == "IF")
                     {
                         int tIdx = IndexOfWord(farg, "THEN");
@@ -922,7 +922,7 @@ public static partial class AmosRunner
                         continue;
                     }
 
-                    // ELSE / ENDIF — hoppa förbi resten av IF-blocket
+                    // ELSE / ENDIF - jump past the rest of the IF block
                     if (fcmd == "ELSE")
                     {
                         if (elseJumps.TryGetValue(funcPc, out var skipTo))
@@ -1014,7 +1014,7 @@ public static partial class AmosRunner
                     if (fcmd == "INC") { setVar(farg, GetDoubleVar(farg, vars, funcPc + 1) + 1.0); continue; }
                     if (fcmd == "DEC") { setVar(farg, GetDoubleVar(farg, vars, funcPc + 1) - 1.0); continue; }
 
-                    // Tilldelning (X = ...) och allt annat — skicka via EvalValue
+                    // Assignment (X = ...) and everything else - send through EvalValue
                     if (trimFc.Contains('='))
                     {
                         var (leftSide, varValue) = SplitAssignment(trimFc);
@@ -1022,7 +1022,7 @@ public static partial class AmosRunner
                         continue;
                     }
 
-                    // Okänt kommando i funktion — kasta fel
+                    // Unknown command in a function - throw an error
                     throw new Exception($"Unsupported command '{fcmd}' inside FUNCTION at line {funcPc + 1}. " +
                                         $"Use subroutines (GOSUB) for complex side-effects.");
                 }
@@ -1031,7 +1031,7 @@ public static partial class AmosRunner
             }
 
             func_done:
-            // Återställ parametrar
+            // Restore the parameters
             foreach (var param in funcDef.Parameters)
             {
                 if (savedVars.TryGetValue(param, out var old))
@@ -1040,7 +1040,7 @@ public static partial class AmosRunner
                     vars.Remove(param);
             }
 
-            // Hämta returvärde och återställ ev. sparat __return_value__
+            // Get the return value and restore any saved __return_value__
             var result = vars.TryGetValue("__return_value__", out var retVal) ? retVal : 0.0;
             if (savedReturn != null)
                 vars["__return_value__"] = savedReturn;
@@ -1050,8 +1050,8 @@ public static partial class AmosRunner
             return result;
         }
         
-        // Allt som går att göra en gång (kommentarer, radnummer, uppdelning i satser) görs här
-        // i stället för varje gång raden körs
+        // Everything that can be done once (comments, line numbers, splitting into statements) is done here
+        // instead of every time the line runs
         ClearCompiledCache();
         var prepared = PrepareLines(lines, sourceLines);
 
@@ -1059,7 +1059,7 @@ public static partial class AmosRunner
         while (pc < lines.Length) {
             token.ThrowIfCancellationRequested();
             
-            // Hoppa över tomma rader, kommentarer och etiketter
+            // Skip empty lines, comments and labels
             while (pc < lines.Length && prepared[pc].Skip)
             {
                 pc++;
@@ -1071,9 +1071,9 @@ public static partial class AmosRunner
             var line = preparedLine.Text;
             var ln = preparedLine.SourceLine;
 
-            // Debuggern räknar i editorns rader (0-baserat), en gång per källrad
+            // The debugger counts in the editor's lines (0-based), once per source line
             if (preparedLine.FirstOfSourceLine)
-                await waitForStep(ln - 1);          // stannar aldrig på REM
+                await waitForStep(ln - 1);          // never stops on REM
             
             bool jumpHappened = false;
 
@@ -1108,7 +1108,7 @@ public static partial class AmosRunner
                             break;
 
                         case "FUNCTION":
-                            // Hoppa över funktionsdefinitioner
+                            // Skip function definitions
                         {
                             var funcDef = functions.Values.FirstOrDefault(f => f.StartPc == pc + 1);
                             if (funcDef != null && funcDef.EndPc > 0)
@@ -1134,7 +1134,7 @@ public static partial class AmosRunner
 
                         case "PROC":
                         {
-                            // Hoppa över proc-definitionen vid körning
+                            // Skip the proc definition when running
                             var procName = arg.Split('(')[0].Trim();
                             if (procs.TryGetValue(procName, out var pd) && pd.EndPc > 0)
                             {
@@ -1146,13 +1146,13 @@ public static partial class AmosRunner
                         }
 
                         case "ENDPROC":
-                        case "END PROC": // hanteras via "END"-casen nedan, se steg 4
+                        case "END PROC": // handled through the "END" case below, see step 4
                         {
-                            // Implicit END PROC — återvänd till anroparen
+                            // Implicit END PROC - return to the caller
                             if (procCallStack.Count > 0)
                             {
                                 var frame = procCallStack.Pop();
-                                // Återställ parametrar
+                                // Restore the parameters
                                 foreach (var kvp in frame.SavedVars)
                                     vars[kvp.Key] = kvp.Value;
                                 pc = frame.ReturnPc;
@@ -1167,7 +1167,7 @@ public static partial class AmosRunner
                             if (onArg.StartsWith("ERROR GOTO "))
                             {
                                 var labelName = arg[11..].Trim(); // "ERROR GOTO ".Length == 11
-                                // ÄNDRAT: targetPc -> errorTargetPc för att undvika namnkonflikt med GOTO
+                                // CHANGED: targetPc -> errorTargetPc to avoid a name clash with GOTO
                                 if (labels.TryGetValue(labelName, out var errorTargetPc))
                                 {
                                     errorMode = 2; // Goto
@@ -1195,9 +1195,9 @@ public static partial class AmosRunner
                             break;
 
                         case "CLSG2":
-                            // Rensa både grafik och text-cursor
-                            await clearAsync(); // Om du vill rensa loggen/text-boxen också, annars ta bort
-                            graphics.Clear(graphics.PaperColor); // Använd paper color som bakgrund
+                            // Clear both the graphics and the text cursor
+                            await clearAsync(); // If you want to clear the log/text box too; otherwise remove
+                            graphics.Clear(graphics.PaperColor); // Use the paper colour as the background
                             graphics.Locate(0, 0);
                             break;
 
@@ -1215,7 +1215,7 @@ public static partial class AmosRunner
                             }
                             else if (!string.IsNullOrWhiteSpace(cleanArg))
                             {
-                                // Gammalt beteende: CLSG 1 (utan #)
+                                // Old behaviour: CLSG 1 (without #)
                                 savedScreen = graphics.GetActiveScreenNumber();
                                 graphics.SetDrawingScreen(EvalInt(cleanArg, vars, ln, getInkey, isKeyDown, graphics));
                                 graphics.Clear(Colors.Transparent);
@@ -1223,7 +1223,7 @@ public static partial class AmosRunner
                             }
                             else
                             {
-                                // Ingen parameter: rensa aktivt lager
+                                // No parameter: clear the active layer
                                 graphics.Clear(Colors.Transparent);
                             }
                                 
@@ -1235,7 +1235,7 @@ public static partial class AmosRunner
                             var x2 = graphics.GetActiveScreenNumber();
                             if (!string.IsNullOrWhiteSpace(arg))
                             {
-                                // Om ett argument skickades med, välj det lagret först
+                                // If an argument was given, select that layer first
                                 graphics.SetDrawingScreen(EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
                             }
 
@@ -1248,7 +1248,7 @@ public static partial class AmosRunner
                         {
                             var printArg = arg.Trim();
 
-                            // Kolla om det är PRINT #channel (fil-output)
+                            // Check whether it is PRINT #channel (file output)
                             if (printArg.StartsWith("#"))
                             {
                                 // PRINT #channel, data
@@ -1256,7 +1256,7 @@ public static partial class AmosRunner
                                 if (commaIdx2 < 0)
                                     throw new Exception("PRINT #: The syntax is PRINT #channel, data");
 
-                                string channelExpr = printArg[1..commaIdx2].Trim(); // Ta bort # och läs kanalnummer
+                                string channelExpr = printArg[1..commaIdx2].Trim(); // Remove the # and read the channel number
                                 int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
 
                                 if (!_openFiles.ContainsKey(channel))
@@ -1271,10 +1271,10 @@ public static partial class AmosRunner
                                 if (fileChannel.Writer == null)
                                     throw new Exception($"PRINT #: Channel {channel} has no writer");
 
-                                // Läs data att skriva
+                                // Read the data to write
                                 string dataExpr = printArg[(commaIdx2 + 1)..].Trim();
 
-                                // Kolla om det slutar med semikolon (ingen nyrad)
+                                // Check whether it ends with a semicolon (no newline)
                                 bool addNewLine = true;
                                 if (dataExpr.EndsWith(";"))
                                 {
@@ -1292,16 +1292,16 @@ public static partial class AmosRunner
                                     else
                                         fileChannel.Writer.Write(output);
 
-                                    fileChannel.Writer.Flush(); // Säkerställ att data skrivs direkt
+                                    fileChannel.Writer.Flush(); // Make sure the data is written straight away
                                 }
                                 else if (addNewLine)
                                 {
-                                    // Tom PRINT #channel för nyrad
+                                    // An empty PRINT #channel for a newline
                                     fileChannel.Writer.WriteLine();
                                     fileChannel.Writer.Flush();
                                 }
                             }
-                            // Vanlig PRINT till skärm
+                            // Ordinary PRINT to the screen
                             else if (printArg.StartsWith("AT ", StringComparison.OrdinalIgnoreCase))
                             {
                                 var at = ParsePrintAtArguments(printArg);
@@ -1345,8 +1345,8 @@ public static partial class AmosRunner
                                 int row = EvalInt(at.RowExpr, vars, ln, getInkey, isKeyDown, graphics);
                                 int col = EvalInt(at.ColExpr, vars, ln, getInkey, isKeyDown, graphics);
                                 graphics.Locate(row,
-                                    col); // Notera: x=row? AMOS kör ofta Y,X i Locate men X,Y i text. Dubbelkolla ordningen.
-                                // LOCATE X,Y brukar vara Kolumn, Rad.
+                                    col); // Note: x=row? AMOS often uses Y,X in Locate but X,Y in text. Double-check the order.
+                                // LOCATE X,Y is usually column, row.
 
                                 if (!string.IsNullOrWhiteSpace(at.RestExpr))
                                 {
@@ -1357,7 +1357,7 @@ public static partial class AmosRunner
                             else
                             {
                                 // Vanlig PRINT
-                                // Kolla om det slutar med , för att undvika nyrad
+                                // Check whether it ends with , to avoid a newline
                                 bool newLine = true;
                                 if (printArg.EndsWith(","))
                                 {
@@ -1372,7 +1372,7 @@ public static partial class AmosRunner
                             if (savedScreen.HasValue)
                                 graphics.SetDrawingScreen(savedScreen.Value);
                             
-                            // Trigga uppdatering av fönstret
+                            // Trigger an update of the window
                             onGraphicsChanged();
                         }
                             break;
@@ -1380,7 +1380,7 @@ public static partial class AmosRunner
                         {
                             string inputArg = arg.Trim();
 
-                            // Kolla om det är INPUT #channel (fil-input)
+                            // Check whether it is INPUT #channel (file input)
                             if (inputArg.StartsWith("#"))
                             {
                                 // INPUT #channel, variable
@@ -1404,12 +1404,12 @@ public static partial class AmosRunner
 
                                 string varName = inputArg[(commaIdx + 1)..].Trim();
 
-                                // Läs en rad från filen
+                                // Read a line from the file
                                 string? line2 = fileChannel.Reader.ReadLine();
 
                                 if (line2 == null)
                                 {
-                                    // End of file - sätt tom sträng eller 0
+                                    // End of file - set an empty string or 0
                                     if (varName.EndsWith("$"))
                                         setVar(varName, "");
                                     else
@@ -1417,29 +1417,29 @@ public static partial class AmosRunner
                                 }
                                 else
                                 {
-                                    // Försök konvertera till nummer om det är numerisk variabel
+                                    // Try to convert to a number if it is a numeric variable
                                     if (varName.EndsWith("$"))
                                     {
                                         setVar(varName, line2);
                                     }
                                     else
                                     {
-                                        // Numerisk variabel
+                                        // Numeric variable
                                         if (double.TryParse(line2.Trim(), NumberStyles.Any,
                                                 CultureInfo.InvariantCulture, out double numValue))
                                             setVar(varName, numValue);
                                         else
-                                            setVar(varName, 0); // Default till 0 om konvertering misslyckas
+                                            setVar(varName, 0); // Default to 0 if the conversion fails
                                     }
                                 }
                             }
-                            // Vanlig INPUT från användare
+                            // Ordinary INPUT from the user
                             else
                             {
                                 string promptInput = "";
                                 string varNameInput = "A$";
 
-                                // Hitta kommat som INTE är inuti citattecken
+                                // Find the comma that is NOT inside quotation marks
                                 int commaIdx = -1;
                                 bool inQuotes = false;
                                 for (int i = 0; i < inputArg.Length; i++)
@@ -1462,16 +1462,16 @@ public static partial class AmosRunner
                                     varNameInput = inputArg;
                                 }
 
-                                // Skriv ut prompten
+                                // Print the prompt
                                 if (!string.IsNullOrEmpty(promptInput))
                                 {
                                     await appendLineAsync("@@PRINT " + promptInput);
                                 }
 
-                                // Vänta på användarens inmatning
+                                // Wait for the user's input
                                 string userInput = await getConsoleInputAsync();
 
-                                // Spara resultatet
+                                // Save the result
                                 setVar(varNameInput, userInput.Trim());
                             }
                         }
@@ -1506,7 +1506,7 @@ public static partial class AmosRunner
                                 vName = iArg;
                             }
 
-                            // 2. Skriv prompt och tvinga cursor-uppdatering
+                            // 2. Write the prompt and force a cursor update
                             if (!string.IsNullOrEmpty(pPrompt))
                             {
                                 graphics.ConsolePrint(pPrompt, newLine: false);
@@ -1518,7 +1518,7 @@ public static partial class AmosRunner
                             {
                             }
 
-                            // Variabler för repeat-logik
+                            // Variables for the key repeat logic
                             string? lastKey = null;
                             DateTime lastKeyTime = DateTime.MinValue;
                             int currentDelay = 500;
@@ -1576,7 +1576,7 @@ public static partial class AmosRunner
                                         int cy = graphics.CursorY;
                                         if (cx > 0)
                                         {
-                                            // Sudda med bakgrundsfärg (Bar)
+                                            // Erase with the background colour (Bar)
                                             int cw = graphics.CharWidth;
                                             int ch = graphics.CharHeight;
                                             graphics.Bar((cx - 1) * cw, cy * ch, cx * cw - 1, cy * ch + ch - 1,
@@ -1593,10 +1593,10 @@ public static partial class AmosRunner
                                     graphics.ConsolePrint(" ", newLine: false);
                                     onGraphicsChanged();
                                 }
-                                // TECKEN (A-Z, 0-9)
+                                // CHARACTERS (A-Z, 0-9)
                                 else if (key.Length == 1 && !char.IsControl(key[0]))
                                 {
-                                    // Kolla Shift status via isKeyDown
+                                    // Check the Shift state via isKeyDown
                                     bool isShift = isKeyDown("LeftShift") || isKeyDown("RightShift") ||
                                                    isKeyDown("Shift");
 
@@ -1604,12 +1604,12 @@ public static partial class AmosRunner
 
                                     if (char.IsLetter(key[0]))
                                     {
-                                        // Om bokstav: Shift = Stor, Ingen Shift = Liten
+                                        // If a letter: Shift = upper case, no Shift = lower case
                                         finalChar = isShift ? key.ToUpperInvariant() : key.ToLowerInvariant();
                                     }
                                     else if (char.IsDigit(key[0]) && isShift)
                                     {
-                                        // Enkel mapping för siffror + shift (kan behöva justeras för SE/US layout)
+                                        // Simple mapping for digits + shift (may need adjusting for SE/US layouts)
                                         finalChar = key[0] switch
                                         {
                                             '1' => "!", '2' => "\"", '3' => "#", '4' => "¤", '5' => "%",
@@ -1617,7 +1617,7 @@ public static partial class AmosRunner
                                             _ => key
                                         };
                                     }
-                                    // Hantera punkt och kommma om de kommer in som råa tecken
+                                    // Handle dot and comma if they come in as raw characters
                                     else if (key == "." && isShift) finalChar = ":";
                                     else if (key == "," && isShift) finalChar = ";";
 
@@ -1648,7 +1648,7 @@ public static partial class AmosRunner
                                 c2 = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
                             }
 
-                            // Skicka till UI-tråden via console-pipeline (AppendConsoleLineAsync)
+                            // Send to the UI thread via the console pipeline (AppendConsoleLineAsync)
                             await appendLineAsync("@@PAPER " + c2.ToString());
                             break;
                         }
@@ -1656,12 +1656,12 @@ public static partial class AmosRunner
                         case "PAPERG":
                         {
                             Color c;
-                            // 1. Försök tolka som direkt färg/siffra först (t.ex. Red, #FF0000, 1)
+                            // 1. Try to parse it as a direct colour/number first (e.g. Red, #FF0000, 1)
                             try
                             {
                                 c = ParseColorFlexible(Unquote(arg));
                             }
-                            // 2. Om det misslyckas, utvärdera som variabel/uttryck (t.ex. I, A$, 10+5)
+                            // 2. If that fails, evaluate it as a variable/expression (e.g. I, A$, 10+5)
                             catch
                             {
                                 c = PaperValueToColor(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
@@ -1732,14 +1732,14 @@ public static partial class AmosRunner
 
 
                         case "DATA":
-                            // DATA exekveras inte (endast deklaration)
+                            // DATA is not executed (declaration only)
                             break;
                         case "RESTORE":
                         {
                             var labelName = (arg ?? "").Trim();
                             if (string.IsNullOrWhiteSpace(labelName))
                             {
-                                // Om ingen label anges: välj första data-area om den finns
+                                // If no label is given: choose the first data area if there is one
                                 if (dataAreas.Count == 0)
                                     throw new Exception($"RESTORE without label but no DATA exists at line {ln}");
 
@@ -1768,7 +1768,7 @@ public static partial class AmosRunner
                             {
                                 var val = NextDataValue(ln);
 
-                                // Om target är en strängvariabel (slutar med $), konvertera val till string
+                                // If the target is a string variable (ends with $), convert val to a string
                                 var tt = (t ?? "").Trim();
                                 if (tt.EndsWith("$", StringComparison.Ordinal))
                                 {
@@ -1776,7 +1776,7 @@ public static partial class AmosRunner
                                 }
                                 else
                                 {
-                                    // Numeriskt target: om data råkar vara string försöker vi tolka som tal
+                                    // Numeric target: if the data happens to be a string we try to parse it as a number
                                     if (val is string s && double.TryParse(s, NumberStyles.Float,
                                             CultureInfo.InvariantCulture, out var d))
                                         AssignValueToTarget(tt, d, ln);
@@ -1808,21 +1808,21 @@ public static partial class AmosRunner
 
                             if (targetMarkerPc.HasValue)
                             {
-                                // Hoppa in i matchande CASE-block (raden efter CASE)
+                                // Jump into the matching CASE block (the line after CASE)
                                 selectRuntimeStack.Push(new SelectRuntimeFrame { EndSelectPc = sel.EndSelectPc });
                                 pc = targetMarkerPc.Value + 1;
                                 jumpHappened = true;
                             }
                             else if (sel.DefaultPc.HasValue)
                             {
-                                // Hoppa in i DEFAULT-block (raden efter DEFAULT)
+                                // Jump into the DEFAULT block (the line after DEFAULT)
                                 selectRuntimeStack.Push(new SelectRuntimeFrame { EndSelectPc = sel.EndSelectPc });
                                 pc = sel.DefaultPc.Value + 1;
                                 jumpHappened = true;
                             }
                             else
                             {
-                                // Ingen match och ingen DEFAULT -> hoppa förbi hela SELECT
+                                // No match and no DEFAULT -> jump past the whole SELECT
                                 pc = sel.EndSelectPc + 1;
                                 jumpHappened = true;
                             }
@@ -1833,7 +1833,7 @@ public static partial class AmosRunner
                         case "CASE":
                         case "DEFAULT":
                         {
-                            // Om vi når en CASE/DEFAULT under exekvering betyder det att vi är klara med valt block.
+                            // If we reach a CASE/DEFAULT while running, it means we are done with the chosen block.
                             if (selectOwnerMarker.TryGetValue(pc, out var selPc) &&
                                 selectMap.TryGetValue(selPc, out var sel))
                             {
@@ -1847,7 +1847,7 @@ public static partial class AmosRunner
 
                         case "ENDSELECT":
                         {
-                            // Markör: om vi kommer hit naturligt så poppar vi ett SELECT (om vi är i ett)
+                            // Marker: if we get here naturally we pop a SELECT (if we are in one)
                             if (selectRuntimeStack.Count > 0 && selectRuntimeStack.Peek().EndSelectPc == pc)
                                 selectRuntimeStack.Pop();
                             break;
@@ -1857,7 +1857,7 @@ public static partial class AmosRunner
                         {
                             if (arg.Equals("SELECT", StringComparison.OrdinalIgnoreCase))
                             {
-                                // befintlig SELECT-logik...
+                                // existing SELECT logic...
                                 break;
                             }
 
@@ -1877,16 +1877,16 @@ public static partial class AmosRunner
 
                             if (arg.Equals("FUNCTION", StringComparison.OrdinalIgnoreCase))
                             {
-                                // befintlig ENDFUNCTION-logik...
+                                // existing ENDFUNCTION logic...
                                 break;
                             }
 
                             if (arg.Equals("IF", StringComparison.OrdinalIgnoreCase))
                             {
-                                break; // bara en markör, precis som ENDIF
+                                break; // just a marker, like ENDIF
                             }
 
-                            return; // END utan argument avslutar programmet
+                            return; // END without an argument ends the program
                         }
                         case "REM": goto next_line;
                         case "GOTO":
@@ -1919,7 +1919,7 @@ public static partial class AmosRunner
                             break;
                         case "LET":
                         {
-                            // Även "A(I) = värde" hamnar här (via SplitCommand), så arrayer måste hanteras
+                            // "A(I) = value" also ends up here (via SplitCommand), so arrays must be handled
                             var (n, vt) = SplitAssignment(arg);
                             AssignValueToTarget(n, EvalValue(vt, vars, ln, getInkey, isKeyDown, graphics), ln);
                             break;
@@ -1930,7 +1930,7 @@ public static partial class AmosRunner
                             string dimDecl = eqIdx >= 0 ? arg[..eqIdx].Trim() : arg;
                             string? initValues = eqIdx >= 0 ? arg[(eqIdx + 1)..].Trim() : null;
 
-                            // Parse array namn och dimensioner: A(10,20,5)
+                            // Parse the array name and dimensions: A(10,20,5)
                             int openParen = dimDecl.IndexOf('(');
                             int closeParen = dimDecl.LastIndexOf(')');
 
@@ -1940,7 +1940,7 @@ public static partial class AmosRunner
                             var arrName = dimDecl[..openParen].Trim();
                             var dimensionsStr = dimDecl[(openParen + 1)..closeParen].Trim();
 
-                            // Split på komma och utvärdera varje dimension
+                            // Split at commas and evaluate each dimension
                             var dimParts = SplitTopLevelCsv(dimensionsStr);
                             var dimensions = new int[dimParts.Count];
 
@@ -1952,7 +1952,7 @@ public static partial class AmosRunner
                                     throw new Exception($"DIM Error at line {ln}: Dimension {i} cannot be negative");
                             }
 
-                            // Skapa array baserat på typ ($ = sträng)
+                            // Create the array based on the type ($ = string)
                             IAmosArray array;
                             if (arrName.EndsWith("$", StringComparison.Ordinal))
                                 array = new AmosStringArray(dimensions);
@@ -1961,7 +1961,7 @@ public static partial class AmosRunner
 
                             vars[arrName] = array;
 
-                            // Initialisering med värden om de finns
+                            // Initialisation with values if there are any
                             if (initValues != null)
                             {
                                 InitializeArrayFromString(array, initValues, dimensions, vars, ln, getInkey, isKeyDown,
@@ -1972,17 +1972,17 @@ public static partial class AmosRunner
                         case "WAIT":
                             if (arg.ToUpperInvariant() == "VBL")
                             {
-                                // NYTT: Stega sprite-fades innan frame presenteras
+                                // NEW: Step the sprite fades before the frame is presented
                                 graphics.TickSpriteFades();
                                 graphics.TickLayerFades();
                                 
-                                // ✅ NYTT: Auto-uppdatera WAVE Time parameter
+                                // ✅ NEW: Auto-update the WAVE Time parameter
                                 graphics.TickSpriteEffects(0.016f);
                                 
-                                // 1. Säkerställ att all ritning är klar
+                                // 1. Make sure all drawing is done
                                 graphics.EndFrame();
 
-                                // 2. Uppdatera timers för shader-animationer i den AKTIVA (synliga) framen
+                                // 2. Update the timers for shader animations in the ACTIVE (visible) frame
                                 lock (graphics.LockObject)
                                 {
                                     foreach (var layer in graphics.ActiveFrame)
@@ -1993,25 +1993,25 @@ public static partial class AmosRunner
                                 // 2. Animations
                                 animationManager.Tick(graphics); 
                                 
-                                // 3. Vänta tills nästa frame är redo (timing)
+                                // 3. Wait until the next frame is ready (timing)
                                 await WaitNextFrameAsync(token);
 
-                                // 4. Lås fast framens texter och signalera att UI ska uppdateras
+                                // 4. Lock in the frame's texts and signal that the UI should update
                                 graphics.PresentFrame();
                                 onGraphicsChanged();
 
-                                // 5. Börja rita på nya inactive frame
+                                // 5. Start drawing on the new inactive frame
                                 graphics.BeginFrame();
                             }
                             else if (arg.ToUpperInvariant() == "MUSIC")
                             {
-                                // Vänta tills alla musikkanaler är klara
+                                // Wait until all music channels are done
                                 while (ChiptuneSynth.IsAnyPlaying())
                                     await Task.Delay(10, token);
                             }
                             else if (arg.ToUpperInvariant().StartsWith("MUSIC "))
                             {
-                                // WAIT MUSIC 1 — vänta på specifik kanal
+                                // WAIT MUSIC 1 - wait for a specific channel
                                 int ch = EvalInt(arg[6..], vars, ln, getInkey, isKeyDown, graphics);
                                 while (ChiptuneSynth.IsPlaying(ch))
                                     await Task.Delay(10, token);
@@ -2034,12 +2034,12 @@ public static partial class AmosRunner
                             {
                                 string defRest = arg.Substring(4).Trim();
 
-                                // Hämta sprite-id (första token före första kommat)
+                                // Get the sprite id (the first token before the first comma)
                                 int firstComma = defRest.IndexOf(',');
                                 if (firstComma < 0) break;
                                 int spriteId = EvalInt(defRest[..firstComma].Trim(), vars, ln, getInkey, isKeyDown, graphics);
 
-                                // Hämta state-namn (andra token, citatskyddad)
+                                // Get the state name (the second token, quote-protected)
                                 string afterId = defRest[(firstComma + 1)..].Trim();
                                 int secondComma = -1;
                                 bool inQ = false;
@@ -2057,10 +2057,10 @@ public static partial class AmosRunner
                                 var frames = AnimationManager.ParseFrameSequence(seqAndFlags);
                                 if (frames.Count == 0) break;
 
-                                // LOOP eller ONCE
+                                // LOOP or ONCE
                                 bool loop = seqAndFlags.ToUpperInvariant().Contains("LOOP");
 
-                                // Valfritt: "idle" i slutet = OnCompleteGoTo
+                                // Optional: "idle" at the end = OnCompleteGoTo
                                 string? onComplete = null;
                                 var goMatch = System.Text.RegularExpressions.Regex.Match(
                                     seqAndFlags, "\"([\\w]+)\"\\s*$");
@@ -2118,14 +2118,14 @@ public static partial class AmosRunner
                                 else
                                 {
                                     // ANIM GROUP "player", 1, 2, 3
-                                    // Parsa gruppnamn + sprite-ids
+                                    // Parse the group name + sprite ids
                                     int firstComma = groupRest.IndexOf(',');
                                     if (firstComma < 0) break;
 
                                     string groupName = groupRest[..firstComma].Trim().Trim('"');
                                     string idsRest = groupRest[(firstComma + 1)..].Trim();
 
-                                    // Dela upp på komman och utvärdera varje id
+                                    // Split at commas and evaluate each id
                                     var idParts = idsRest.Split(',',
                                         System.StringSplitOptions.RemoveEmptyEntries |
                                         System.StringSplitOptions.TrimEntries);
@@ -2166,7 +2166,7 @@ public static partial class AmosRunner
                         }
                         case "ENDIF":
                         {
-                            // Bara markör, gå vidare
+                            // Just a marker, move on
                             break;
                         }
                         
@@ -2198,7 +2198,7 @@ public static partial class AmosRunner
                             var cur = GetDoubleVar(f.VarName, vars, ln) + f.StepValue;
                             setVar(f.VarName, cur);
 
-                            // Lägg till en liten marginal (0.000001) för att undvika att flyttalsfel kör loopen en gång för mycket
+                            // Add a small margin (0.000001) so that floating point errors do not run the loop once too often
                             bool loopDone = f.StepValue > 0
                                 ? cur > (f.EndValue + 0.000001)
                                 : cur < (f.EndValue - 0.000001);
@@ -2221,7 +2221,7 @@ public static partial class AmosRunner
 
                             if (!conditionw)
                             {
-                                // Hoppa direkt till raden efter WEND
+                                // Jump straight to the line after WEND
                                 if (!whileMap.TryGetValue(pc, out var wendPc))
                                     throw new Exception($"WHILE without WEND at line {ln}");
 
@@ -2230,7 +2230,7 @@ public static partial class AmosRunner
                             }
                             else
                             {
-                                // Villkoret sant → fortsätt, men kom ihåg loopen
+                                // The condition is true → continue, but remember the loop
                                 if (!whileMap.TryGetValue(pc, out var wpc))
                                     throw new Exception($"WHILE without WEND at line {ln}");
 
@@ -2265,8 +2265,8 @@ public static partial class AmosRunner
 
                             var frame = whileStack.Peek();
 
-                            // Utvärdera villkoret igen (WHILE-raden är redan förberedd)
-                            var conditionText = prepared[frame.WhilePc].Text.Substring(5).Trim(); // efter "WHILE"
+                            // Evaluate the condition again (the WHILE line is already prepared)
+                            var conditionText = prepared[frame.WhilePc].Text.Substring(5).Trim(); // after "WHILE"
 
                             if (EvalCondition(conditionText, vars, ln, getInkey, isKeyDown, graphics))
                             {
@@ -2275,7 +2275,7 @@ public static partial class AmosRunner
                             }
                             else
                             {
-                                // Klart → lämna loopen
+                                // Done → leave the loop
                                 whileStack.Pop();
                             }
 
@@ -2288,19 +2288,19 @@ public static partial class AmosRunner
     
                             var frame = whileStack.Peek();
     
-                            // ✅ LOOP hoppar alltid tillbaka (ingen villkorscheck)
+                            // ✅ LOOP always jumps back (no condition check)
                             pc = frame.WhilePc;
                             jumpHappened = true;
                             break;
                         }
                         case "REPEAT":
                         {
-                            // Lägg till repeat frame utan UNTILPc
+                            // Add a repeat frame without UNTILPc
                             repeatStack.Push(new RepeatFrame
                             {
                                 RepeatPc = pc,
                                 RepeatLine = ln,
-                                UntilPc = 0 // sätts senare när vi hittar UNTIL
+                                UntilPc = 0 // set later when we find UNTIL
                             });
                             break;
                         }
@@ -2311,18 +2311,18 @@ public static partial class AmosRunner
 
                             var rf = repeatStack.Peek();
 
-                            // Spara UNTILPc om det inte redan finns
+                            // Save UNTILPc if it is not already there
                             if (rf.UntilPc == 0)
                                 rf.UntilPc = pc;
 
                             if (EvalCondition(arg, vars, ln, getInkey, isKeyDown, graphics))
                             {
-                                // Villkor sant → avsluta loop
+                                // Condition true → end the loop
                                 repeatStack.Pop();
                             }
                             else
                             {
-                                // Villkor falskt → hoppa tillbaka till REPEAT
+                                // Condition false → jump back to REPEAT
                                 pc = rf.RepeatPc;
                                 jumpHappened = true;
                             }
@@ -2341,7 +2341,7 @@ public static partial class AmosRunner
 
                                 var rf = repeatStack.Pop();
 
-                                // Om UNTILPc inte är satt, skanna programmet framåt
+                                // If UNTILPc is not set, scan the program forward
                                 if (rf.UntilPc == 0)
                                 {
                                     int searchPc = rf.RepeatPc + 1;
@@ -2367,7 +2367,7 @@ public static partial class AmosRunner
                             }
                             else if (what == "WHILE")
                             {
-                                // Befintlig WHILE-logik
+                                // Existing WHILE logic
                                 if (whileStack.Count == 0)
                                     throw new Exception($"EXIT WHILE without WHILE at line {ln}");
                                 var wf = whileStack.Pop();
@@ -2388,7 +2388,7 @@ public static partial class AmosRunner
 
                             else if (what == "PROC" || what == "PROCEDURE")
                             {
-                                // Lämna proceduren direkt, precis som END PROC
+                                // Leave the procedure straight away, just like END PROC
                                 if (procCallStack.Count == 0)
                                     throw new Exception($"EXIT PROC outside PROC at line {ln}");
                                 var frame = procCallStack.Pop();
@@ -2414,14 +2414,14 @@ public static partial class AmosRunner
                                 }
                                 else if (subCmd == "ALPHA" && screenArgs.Count >= 3)
                                 {
-                                    // SCREEN ALPHA lager, 0-255
+                                    // SCREEN ALPHA layer, 0-255
                                     int layerId = EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                                     int val     = EvalInt(screenArgs[2], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.ScreenAlpha(layerId, val);
                                 }
                                 else if (subCmd == "FADE" && screenArgs.Count >= 4)
                                 {
-                                    // SCREEN FADE lager, targetAlpha(0-255), frames
+                                    // SCREEN FADE layer, targetAlpha(0-255), frames
                                     int layerId = EvalInt(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                                     int target  = EvalInt(screenArgs[2], vars, ln, getInkey, isKeyDown, graphics);
                                     int frames  = EvalInt(screenArgs[3], vars, ln, getInkey, isKeyDown, graphics);
@@ -2429,7 +2429,7 @@ public static partial class AmosRunner
                                 }
                                 else if (subCmd == "CRT" && screenArgs.Count >= 2)
                                 {
-                                    // SCREEN CRT på/av [, scanlines 0-100 [, böjning 0-100]]
+                                    // SCREEN CRT on/off [, scanlines 0-100 [, curve 0-100]]
                                     graphics.CrtEnabled = EvalDouble(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics) != 0;
                                     if (screenArgs.Count >= 3)
                                         graphics.CrtScanlines = (float)EvalDouble(screenArgs[2], vars, ln, getInkey, isKeyDown, graphics) / 100f;
@@ -2476,15 +2476,15 @@ public static partial class AmosRunner
 
                         case "LOAD":
                         {
-                            // Parsa första parametern
+                            // Parse the first parameter
                             int commaIndex = arg.IndexOf(',');
     
                             if (commaIndex > -1)
                             {
-                                // Vi har ett komma → kolla vad som står FÖRE kommat
+                                // We have a comma → check what comes BEFORE the comma
                                 string firstParam = arg[..commaIndex].Trim();
         
-                                // Är det #X-prefix? (börjar med #)
+                                // Is it a #X prefix? (starts with #)
                                 if (firstParam.StartsWith("#"))
                                 {
                                     // === LOAD #1, "background.png" ===
@@ -2497,7 +2497,7 @@ public static partial class AmosRunner
                                         graphics.SetDrawingScreen(tempScreen.Value);
                                     }
             
-                                    // Resten efter #X, är filnamnet
+                                    // The rest after #X is the file name
                                     string path = ValueToString(EvalValue(cleanArg, vars, ln, getInkey, isKeyDown, graphics));
                                     graphics.LoadBackground(path);
             
@@ -2507,7 +2507,7 @@ public static partial class AmosRunner
                             }
                             else
                             {
-                                // Inget komma → enkel background-load till aktivt lager
+                                // No comma → simple background load to the active layer
                                 // === LOAD "background.png" ===
                                 string path = ValueToString(EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics));
                                 graphics.LoadBackground(path);
@@ -2519,7 +2519,7 @@ public static partial class AmosRunner
 
                         case "SWAP":
                         {
-                            // SWAP A, B eller SWAP A(I), A(J): båda värdena läses innan något skrivs
+                            // SWAP A, B or SWAP A(I), A(J): both values are read before anything is written
                             var sw = SplitTopLevelCsv(arg);
                             if (sw.Count != 2)
                                 throw new Exception($"Syntax Error in SWAP: expected two variables at line {ln}");
@@ -2807,7 +2807,7 @@ public static partial class AmosRunner
                                     id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     string path = Unquote(ss[2]);
 
-                                    // Om vi har mer än 2 argument (id + path), då är det ett sheet
+                                    // If we have more than 2 arguments (id + path), it is a sheet
                                     // SPRITE LOAD 1, "sheet.png", 32, 32, 7
                                     if (ss.Count >= 6) // "LOAD", id, path, w, h, count = 6 delar
                                     {
@@ -2817,21 +2817,21 @@ public static partial class AmosRunner
                                         graphics.LoadSpriteSheet(id.Value, path, fw, fh, count);
                                     }
                                     else if
-                                        (ss.Count == 5) // "LOAD", id, path, w, h = 5 delar (frameCount från filnamn)
+                                        (ss.Count == 5) // "LOAD", id, path, w, h = 5 parts (frameCount from the file name)
                                     {
                                         int fw = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
                                         int fh = EvalInt(ss[4], vars, ln, getInkey, isKeyDown, graphics);
                                         graphics.LoadSpriteSheetAuto(id.Value, path, fw, fh, null);
                                     }
                                     else if
-                                        (ss.Count == 4) // "LOAD", id, path, count = 4 delar (width/height från filnamn)
+                                        (ss.Count == 4) // "LOAD", id, path, count = 4 parts (width/height from the file name)
                                     {
                                         int count = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
                                         graphics.LoadSpriteSheetAuto(id.Value, path, null, null, count);
                                     }
                                     else if (ss.Count == 3) // "LOAD", id, path = 3 delar
                                     {
-                                        // Kolla om filnamnet innehåller _W, _H eller _B/_F (dvs. är det ett spritesheet?)
+                                        // Check whether the file name contains _W, _H or _B/_F (i.e. is it a sprite sheet?)
                                         string fileName = System.IO.Path.GetFileNameWithoutExtension(path);
                                         bool isSpriteSheet =
                                             fileName.Contains("_W", System.StringComparison.OrdinalIgnoreCase) ||
@@ -2841,7 +2841,7 @@ public static partial class AmosRunner
 
                                         if (isSpriteSheet)
                                         {
-                                            // Auto-parse allt från filnamnet
+                                            // Auto-parse everything from the file name
                                             graphics.LoadSpriteSheetAuto(id.Value, path);
                                         }
                                         else
@@ -2852,7 +2852,7 @@ public static partial class AmosRunner
                                     }
                                     else
                                     {
-                                        // Fallback: Vanlig laddning av en bild
+                                        // Fallback: ordinary loading of an image
                                         graphics.LoadSprite(id.Value, path);
                                     }
                                 }
@@ -2986,7 +2986,7 @@ public static partial class AmosRunner
                                                         ? (float)EvalDouble(ss[7], vars, ln, getInkey, isKeyDown, graphics) 
                                                         : 0f;
         
-                                                    // ✅ Auto-sätt phaseY till pi/2 (90 grader) för organisk rörelse
+                                                    // ✅ Auto-set phaseY to pi/2 (90 degrees) for organic movement
                                                     float phaseY = amplitudeY > 0 ? 1.57f : 0f;  // pi/2 ≈ 1.57
         
                                                     graphics.AddSpriteEffect(id.Value, new WaveEffect { 
@@ -2995,7 +2995,7 @@ public static partial class AmosRunner
                                                         AmplitudeY = amplitudeY,
                                                         FrequencyY = frequencyY,
                                                         PhaseX = 0f,
-                                                        PhaseY = phaseY  // ✅ Ge Y-wave en 90° fasförskjutning
+                                                        PhaseY = phaseY  // ✅ Give the Y wave a 90° phase shift
                                                     });
                                                 }
                                                 break;
@@ -3034,7 +3034,7 @@ public static partial class AmosRunner
                                         {
                                             var effect = sprite.Effects[idx];
         
-                                            // WAVE räknas om varje frame ändå, så dess parametrar påverkar inte cachen
+                                            // WAVE is recalculated every frame anyway, so its parameters do not affect the cache
                                             bool shouldInvalidateCache = effect is not WaveEffect;
         
                                             switch (effect)
@@ -3076,7 +3076,7 @@ public static partial class AmosRunner
                                                     color.Saturation = val;
                                                     break;
                                             }
-                                            // ✅ Invalidera bara för statiska parametrar (RADIUS, AMPLITUDE etc)
+                                            // ✅ Only invalidate for static parameters (RADIUS, AMPLITUDE etc)
                                             if (shouldInvalidateCache)
                                             {
                                                 sprite.InvalidateEffectCache();
@@ -3098,8 +3098,8 @@ public static partial class AmosRunner
                             else
                             {
                                 // ============================================================
-                                // DIREKT SYNTAX: SPRITE id, x, y, img
-                                // Ex: SPRITE #0,1,0,0,1 (lager 0, sprite 1, x=0, y=0, image 1)
+                                // DIRECT SYNTAX: SPRITE id, x, y, img
+                                // E.g. SPRITE #0,1,0,0,1 (layer 0, sprite 1, x=0, y=0, image 1)
                                 // ============================================================
                                 if (ss.Count >= 4)
                                 {
@@ -3108,11 +3108,11 @@ public static partial class AmosRunner
                                     int y1  = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
                                     int img = EvalInt(ss[3], vars, ln, getInkey, isKeyDown, graphics);
                                     
-                                    // Skapa spriten med rätt storlek från bilden
+                                    // Create the sprite with the right size from the image
                                     graphics.SpriteImage(id.Value, img, 1);
-                                    // Sätt position
+                                    // Set the position
                                     graphics.SpritePos(id.Value, x1, y1);
-                                    // Gör spriten synlig
+                                    // Make the sprite visible
                                     graphics.SpriteOn(id.Value);
                                     
                                     if (savedScreen.HasValue)
@@ -3157,7 +3157,7 @@ public static partial class AmosRunner
                         
                         case "TRACK":
                         {
-                            // Trackerlåtar (.amostrk) på kanal 1 – 4
+                            // Tracker songs (.amostrk) on channels 1 – 4
                             var (trackSub, trackRest) = SplitFirstWord(arg);
                             var tA = SplitTopLevelCsv(trackRest);
                             switch (trackSub.ToUpperInvariant())
@@ -3165,7 +3165,7 @@ public static partial class AmosRunner
                                 case "LOAD":
                                 {
                                     string file = ValueToString(EvalValue(tA[0], vars, ln, getInkey, isKeyDown, graphics));
-                                    string path = ResourceLoader.GetPath(file);   // ger fel om filen saknas
+                                    string path = ResourceLoader.GetPath(file);   // throws if the file is missing
                                     try { _trackSong = TrackerSong.Load(path); }
                                     catch (FormatException fe) { throw new Exception($"TRACK LOAD: {fe.Message} at line {ln}"); }
                                     break;
@@ -3190,7 +3190,7 @@ public static partial class AmosRunner
                                     break;
                                 case "SFX":
                                 {
-                                    // TRACK SFX LOAD "fil" | VOLUME v | STOP | instrument, not [, ms [, kanal]]
+                                    // TRACK SFX LOAD "file" | VOLUME v | STOP | instrument, note [, ms [, channel]]
                                     var (sfxSub, sfxRest) = SplitFirstWord(trackRest);
                                     switch (sfxSub.ToUpperInvariant())
                                     {
@@ -3263,7 +3263,7 @@ public static partial class AmosRunner
                                 case "MUSIC":
                                 case "LOOP":
                                 {
-                                    // Noterna kan vara en textvariabel: PLAY MUSIC 1, MELODI$
+                                    // The notes can be a text variable: PLAY MUSIC 1, MELODY$
                                     var (_, rest2) = SplitFirstWord(arg);
                                     var ms2       = SplitTopLevelCsv(rest2);
                                     int    ch     = EvalInt(ms2[0], vars, ln, getInkey, isKeyDown, graphics);
@@ -3279,7 +3279,7 @@ public static partial class AmosRunner
                                         ChiptuneSynth.StopMusic();
                                     break;
 
-                                // Ljudinställningar som kan ändras medan musiken spelar
+                                // Sound settings that can change while the music plays
                                 case "PULSE":
                                     ChiptuneSynth.SetPulse(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics),
@@ -3475,7 +3475,7 @@ public static partial class AmosRunner
                                 int type = EvalInt(rainArgs[0], vars, ln, getInkey, isKeyDown, graphics);
                                 float density = (float)EvalDouble(rainArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                                 int curL = graphics.GetActiveScreenNumber();
-                                // Slot 0 = Typ, Slot 1 = Mängd
+                                // Slot 0 = type, slot 1 = amount
                                 graphics.SetShadervalues(curL, 1, (float)type, density);
                             }
 
@@ -3499,7 +3499,7 @@ public static partial class AmosRunner
                                         EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
                                 else if (tileSub == "DRAW" && tArgs.Count >= 3)
                                 {
-                                    // TILE DRAW kan nu ha #X-prefix: TILE DRAW #1, offsetX, offsetY
+                                    // TILE DRAW can now have a #X prefix: TILE DRAW #1, offsetX, offsetY
                                     string drawArgs = string.Join(",", tArgs.Skip(1));
                                     var (tempScreen, cleanArg) = ExtractScreenPrefix(drawArgs);
                                     int? savedScreen = null;
@@ -3553,10 +3553,10 @@ public static partial class AmosRunner
 
                                 else if (fSub == "PRINT" && fArgs.Count >= 4)
                                 {
-                                    // Bygg ihop argumenten efter "PRINT"
+                                    // Join the arguments after "PRINT"
                                     string printRest = string.Join(",", fArgs.Skip(1));
     
-                                    // Nu körs ExtractScreenPrefix på "#3, 134, 0, 0, \"HELLO AMOS\""
+                                    // Now ExtractScreenPrefix runs on "#3, 134, 0, 0, \"HELLO AMOS\""
                                     var (tempScreen2, cleanPrint) = ExtractScreenPrefix(printRest);
                                     int? savedScreen2 = null;
     
@@ -3636,7 +3636,7 @@ public static partial class AmosRunner
                                         // FONT EFFECT ADD fontId, effectType, param1, param2...
                                         int fontId = EvalInt(ss[2], vars, ln, getInkey, isKeyDown, graphics);
         
-                                        // Effekten läggs på fonten och ligger kvar efter FONT CLEAR
+                                        // The effect is put on the font and stays after FONT CLEAR
                                         if (graphics.GetFont(fontId) == null)
                                         {
                                             graphics.OnError?.Invoke($"[FONT EFFECT] Font {fontId} is not loaded");
@@ -3700,7 +3700,7 @@ public static partial class AmosRunner
                                         if (effect != null)
                                         {
             
-                                            // WAVE räknas om varje frame ändå, så dess parametrar påverkar inte cachen
+                                            // WAVE is recalculated every frame anyway, so its parameters do not affect the cache
                                             bool shouldInvalidateCache = effect is not WaveEffect;
             
                                             switch (effect)
@@ -3801,7 +3801,7 @@ public static partial class AmosRunner
                             break;
                         case "TIMER":
                         {
-                            // TIMER = nuvarande tid i millisekunder
+                            // TIMER = the current time in milliseconds
                             var currentTime = DateTime.UtcNow;
                             var elapsed = (currentTime - new DateTime(1970, 1, 1)).TotalMilliseconds;
                             setVar("TIMER", elapsed);
@@ -3810,17 +3810,17 @@ public static partial class AmosRunner
 
                         case "TICKS":
                         {
-                            // TICKS = antal millisekunder sedan programstart
+                            // TICKS = milliseconds since the program started
                             var elapsed = (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
                             setVar("TICKS", elapsed);
                             break;
                         }
-                        // Lägg till i switch(cmd):
+                        // Add to switch(cmd):
 
                         case "PROFILE":
                         {
-                            // PROFILE START "name" - börja mäta
-                            // PROFILE END "name" - sluta mäta och skriv ut
+                            // PROFILE START "name" - start measuring
+                            // PROFILE END "name" - stop measuring and print
                             var subCmd = arg.Split(' ')[0].ToUpperInvariant();
                             var profileName = arg.Substring(subCmd.Length).Trim().Trim('"');
     
@@ -3842,7 +3842,7 @@ public static partial class AmosRunner
             
                                     await appendLineAsync($"[PROFILE] {profileName}: {elapsed:F2} ms");
             
-                                    // Spara resultat i variabel
+                                    // Save the result in a variable
                                     setVar($"TIME_{profileName}", elapsed);
                                 }
                             }
@@ -3853,7 +3853,7 @@ public static partial class AmosRunner
                             // Syntax: OPEN IN/OUT/APPEND channel, "filename"
                             string openArg = arg.Trim();
 
-                            // Läs mode (IN/OUT/APPEND)
+                            // Read the mode (IN/OUT/APPEND)
                             string[] parts = openArg.Split(new[] { ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
                             if (parts.Length < 2)
                                 throw new Exception("OPEN: The syntax is OPEN IN/OUT/APPEND channel, \"filename\"");
@@ -3870,13 +3870,13 @@ public static partial class AmosRunner
                             else
                                 throw new Exception($"OPEN: Unknown mode '{modeStr}'. Use IN, OUT or APPEND");
 
-                            // Hitta kommat mellan channel och filename
+                            // Find the comma between the channel and the file name
                             string restArg = parts[1];
                             int commaIdx2 = restArg.IndexOf(',');
                             if (commaIdx2 < 0)
                                 throw new Exception("OPEN: The syntax is OPEN mode channel, \"filename\"");
 
-                            // Läs kanalnummer
+                            // Read the channel number
                             string channelExpr = restArg[..commaIdx2].Trim();
                             int channel = EvalInt(channelExpr, vars, ln, getInkey, isKeyDown, graphics);
 
@@ -3887,18 +3887,18 @@ public static partial class AmosRunner
                             if (_openFiles.ContainsKey(channel))
                                 throw new Exception($"OPEN: Channel {channel} is already open");
 
-                            // Läs filnamn
+                            // Read the file name
                             string fileExpr = restArg[(commaIdx2 + 1)..].Trim();
                             object fileObj = EvalValue(fileExpr, vars, ln, getInkey, isKeyDown, graphics);
                             string filePath = ValueToString(fileObj);
 
-                            // Konvertera relativ sökväg till absolut
+                            // Convert a relative path to an absolute one
                             if (!Path.IsPathRooted(filePath))
                             {
                                 filePath = Path.Combine(Environment.CurrentDirectory, filePath);
                             }
 
-                            // Öppna filen
+                            // Open the file
                             try
                             {
                                 var fileChannel = new FileChannel(channel, filePath, mode);
@@ -3912,7 +3912,7 @@ public static partial class AmosRunner
                                         break;
 
                                     case FileMode.Output:
-                                        // Skapa katalog om den inte finns
+                                        // Create the folder if it does not exist
                                         var dir = Path.GetDirectoryName(filePath);
                                         if (!string.IsNullOrEmpty(dir))
                                             Directory.CreateDirectory(dir);
@@ -3944,7 +3944,7 @@ public static partial class AmosRunner
 
                             if (!_openFiles.ContainsKey(channel))
                             {
-                                // Ignorera om kanalen inte är öppen (som klassisk BASIC)
+                                // Ignore it if the channel is not open (like classic BASIC)
                                 break;
                             }
 
@@ -3973,7 +3973,7 @@ public static partial class AmosRunner
                         {
                             if (!string.IsNullOrWhiteSpace(cmd))
                             {
-                                // --- PROC-anrop ---
+                                // --- PROC call ---
                                 if (procs.TryGetValue(cmd, out var procDef))
                                 {
                                     // Parsa argument
@@ -3990,18 +3990,18 @@ public static partial class AmosRunner
                                             $"PROC {procDef.Name} expects {procDef.Parameters.Count} " +
                                             $"parameters, got {argValues.Count} at line {ln}");
 
-                                    // Spara undan parametrar som skrivs över
+                                    // Save the parameters that are overwritten
                                     var savedVars = new Dictionary<string, object>(
                                         StringComparer.OrdinalIgnoreCase);
                                     foreach (var param in procDef.Parameters)
                                         if (vars.TryGetValue(param, out var old))
                                             savedVars[param] = old;
 
-                                    // Sätt parametrar
+                                    // Set the parameters
                                     for (int i = 0; i < procDef.Parameters.Count; i++)
                                         setVar(procDef.Parameters[i], argValues[i]);
 
-                                    // Pusha return-frame och hoppa
+                                    // Push a return frame and jump
                                     procCallStack.Push(new ProcCallFrame
                                     {
                                         ReturnPc = pc + 1,
@@ -4016,7 +4016,7 @@ public static partial class AmosRunner
                                 // --- Tilldelning (X = ...) ---
                                 if (fullCmd.Contains('='))
                                 {
-                                    // Uppdelningen vid '=' och arrayindexen görs en gång per sats
+                                    // The split at '=' and the array indexes are done once per statement
                                     var asg = preparedCmd.Assignment ??= PrepareAssignment(fullCmd);
                                     var leftSide = asg.Target;
 
@@ -4030,7 +4030,7 @@ public static partial class AmosRunner
 
                                             if (vars.TryGetValue(arrayName, out var aVal) && aVal is IAmosArray array)
                                             {
-                                                // Parse alla index (kan vara flera för multidim)
+                                                // Parse all indexes (there can be several for multi-dimensional arrays)
                                                 var indexParts = asg.IndexParts!;
                                                 var indices = new int[indexParts.Length];
 
@@ -4042,7 +4042,7 @@ public static partial class AmosRunner
                                                         CultureInfo.InvariantCulture));
                                                 }
 
-                                                // Sätt värde på rätt plats i multidim-arrayen
+                                                // Set the value at the right place in the multi-dimensional array
                                                 array.Set(rightValue, indices);
                                             }
                                             else
@@ -4069,29 +4069,29 @@ public static partial class AmosRunner
                 }
                 catch (Exception ex)
                 {
-                    // Spara felinformation i BASIC-variabler så man kan kolla vad som hände
+                    // Keep the error information in BASIC variables so that you can check what happened
                     setVar("ERR$", ex.Message);
                     setVar("ERL", ln);
 
                     if (errorMode == 1)
                     {
-                        // RESUME NEXT: Ignorera felet och kör vidare till nästa kommando/rad.
-                        // Vi gör ingenting här, loopen fortsätter till nästa kommando i 'commands'
-                        // eller nästa rad om commands är slut.
+                        // RESUME NEXT: Ignore the error and carry on with the next command/line.
+                        // We do nothing here; the loop continues with the next command in 'commands'
+                        // or the next line if the commands are done.
                     }
                     else if (errorMode == 2)
                     {
                         // GOTO Label
                         pc = errorGotoPc;
                         jumpHappened = true;
-                        break; // Bryt command-loopen för att utföra hoppet
+                        break; // Break the command loop to make the jump
                     }
                     else
                     {
-                        // BREAK (Standard): Rapportera och avsluta
+                        // BREAK (the default): report and end
                         if (ex.Message == "A task was canceled.") {return;}
                         await appendLineAsync($"Runtime Error at line {ln}: {ex.Message}");
-                        // Kasta vidare eller returnera för att stoppa helt
+                        // Rethrow or return to stop completely
                         return;
                     }
                 }
@@ -4128,7 +4128,7 @@ public static partial class AmosRunner
         return l;
     }
 
-    // NYTT: Hjälpmetod för att kolla om rad är tom eller bara kommentar
+    // NEW: Helper method that checks whether a line is empty or only a comment
     private static bool IsEmptyLine(string line)
     {
         if (string.IsNullOrWhiteSpace(line)) return true;
@@ -4136,12 +4136,12 @@ public static partial class AmosRunner
         var stripped = StripComments(line.Trim());
         stripped = StripLeadingLineNumber(stripped).Trim();
             
-        // Rad är tom om den bara innehåller label eller är tom efter stripping
+        // A line is empty if it only holds a label or is empty after stripping
         return string.IsNullOrWhiteSpace(stripped) || stripped.EndsWith(":");
     }
     
-    // Den ursprungliga tolken: läser och räknar ut uttrycket direkt från text.
-    // Används av den kompilerade varianten (AmosRunner.Compiled.cs) som reserv.
+    // The original interpreter: reads and evaluates the expression straight from the text.
+    // Used by the compiled variant (AmosRunner.Compiled.cs) as a fallback.
     private static object EvalValueInterpreted(string t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         if (string.IsNullOrWhiteSpace(t)) return "";
         var tok = new Tokenizer(t);
@@ -4149,7 +4149,7 @@ public static partial class AmosRunner
     }
 
     private static int EvalInt(string val, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) { 
-        // Använd din nya uträkningslogik som returnerar double och runda av
+        // Use the new calculation logic that returns a double and round it
         return (int)Math.Round(EvalDouble(val, v, ln, gk, ikd, g));
     }
     
@@ -4161,7 +4161,7 @@ public static partial class AmosRunner
     }
     
 
-    // Samma grammatik som CompileExpr: OR, AND, NOT, jämförelse, + - &, * / MOD DIV, ^
+    // The same grammar as CompileExpr: OR, AND, NOT, comparison, + - &, * / MOD DIV, ^
     private static object ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         var res = ParseAnd(ref t, v, ln, gk, ikd, g);
         while (t.TryConsumeWord("OR")) {
@@ -4223,13 +4223,13 @@ public static partial class AmosRunner
                 var d = ParsePower(ref t, v, ln, gk, ikd, g);
                 double div = Convert.ToDouble(d, CultureInfo.InvariantCulture);
                         
-                // ÄNDRAT: Kasta fel om nämnaren är noll (eller extremt nära noll)
+                // CHANGED: Throw an error if the denominator is zero (or extremely close to zero)
                 if (Math.Abs(div) < 0.000000001)
                     throw new DivideByZeroException("Division by zero");
 
                 res = Convert.ToDouble(res, CultureInfo.InvariantCulture) / div;
             } 
-            // ✅ LÄGG TILL DESSA RADER HÄR (innan "else break"):
+            // ✅ ADD THESE LINES HERE (before "else break"):
             else if (t.TryConsumeWord("MOD")) {
                 var right = ParsePower(ref t, v, ln, gk, ikd, g);
                 var a = Convert.ToDouble(res, CultureInfo.InvariantCulture);
@@ -4267,7 +4267,7 @@ public static partial class AmosRunner
         t.SkipWs();
         if (t.TryReadString(out var s)) return s;
         if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
-        // Unärt minus/plus framför tal, variabel, funktion eller parentes: -2^2, -MAXV, -SIN(A), -(A+B)
+        // Unary minus/plus in front of a number, variable, function or bracket: -2^2, -MAXV, -SIN(A), -(A+B)
         if (t.TryConsume('-')) return -Convert.ToDouble(ParsePower(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
         if (t.TryConsume('+')) return ParsePower(ref t, v, ln, gk, ikd, g);
         if (t.TryReadDouble(out var n)) return n;
@@ -4620,7 +4620,7 @@ public static partial class AmosRunner
                     string find = ValueToString(findObj);
                     string repl = ValueToString(replObj);
 
-                    // Skydd mot tom söksträng
+                    // Guard against an empty search string
                     if (string.IsNullOrEmpty(find))
                         return src;
 
@@ -4673,7 +4673,7 @@ public static partial class AmosRunner
                     
                 if (id.Equals("JOIN$", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Första argumentet är array-variabeln
+                    // The first argument is the array variable
                     object arrayObj = ParseExpr(ref t, v, ln, gk, ikd, g);
                     t.TryConsume(',');
                     object separatorObj = ParseExpr(ref t, v, ln, gk, ikd, g);
@@ -4681,29 +4681,29 @@ public static partial class AmosRunner
 
                     string separator = ValueToString(separatorObj);
     
-                    // Hantera både AmosStringArray och AmosNumericArray
+                    // Handle both AmosStringArray and AmosNumericArray
                     if (arrayObj is AmosStringArray strArray)
                     {
-                        // Filtrera bort null-värden och sista elementet om det är tomt
+                        // Filter out null values and the last element if it is empty
                         var validParts = strArray.Data.Where(s => s != null).ToArray();
                         return string.Join(separator, validParts);
                     }
                     else if (arrayObj is AmosNumericArray numArray)
                     {
-                        // Konvertera numerisk array till strängar
+                        // Convert a numeric array to strings
                         var parts = numArray.Data.Select(d => d.ToString(CultureInfo.InvariantCulture)).ToArray();
                         return string.Join(separator, parts);
                     }
                     else if (arrayObj is IAmosArray genericArray)
                     {
-                        // Fallback för andra IAmosArray-implementationer
+                        // Fallback for other IAmosArray implementations
                         var parts = new string[genericArray.Length];
                         for (int i = 0; i < genericArray.Length; i++)
                             parts[i] = ValueToString(genericArray.Get(i));
                         return string.Join(separator, parts);
                     }
     
-                    return ""; // Ingen array hittades
+                    return ""; // No array found
                 }                     
                         
                 if (id.Equals("SPLIT$", StringComparison.OrdinalIgnoreCase))
@@ -4718,7 +4718,7 @@ public static partial class AmosRunner
     
                     if (string.IsNullOrEmpty(delimiter))
                     {
-                        // Tom delimiter = dela i enskilda tecken
+                        // Empty delimiter = split into single characters
                         var chars = input.Select(c => c.ToString()).ToArray();
                         var result = new AmosStringArray(chars.Length - 1);
                         for (int i = 0; i < chars.Length; i++)
@@ -4736,14 +4736,14 @@ public static partial class AmosRunner
                         
                 if (id.Equals("FIND", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Första argumentet: sträng att söka i
+                    // First argument: the string to search in
                     object textObj = ParseExpr(ref t, v, ln, gk, ikd, g);
                     t.TryConsume(',');
     
-                    // Andra argumentet: söksträng
+                    // Second argument: the string to search for
                     object searchObj = ParseExpr(ref t, v, ln, gk, ikd, g);
     
-                    // Tredje argumentet (valfritt): startposition
+                    // Third argument (optional): start position
                     int startPos = 0;
                     if (t.TryConsume(','))
                     {
@@ -4776,11 +4776,11 @@ public static partial class AmosRunner
                         
                 if (id.Equals("REPEAT$", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Första argumentet: sträng att upprepa
+                    // First argument: the string to repeat
                     object strObj = ParseExpr(ref t, v, ln, gk, ikd, g);
                     t.TryConsume(',');
     
-                    // Andra argumentet: antal gånger
+                    // Second argument: the number of times
                     object countObj = ParseExpr(ref t, v, ln, gk, ikd, g);
                     t.TryConsume(')');
 
@@ -4789,7 +4789,7 @@ public static partial class AmosRunner
     
                     if (count <= 0) return "";
     
-                    // Optimera för enstaka tecken
+                    // Optimise for single characters
                     if (str.Length == 1)
                     {
                         return new string(str[0], count);
@@ -4858,7 +4858,7 @@ public static partial class AmosRunner
                     t.TryConsume(')');
                     return g.GetSprite(val).Visible ? 1.0 : 0.0; 
                 } 
-                // FADING(id) — returnerar 1.0 om sprite har pågående fade, annars 0.0
+                // FADING(id) - returns 1.0 if the sprite has a fade in progress, otherwise 0.0
                 if (id.Equals("FADING", StringComparison.OrdinalIgnoreCase))
                 {
                     int sprId = Convert.ToInt32(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
@@ -4879,17 +4879,17 @@ public static partial class AmosRunner
     
                     int channel = (int)Math.Round(Convert.ToDouble(channelObj, CultureInfo.InvariantCulture));
     
-                    // Kolla om kanalen finns
+                    // Check whether the channel exists
                     if (!_openFiles.ContainsKey(channel))
                     {
-                        // Om kanalen inte är öppen, returnera 1 (true/EOF)
-                        // Alternativt: throw new Exception($"EOF: Kanal {channel} är inte öppen");
+                        // If the channel is not open, return 1 (true/EOF)
+                        // Alternatively: throw new Exception($"EOF: Channel {channel} is not open");
                         return 1;
                     }
     
                     var fileChannel = _openFiles[channel];
     
-                    // Kolla att det är en läskanal
+                    // Check that it is a reading channel
                     if (fileChannel.Mode != FileMode.Input)
                     {
                         throw new Exception($"EOF: Channel {channel} is not open for reading");
@@ -4897,22 +4897,22 @@ public static partial class AmosRunner
     
                     if (fileChannel.Reader == null)
                     {
-                        return 1; // Ingen reader = EOF
+                        return 1; // No reader = EOF
                     }
     
-                    // Returnera 1 om EOF, annars 0
+                    // Return 1 if EOF, otherwise 0
                     return fileChannel.Reader.EndOfStream ? 1 : 0;
                 }
                         
                 if (id.Equals("DIM", StringComparison.OrdinalIgnoreCase))
                 {
-                    // DIM(A) eller DIM(A()) returnerar arrayens storlek
-                    // Vi läser namnet direkt utan att parsa som uttryck
+                    // DIM(A) or DIM(A()) returns the size of the array
+                    // We read the name directly without parsing it as an expression
                     t.SkipWs();
                     if (!t.TryReadIdentifier(out var arrName))
                         throw new Exception($"DIM() expects array name at line {ln}");
                             
-                    // Skippa eventuella tomma parenteser: A()
+                    // Skip any empty brackets: A()
                     t.SkipWs();
                     if (t.TryConsume('('))
                     {
@@ -4920,13 +4920,13 @@ public static partial class AmosRunner
                         t.TryConsume(')');
                     }
                             
-                    // Stäng DIM-funktionens parentes
+                    // Close the DIM function's bracket
                     t.SkipWs();
                     t.TryConsume(')');
                             
                     if (v.TryGetValue(arrName, out var arrObj2) && arrObj2 is IAmosArray arr2)
                     {
-                        // Returnera storleken (längd - 1 eftersom AMOS indexerar 0-baserat men DIM A(10) ger 11 element)
+                        // Return the size (length - 1 since AMOS indexes from 0 but DIM A(10) gives 11 elements)
                         return (double)(arr2.Length);
                     }
                             
@@ -4943,7 +4943,7 @@ public static partial class AmosRunner
 
                 if (id.Equals("MILLIS", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Alias för TICKS
+                    // Alias for TICKS
                     t.TryConsume('(');
                     t.TryConsume(')');
                     var elapsed = (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
@@ -4952,37 +4952,37 @@ public static partial class AmosRunner
 
                 if (id.Equals("MICROS", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Mikrosekunder för ultra-precision
+                    // Microseconds for ultra precision
                     t.TryConsume('(');
                     t.TryConsume(')');
                     var elapsed = (DateTime.UtcNow - _programStartTime).TotalMilliseconds * 1000.0;
                     return elapsed;
                 }
                 
-                // Om vi kommer hit och det inte var en funktion, kolla om det är en array
+                // If we get here and it was not a function, check whether it is an array
                 if (v.TryGetValue(id, out var arrObj) && arrObj is IAmosArray array)
                 {
                     var indices = new List<int>();
 
-                    // Första uttrycket (vi är redan efter '(' när vi kommer hit)
+                    // The first expression (we are already past the '(' when we get here)
                     while (true)
                     {
-                        // Parse ett index-uttryck (kan vara siffra, variabel, expr, funktion etc)
+                        // Parse an index expression (can be a digit, variable, expression, function etc)
                         object exprVal = ParseExpr(ref t, v, ln, gk, ikd, g);
 
-                        // Konvertera till int-index
+                        // Convert to an int index
                         var d = Convert.ToDouble(exprVal, CultureInfo.InvariantCulture);
                         indices.Add((int)Math.Round(d));
 
-                        // Om komma → fortsätt läsa fler dimensioner
+                        // If a comma → carry on reading more dimensions
                         if (t.TryConsume(','))
                             continue;
 
-                        // Om ) → klart
+                        // If ) → done
                         if (t.TryConsume(')'))
                             break;
 
-                        // Annars syntaxfel
+                        // Otherwise a syntax error
                         throw new Exception("Syntax error in array index expression");
                     }
 
@@ -5003,12 +5003,12 @@ public static partial class AmosRunner
     {
         if (v is double d) 
         {
-            // "G10" betyder "General format" med 10 signifikanta siffror.
-            // Det rensar bort de pyttesmå avrundningsfelen i slutet.
+            // "G10" means "general format" with 10 significant digits.
+            // It cleans away the tiny rounding errors at the end.
             return d.ToString("G10", CultureInfo.InvariantCulture);
         }
-        // Andra tal (t.ex. heltal från SGN) som BASIC-tal, inte med datorns språkinställning
-        // (svenska ger annars "−1" med typografiskt minustecken)
+        // Other numbers (e.g. whole numbers from SGN) as BASIC numbers, not with the computer's language setting
+        // (Swedish otherwise gives "−1" with a typographic minus sign)
         if (v is IFormattable f)
             return f.ToString(null, CultureInfo.InvariantCulture);
         return v?.ToString() ?? "";
@@ -5027,19 +5027,19 @@ public static partial class AmosRunner
 
     private static (string n, string v) SplitAssignment(string t) { var i = t.IndexOf('='); return (t[..i].Trim(), t[(i + 1)..].Trim()); }
     private static (string c, string a) SplitCommand(string l) { 
-        // 1. Trimma bort mellanslag i början och slutet direkt!
+        // 1. Trim away spaces at the start and end straight away!
         l = l.Trim();
         if (string.IsNullOrWhiteSpace(l)) return ("", "");
         
         var i = l.IndexOf(' '); 
         if (i < 0) return (l.ToUpperInvariant(), "");
         
-        // 2. Ta ut kommandot och argumentet, och trimma igen
+        // 2. Take out the command and the argument, and trim again
         string cmd = l[..i].ToUpperInvariant().Trim();
         string arg = l[(i + 1)..].Trim();
 
-        // 3. "NAMN = uttryck" är alltid en tilldelning, även om NAMN råkar vara ett
-        //    kommando (TIMER, COLOR, HIT ...). Inget kommando tar ett argument som börjar med '='.
+        // 3. "NAME = expression" is always an assignment, even if NAME happens to be a
+        //    command (TIMER, COLOR, HIT ...). No command takes an argument starting with '='.
         if (arg.StartsWith('=') && !arg.StartsWith("=="))
             return ("LET", l);
         
@@ -5053,7 +5053,7 @@ public static partial class AmosRunner
     
     private static void StopEffect(string file, AudioEngine? engine) {
         if (engine == null) return;
-        // Om filsträngen är tom, stoppa allt!
+        // If the file string is empty, stop everything!
         if (string.IsNullOrEmpty(file))
         {
             engine.StopAllSamples();
@@ -5064,8 +5064,8 @@ public static partial class AmosRunner
         }
     }
 
-    // TRACK SFX instrument, not [, ms [, kanal]]. Instrumentet är ett nummer eller ett namn,
-    // noten ett MIDI-nummer eller text som "C-5", "C5" eller "C#5".
+    // TRACK SFX instrument, note [, ms [, channel]]. The instrument is a number or a name,
+    // the note a MIDI number or text such as "C-5", "C5" or "C#5".
     private static void PlayTrackSfx(List<string> args, Dictionary<string, object> vars, int ln,
         Func<string> getInkey, Func<string, bool> isKeyDown, AmosGraphics graphics)
     {
@@ -5112,7 +5112,7 @@ public static partial class AmosRunner
         try {
             StopMusic(engine); 
 
-            // Leta upp filen som all annan grafik och ljud (fungerar även i en exporterad app)
+            // Find the file like all other graphics and sound (works in an exported app too)
             file = ResourceLoader.GetPath(file);
             IntPtr ctx = LibXmp.xmp_create_context();
             if (LibXmp.xmp_load_module(ctx, file) == 0)
@@ -5127,7 +5127,7 @@ public static partial class AmosRunner
     public static void StopMusic(AudioEngine? engine = null) {
         try {
             if (_currentXmpContext != IntPtr.Zero) {
-                // Vi låter AudioEngine sluta läsa först
+                // We let the AudioEngine stop reading first
                 engine?.StopMod();
                 LibXmp.xmp_release_module(_currentXmpContext);
                 LibXmp.xmp_free_context(_currentXmpContext);
@@ -5138,7 +5138,7 @@ public static partial class AmosRunner
 
     public static void StopAllSounds() {
         StopMusic();
-        // För att vara helt säkra vid STOP-knappen dödar vi alla afplay
+        // To be completely safe at the STOP button we kill all afplay processes
         try { System.Diagnostics.Process.Start("killall", "afplay"); } catch {}
     }
     
@@ -5150,7 +5150,7 @@ public static partial class AmosRunner
             if (s[i] == '"') { inQ = !inQ; continue; }
             if (!inQ && string.Compare(s, i, word, 0, word.Length, StringComparison.OrdinalIgnoreCase) == 0)
             {
-                // Kontrollera att det är ett helt ord (omgivet av mellanslag/radslut)
+                // Check that it is a whole word (surrounded by spaces/line end)
                 bool prevOk = i == 0 || !char.IsLetterOrDigit(s[i - 1]);
                 bool nextOk = i + word.Length >= s.Length || !char.IsLetterOrDigit(s[i + word.Length]);
                 if (prevOk && nextOk) return i;
@@ -5160,10 +5160,10 @@ public static partial class AmosRunner
     }
     
     private static string StripLeadingLineNumber(string l) { var i = 0; while (i < l.Length && char.IsDigit(l[i])) i++; return l[i..].Trim(); }
-    // Delar argument på komma och mellanslag, men inte inuti "strängar" eller (parenteser)
-    // och inte runt operatorer. "1, X + 10, Y" blir alltså 1 | X + 10 | Y, "T MOD 6" hålls ihop
-    // och "HEJ PÅ DIG" i citattecken förblir en sträng. Ord utan operator emellan delas som förut
-    // (t.ex. "ADD 0, BLUR 1.0"). Ett ensamt "-5" efter ett mellanslag räknas som ett eget argument.
+    // Splits arguments at commas and spaces, but not inside "strings" or (brackets)
+    // and not around operators. So "1, X + 10, Y" becomes 1 | X + 10 | Y, "T MOD 6" is kept together
+    // and "HELLO THERE" in quotation marks stays one string. Words without an operator between them are split as before
+    // (e.g. "ADD 0, BLUR 1.0"). A lone "-5" after a space counts as an argument of its own.
     private static List<string> SplitCsvOrSpaces(string a) {
         if (a == null) return new List<string>();
         return new List<string>(CsvOrSpacesCache.GetOrAdd(a, x => SplitCsvOrSpacesUncached(x).ToArray()));
@@ -5226,7 +5226,7 @@ public static partial class AmosRunner
     private static bool StartsWithOperator(string s, int i)
     {
         char c = s[i];
-        // + och - räknas bara som operator om de följs av mellanslag ("X - 1"), annars är "-5" ett tal
+        // + and - only count as operators if followed by a space ("X - 1"); otherwise "-5" is a number
         if (c == '+' || c == '-') return i + 1 < s.Length && char.IsWhiteSpace(s[i + 1]);
         if ("*/&=<>^".Contains(c)) return true;
         foreach (var w in WordOperators)
@@ -5269,7 +5269,7 @@ public static partial class AmosRunner
             if (c == '"')
             {
                 inQuotes = !inQuotes;
-                continue; // ta bort citattecken
+                continue; // remove the quotation marks
             }
 
             if (!inQuotes && (c == ',' || char.IsWhiteSpace(c)))
@@ -5295,8 +5295,8 @@ public static partial class AmosRunner
 
     private static int IndexOfWord(string t, string w) => t.ToUpperInvariant().IndexOf(w.ToUpperInvariant());
 
-    // Första förekomsten av 'token' utanför strängar och parenteser. Med isWord måste den stå som
-    // ett eget ord (så att OR inte hittas i t.ex. SCORE eller ORANGE).
+    // The first occurrence of 'token' outside strings and brackets. With isWord it must stand as
+    // a word of its own (so that OR is not found in e.g. SCORE or ORANGE).
     private static int TopLevelIndexOf(string s, string token, bool isWord)
     {
         bool q = false;
@@ -5322,7 +5322,7 @@ public static partial class AmosRunner
         return -1;
     }
 
-    // "(A OR B)" -> "A OR B", men inte "(A) + (B)"
+    // "(A OR B)" -> "A OR B", but not "(A) + (B)"
     private static string StripOuterParens(string s)
     {
         while (s.Length >= 2 && s[0] == '(' && s[^1] == ')')
@@ -5351,7 +5351,7 @@ public static partial class AmosRunner
         public string Source => _s;
         public void SkipWs() { while (_i < _s.Length && char.IsWhiteSpace(_s[_i])) _i++; }
         public bool TryConsume(char c) { SkipWs(); if (_i < _s.Length && _s[_i] == c) { _i++; return true; } return false; }
-        // Läser =, <>, <, >, <= eller >=
+        // Reads =, <>, <, >, <= or >=
         public bool TryConsumeCompareOp(out string op) {
             SkipWs();
             op = "";
@@ -5369,7 +5369,7 @@ public static partial class AmosRunner
         public bool TryReadDouble(out double v) { 
             SkipWs(); 
             
-            // ✅ NYTT: Kolla om det är TRUE/FALSE/ON/OFF
+            // ✅ NEW: Check whether it is TRUE/FALSE/ON/OFF
             var bookmark = _i;
             if (TryReadIdentifier(out string possibleKeyword))
             {
@@ -5384,14 +5384,14 @@ public static partial class AmosRunner
                     v = 0.0;
                     return true;
                 }
-                // Om det inte var ett keyword, backa och fortsätt med normal parsing
+                // If it was not a keyword, back up and carry on with normal parsing
                 _i = bookmark;
             }
             
             var s = _i; 
             while (_i < _s.Length && (char.IsDigit(_s[_i]) || _s[_i] == '.' || (_i == s && _s[_i] == '-'))) _i++; 
             if (double.TryParse(_s[s.._i], CultureInfo.InvariantCulture, out v)) return true;
-            // Inget tal (t.ex. "-MAXV"): backa så att minustecknet inte försvinner
+            // No number (e.g. "-MAXV"): back up so that the minus sign is not lost
             _i = s;
             return false;
         }
@@ -5403,32 +5403,32 @@ public static partial class AmosRunner
             v = "";
             if (_i < _s.Length && _s[_i] == '\"')
             {
-                _i++; // Skippa första "
+                _i++; // Skip the first "
                 var start = _i;
                 while (_i < _s.Length && _s[_i] != '\"') _i++;
                 v = _s[start.._i];
 
-                // Tolka \r\n etc i stränglitteraler
+                // Interpret \r\n etc in string literals
                 v = UnescapeBasicString(v);
 
-                if (_i < _s.Length) _i++; // Skippa sista "
+                if (_i < _s.Length) _i++; // Skip the last "
                 return true;
             }
             return false;
         }
-        // ✅ LÄGG TILL DENNA NYA METOD:
+        // ✅ ADD THIS NEW METHOD:
         public bool TryConsumeWord(string word) {
             SkipWs();
         
-            // Kolla om ordet matchar
+            // Check whether the word matches
             if (_i + word.Length > _s.Length)
                 return false;
         
-            // Case-insensitive jämförelse
+            // Case-insensitive comparison
             if (!string.Equals(_s.Substring(_i, word.Length), word, StringComparison.OrdinalIgnoreCase))
                 return false;
         
-            // Kolla att nästa tecken INTE är bokstav/siffra (så "MODAL" inte matchar "MOD")
+            // Check that the next character is NOT a letter/digit (so "MODAL" does not match "MOD")
             if (_i + word.Length < _s.Length && 
                 (char.IsLetterOrDigit(_s[_i + word.Length]) || _s[_i + word.Length] == '_'))
                 return false;
@@ -5517,8 +5517,8 @@ public static partial class AmosRunner
     }
 
     /// <summary>
-    /// Initialisera en multidimensionell array från en sträng med nested brackets
-    /// Exempel: [[1,2,3],[4,5,6]] för 2D array
+    /// Initialise a multi-dimensional array from a string with nested brackets
+    /// Example: [[1,2,3],[4,5,6]] for a 2D array
     /// </summary>
     private static void InitializeArrayFromString(
         IAmosArray array, 
@@ -5584,7 +5584,7 @@ public static partial class AmosRunner
     }
 
     /// <summary>
-    /// Parsa nested brackets: [[1,2],[3,4]] -> ["1,2", "3,4"]
+    /// Parse nested brackets: [[1,2],[3,4]] -> ["1,2", "3,4"]
     /// </summary>
     private static List<string> ParseNestedArray(string str)
     {
@@ -5610,7 +5610,7 @@ public static partial class AmosRunner
         if (start < str.Length)
             result.Add(str[start..].Trim());
     
-        // Ta bort yttre brackets från varje element
+        // Remove the outer brackets from each element
         for (int i = 0; i < result.Count; i++)
         {
             var elem = result[i].Trim();

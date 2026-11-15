@@ -21,7 +21,7 @@ public partial class MapEditorWindow : Window
         _gfx = gfx;
         InitializeComponent();
         
-        // Synka UI med motorns faktiska data direkt vid start
+        // Sync the UI with the engine's actual data straight away at start
         MapWidthUpDown.Value = _gfx.GetMapWidth();
         MapHeightUpDown.Value = _gfx.GetMapHeight();
         
@@ -57,18 +57,18 @@ public partial class MapEditorWindow : Window
             using var stream = await files[0].OpenReadAsync();
             _gfx.LoadTileBank(stream, 32, 32); 
                 
-            // Öppna paletten automatiskt efter laddning
+            // Open the palette automatically after loading
             ShowPalette_OnClick(null, new Avalonia.Interactivity.RoutedEventArgs());
         }
     }
 
     private void RefreshTileList()
     {
-        // För att ListBox ska fatta att den ska rita om, nollställer vi den först
+        // To make the ListBox understand that it must redraw, we clear it first
         //TileList.ItemsSource = null;
         var tiles = _gfx.GetTileBitmaps();
         
-        // Skapa en kopia av listan så att Avalonia ser den som "ny"
+        // Make a copy of the list so that Avalonia sees it as "new"
         //TileList.ItemsSource = new List<WriteableBitmap>(tiles);
     }
 
@@ -86,7 +86,7 @@ public partial class MapEditorWindow : Window
         int h = (int)(MapHeightUpDown.Value ?? 15);
         _gfx.SetMapSize(w, h);
         
-        // Uppdatera storleken på ritytan (32 pixlar per tile)
+        // Update the size of the canvas (32 pixels per tile)
         MapCanvas.Width = w * 32;
         MapCanvas.Height = h * 32;
         
@@ -106,7 +106,7 @@ public partial class MapEditorWindow : Window
                 if (_gfx.GetMapTile(tx, ty) != _selectedTileIndex)
                 {
                     _gfx.SetMapTile(tx, ty, _selectedTileIndex);
-                    // Istället för att rita om hela banan, rita bara den nya tilen för snabbhet
+                    // Instead of redrawing the whole map, only draw the new tile, for speed
                     UpdateSingleTileOnCanvas(tx, ty, _selectedTileIndex);
                 }
             }
@@ -126,7 +126,7 @@ public partial class MapEditorWindow : Window
             if (_gfx.GetMapTile(tx, ty) != _selectedTileIndex)
             {
                 _gfx.SetMapTile(tx, ty, _selectedTileIndex);
-                // Istället för att rita om hela banan, rita bara den nya tilen för snabbhet
+                // Instead of redrawing the whole map, only draw the new tile, for speed
                 RemoveSingleTileOnCanvas(tx, ty, _selectedTileIndex);
             }
         }
@@ -138,7 +138,7 @@ public partial class MapEditorWindow : Window
         int mw = _gfx.GetMapWidth();
         int mh = _gfx.GetMapHeight();
         
-        // Uppdatera storleken på Canvas så scrollbaren stämmer
+        // Update the size of the Canvas so the scrollbar is right
         MapCanvas.Width = mw * 32;
         MapCanvas.Height = mh * 32;
 
@@ -157,8 +157,8 @@ public partial class MapEditorWindow : Window
         var tiles = _gfx.GetTileBitmaps();
         if (tid < 0 || tid >= tiles.Count) return;
 
-        // Om det redan finns en bild på denna plats, ta bort den först
-        // (Enkel optimering: vi letar efter objektet på rätt position)
+        // If there is already an image at this place, remove it first
+        // (Simple optimisation: we look for the object at the right position)
         var existing = MapCanvas.Children
             .FirstOrDefault(c => Canvas.GetLeft(c) == x * 32 && Canvas.GetTop(c) == y * 32);
         if (existing != null) MapCanvas.Children.Remove(existing);
@@ -241,6 +241,6 @@ public partial class MapEditorWindow : Window
         RedrawMap();
     }
     
-    // En liten hjälp-klass för laddning
+    // A small helper class for loading
     private record MapDto(int Width, int Height, List<int> Data);
 }

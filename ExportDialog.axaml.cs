@@ -18,7 +18,7 @@ public partial class ExportDialog : Window
     {
         InitializeComponent();
         NameBox.Text = defaultName;
-        // Standard: den egna plattformen på Windows (Mac-appen måste byggas på en Mac), båda på Mac
+        // Default: the own platform on Windows (the Mac app has to be built on a Mac), both on a Mac
         PlatformBox.SelectedIndex = OperatingSystem.IsWindows() ? 2 : 0;
         Opened += (_, _) => { NameBox.Focus(); NameBox.SelectAll(); };
     }
@@ -26,7 +26,7 @@ public partial class ExportDialog : Window
     private void ExportButton_OnClick(object? sender, RoutedEventArgs e)
     {
         var name = (NameBox.Text ?? "").Trim();
-        // Samma regel som Tools/export_app.py
+        // The same rule as Tools/export_app.py
         if (!Regex.IsMatch(name, @"^[\w .-]+$"))
         {
             ErrorText.Text = "The name may only contain letters, digits, spaces, dots and dashes.";

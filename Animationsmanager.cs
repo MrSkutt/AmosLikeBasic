@@ -6,46 +6,46 @@ using System.Text.RegularExpressions;
 namespace AmosLikeBasic;
 
 // ============================================================
-//  AnimFrame -- ett enda steg i en animationssekvens
+//  AnimFrame -- a single step in an animation sequence
 // ============================================================
 public sealed class AnimFrame
 {
-    /// <summary>Vilket frame-index i sprite-sheetet som ska visas.</summary>
+    /// <summary>Which frame index in the sprite sheet to show.</summary>
     public int SpriteFrameIndex { get; set; }
 
-    /// <summary>Hur många VBL-ticks bilden ska hållas kvar (1 tick ≈ 1/60 sek).</summary>
+    /// <summary>How many VBL ticks the picture is held (1 tick ≈ 1/60 s).</summary>
     public int DelayTicks { get; set; }
 }
 
 // ============================================================
-//  AnimationState -- en namngiven sekvens (t.ex. "idle", "run")
+//  AnimationState -- a named sequence (e.g. "idle", "run")
 // ============================================================
 public sealed class AnimationState
 {
-    /// <summary>Namn på state:t, t.ex. "idle", "run", "jump".</summary>
+    /// <summary>Name of the state, e.g. "idle", "run", "jump".</summary>
     public string Name { get; set; } = "";
 
-    /// <summary>Ramarna som ingår i animationen.</summary>
+    /// <summary>The frames in the animation.</summary>
     public List<AnimFrame> Frames { get; set; } = new();
 
-    /// <summary>Om true loopar animationen, annars spelas den en gång.</summary>
+    /// <summary>If true the animation loops, otherwise it plays once.</summary>
     public bool Loop { get; set; } = true;
 
     /// <summary>
-    /// Om satt: när ONCE-animationen är klar byts automatiskt till detta state.
-    /// Lämna null för att frysa på sista bilden.
+    /// If set: when the ONCE animation is done it switches automatically to this state.
+    /// Leave null to freeze on the last picture.
     /// </summary>
     public string? OnCompleteGoTo { get; set; }
 }
 
 // ============================================================
-//  SpriteAnimation -- animationsdata för en specifik sprite
+//  SpriteAnimation -- animation data for one sprite
 // ============================================================
 public sealed class SpriteAnimation
 {
     public int SpriteId { get; set; }
 
-    /// <summary>Alla definierade states för denna sprite.</summary>
+    /// <summary>All defined states for this sprite.</summary>
     public Dictionary<string, AnimationState> States { get; } =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -56,7 +56,7 @@ public sealed class SpriteAnimation
 }
 
 // ============================================================
-//  AnimGroup -- synkroniserar flera sprites under ett namn
+//  AnimGroup -- synchronises several sprites under one name
 // ============================================================
 public sealed class AnimGroup
 {
@@ -65,7 +65,7 @@ public sealed class AnimGroup
 }
 
 // ============================================================
-//  AnimationManager -- huvudklass som hanterar alla animationer
+//  AnimationManager -- the main class that handles all animations
 // ============================================================
 public sealed class AnimationManager
 {
@@ -77,7 +77,7 @@ public sealed class AnimationManager
         new(StringComparer.OrdinalIgnoreCase);
 
     // -------------------------------------------------------
-    //  ANIM DEF  --  definiera ett state för en sprite
+    //  ANIM DEF  --  define a state for a sprite
     //  BASIC: ANIM DEF 1, "idle", (0,8)(1,8)(2,8), LOOP
     //  BASIC: ANIM DEF 1, "jump", (8,5)(9,5)(10,12), ONCE, "idle"
     // -------------------------------------------------------
@@ -107,7 +107,7 @@ public sealed class AnimationManager
     }
 
     // -------------------------------------------------------
-    //  ANIM SET  --  byt aktivt state för en sprite
+    //  ANIM SET  --  change the active state of a sprite
     //  BASIC: ANIM SET 1, "run"
     // -------------------------------------------------------
     public void SetState(int spriteId, string stateName, bool forceRestart = false)
@@ -118,7 +118,7 @@ public sealed class AnimationManager
         if (!anim.States.TryGetValue(stateName, out var state))
             return;
 
-        // Undvik att restarta samma state om det redan är aktivt
+        // Avoid restarting the same state if it is already active
         if (!forceRestart && anim.CurrentState?.Name == stateName && anim.IsActive)
             return;
 
@@ -129,7 +129,7 @@ public sealed class AnimationManager
     }
 
     // -------------------------------------------------------
-    //  ANIM STOP  --  stoppa animationen för en sprite
+    //  ANIM STOP  --  stop the animation of a sprite
     //  BASIC: ANIM STOP 1
     // -------------------------------------------------------
     public void Stop(int spriteId)
@@ -139,7 +139,7 @@ public sealed class AnimationManager
     }
 
     // -------------------------------------------------------
-    //  ANIM GROUP  --  koppla ihop sprites till en grupp
+    //  ANIM GROUP  --  link sprites into a group
     //  BASIC: ANIM GROUP "player", 1, 2
     // -------------------------------------------------------
     public void DefineGroup(string groupName, params int[] spriteIds)
@@ -152,7 +152,7 @@ public sealed class AnimationManager
     }
 
     // -------------------------------------------------------
-    //  ANIM GROUP SET  --  sätt state för hela gruppen synkat
+    //  ANIM GROUP SET  --  set the state for the whole group in sync
     //  BASIC: ANIM GROUP SET "player", "run"
     // -------------------------------------------------------
     public void SetGroupState(string groupName, string stateName)
@@ -165,9 +165,9 @@ public sealed class AnimationManager
     }
 
     // -------------------------------------------------------
-    //  Tick()  --  anropas EN gång per WAIT VBL, INNAN EndFrame
-    //  Uppdaterar alla aktiva animationer och anropar
-    //  graphics.SetSpriteFrame() när nästa bild ska visas.
+    //  Tick()  --  called ONCE per WAIT VBL, BEFORE EndFrame
+    //  Updates all active animations and calls
+    //  graphics.SetSpriteFrame() when the next picture should show.
     // -------------------------------------------------------
     public void Tick(AmosGraphics graphics)
     {
@@ -181,43 +181,43 @@ public sealed class AnimationManager
             if (anim.TicksRemaining > 0)
                 continue;
 
-            // Stega till nästa frame i sekvensen
+            // Step to the next frame in the sequence
             anim.CurrentFrameIndex++;
 
             if (anim.CurrentFrameIndex >= anim.CurrentState.Frames.Count)
             {
                 if (anim.CurrentState.Loop)
                 {
-                    // Loopa om från början
+                    // Loop from the start
                     anim.CurrentFrameIndex = 0;
                 }
                 else if (anim.CurrentState.OnCompleteGoTo != null)
                 {
-                    // ONCE med automatiskt state-byte när klar
+                    // ONCE with an automatic state change when done
                     SetState(anim.SpriteId, anim.CurrentState.OnCompleteGoTo, forceRestart: true);
                     continue;
                 }
                 else
                 {
-                    // ONCE utan fortsättning: frys på sista bilden
+                    // ONCE without a follow-up: freeze on the last picture
                     anim.CurrentFrameIndex = anim.CurrentState.Frames.Count - 1;
                     anim.IsActive          = false;
                     continue;
                 }
             }
 
-            // Uppdatera countdown och applicera rätt sprite-frame
+            // Update the countdown and apply the right sprite frame
             var frame = anim.CurrentState.Frames[anim.CurrentFrameIndex];
             anim.TicksRemaining = frame.DelayTicks;
 
-            // Använder rätt metodnamn från AmosGraphics
+            // Uses the right method name from AmosGraphics
             graphics.SetSpriteFrame(anim.SpriteId, frame.SpriteFrameIndex);
         }
     }
 
     // -------------------------------------------------------
-    //  Hjälpmetod: returnerar nuvarande state-namn för en sprite
-    //  Användbart för IF-logik i BASIC (via ANIM STATE$(1))
+    //  Helper: returns the current state name of a sprite
+    //  Useful for IF logic in BASIC (via ANIM STATE$(1))
     // -------------------------------------------------------
     public string? GetCurrentState(int spriteId)
     {
@@ -227,8 +227,8 @@ public sealed class AnimationManager
     }
 
     // -------------------------------------------------------
-    //  ParseAnimArgs  --  statisk hjälp för att parsa
-    //  (frame,delay)-par ur en BASIC-sträng
+    //  ParseAnimArgs  --  static helper for parsing
+    //  (frame,delay) pairs from a BASIC string
     //  Ex: "(0,8)(1,8)(2,8)" --> List<AnimFrame>
     // -------------------------------------------------------
     public static List<AnimFrame> ParseFrameSequence(string input)

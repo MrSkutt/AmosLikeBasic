@@ -67,7 +67,7 @@ public partial class SpriteEditorWindow : Window
     {
         var sprite = _gfx.GetSprite(SpriteId);
         
-        // Säkerställ att current frame är giltig
+        // Make sure the current frame is valid
         if (_currentFrame >= sprite.Frames.Count)
             _currentFrame = sprite.Frames.Count - 1;
         if (_currentFrame < 0)
@@ -112,7 +112,7 @@ public partial class SpriteEditorWindow : Window
                 Stretch = Avalonia.Media.Stretch.Uniform
             };
             
-            // Sätt RenderOptions direkt på Image-objektet
+            // Set RenderOptions directly on the Image object
             RenderOptions.SetBitmapInterpolationMode(image, BitmapInterpolationMode.None);
 
             var border = new Border
@@ -343,7 +343,7 @@ public partial class SpriteEditorWindow : Window
         var sprite = _gfx.GetSprite(SpriteId);
         var (w, h) = _gfx.GetSpriteSize(SpriteId);
         
-        // Skapa ny tom frame
+        // Create a new empty frame
         var newFrame = CreateEmptyBitmap(w, h);
         sprite.Frames.Add(newFrame);
         
@@ -356,7 +356,7 @@ public partial class SpriteEditorWindow : Window
     {
         var sprite = _gfx.GetSprite(SpriteId);
         
-        // Kan inte ta bort sista framen
+        // Cannot remove the last frame
         if (sprite.Frames.Count <= 1)
             return;
 
@@ -381,7 +381,7 @@ public partial class SpriteEditorWindow : Window
         unsafe
         {
             var p = (byte*)fb.Address;
-            // Fyll med magenta (transparent key)
+            // Fill with magenta (transparent key)
             for (var i = 0; i < fb.RowBytes * h; i += 4)
             {
                 p[i + 0] = 255; // B
@@ -395,7 +395,7 @@ public partial class SpriteEditorWindow : Window
     }
 
     // ══════════════════════════════════════════════════════════════
-    //  LADDA & SPARA FUNKTIONALITET
+    //  LOAD & SAVE
     // ══════════════════════════════════════════════════════════════
 
     private async void LoadButton_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
@@ -463,10 +463,10 @@ public partial class SpriteEditorWindow : Window
                 var file = files[0];
                 string fileName = Path.GetFileNameWithoutExtension(file.Name);
                 
-                // Försök parsa från filnamnet
+                // Try to parse it from the file name
                 var parsedConfig = ParseSpritesheetFileName(fileName);
                 
-                // Visa dialog för att fråga om frame-storlek (med förvalda värden)
+                // Show a dialog that asks for the frame size (with suggested values)
                 var dialog = new SpritesheetConfigDialog(parsedConfig);
                 var config = await dialog.ShowDialog<SpritesheetConfig?>(this);
             
@@ -485,12 +485,12 @@ public partial class SpriteEditorWindow : Window
                     int rows = sheetH / config.FrameHeight;
                     int totalFrames = Math.Min(cols * rows, config.FrameCount);
 
-                    // Skapa spriten med första frame-storleken
+                    // Create the sprite with the first frame size
                     _gfx.CreateSprite(SpriteId, config.FrameWidth, config.FrameHeight);
                     var sprite = _gfx.GetSprite(SpriteId);
                     sprite.Frames.Clear();
 
-                    // Ladda in alla frames
+                    // Load all frames
                     for (int i = 0; i < totalFrames; i++)
                     {
                         int col = i % cols;
@@ -525,7 +525,7 @@ public partial class SpriteEditorWindow : Window
 
         private SpritesheetConfig ParseSpritesheetFileName(string fileName)
         {
-            // Standardvärden
+            // Default values
             int width = 32;
             int height = 32;
             int frameCount = 8;
@@ -540,7 +540,7 @@ public partial class SpriteEditorWindow : Window
             if (hMatch.Success)
                 height = int.Parse(hMatch.Groups[1].Value);
             
-            // Parse B### eller F### (Frame count)
+            // Parse B### or F### (frame count)
             var fMatch = System.Text.RegularExpressions.Regex.Match(fileName, @"_[BF](\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             if (fMatch.Success)
                 frameCount = int.Parse(fMatch.Groups[1].Value);
@@ -582,14 +582,14 @@ public partial class SpriteEditorWindow : Window
         {
             var sprite = _gfx.GetSprite(SpriteId);
             
-            // Om det bara finns en frame, spara den direkt
+            // If there is only one frame, save it directly
             if (sprite.Frames.Count == 1)
             {
                 await SaveSpriteToFile(_currentFileName);
             }
             else
             {
-                // För multi-frame sprites, spara som spritesheet
+                // For multi-frame sprites, save as a sprite sheet
                 await SaveSpritesheetToFile(_currentFileName);
             }
         }
@@ -651,7 +651,7 @@ public partial class SpriteEditorWindow : Window
         var sprite = _gfx.GetSprite(SpriteId);
         int frameCount = sprite.Frames.Count;
         
-        // Räkna ut layout (t.ex. 4 kolumner)
+        // Work out the layout (e.g. 4 columns)
         int cols = (int)Math.Ceiling(Math.Sqrt(frameCount));
         int rows = (int)Math.Ceiling((double)frameCount / cols);
         
@@ -661,7 +661,7 @@ public partial class SpriteEditorWindow : Window
         int sheetW = cols * frameW;
         int sheetH = rows * frameH;
         
-        // Skapa stor bitmap för hela sheet:et
+        // Create a big bitmap for the whole sheet
         var sheetBmp = new WriteableBitmap(
             new PixelSize(sheetW, sheetH),
             new Vector(96, 96),
@@ -674,7 +674,7 @@ public partial class SpriteEditorWindow : Window
             {
                 byte* destPtr = (byte*)destLock.Address;
                 
-                // Fyll med transparent färg (magenta)
+                // Fill with the transparent colour (magenta)
                 for (int i = 0; i < destLock.RowBytes * sheetH; i += 4)
                 {
                     destPtr[i + 0] = 255; // B
@@ -683,7 +683,7 @@ public partial class SpriteEditorWindow : Window
                     destPtr[i + 3] = 255; // A
                 }
                 
-                // Kopiera varje frame
+                // Copy each frame
                 for (int i = 0; i < frameCount; i++)
                 {
                     int col = i % cols;
@@ -696,7 +696,7 @@ public partial class SpriteEditorWindow : Window
                     int destX = col * frameW;
                     int destY = row * frameH;
                     
-                    // Kopiera pixel för pixel
+                    // Copy pixel by pixel
                     for (int y = 0; y < frameH; y++)
                     {
                         for (int x = 0; x < frameW; x++)

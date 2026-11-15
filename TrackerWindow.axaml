@@ -44,7 +44,7 @@
             <TextBlock Name="StatusText" Classes="amos-label" TextTrimming="CharacterEllipsis"/>
         </Border>
 
-        <!-- Vänster: ordningslista och mönster -->
+        <!-- Left: order list and patterns -->
         <Border DockPanel.Dock="Left" Width="200" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="0,0,2,0">
             <DockPanel Margin="10">
                 <StackPanel DockPanel.Dock="Top" Spacing="6">
@@ -70,7 +70,7 @@
             </DockPanel>
         </Border>
 
-        <!-- Höger: instrument -->
+        <!-- Right: instruments -->
         <Border DockPanel.Dock="Right" Width="330" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2,0,0,0">
             <DockPanel Margin="10">
                 <StackPanel DockPanel.Dock="Top" Spacing="6">
@@ -88,7 +88,7 @@
             </DockPanel>
         </Border>
 
-        <!-- Mitten: mönstret -->
+        <!-- Middle: the pattern -->
         <local:PatternView Name="Pattern"/>
     </DockPanel>
 </Window>

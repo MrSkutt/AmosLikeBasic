@@ -35,12 +35,12 @@ PLATFORMS = {
     "win": "win-x64",
 }
 
-# Mappar som csproj kopierar till varje build. Spelet tar bara med det det använder.
+# Folders that the csproj copies to every build. The game only takes what it uses.
 ASSET_DIRS_IN_BUILD = ("Graphics", "Sound", "Projects")
 
 
 def find_assets(program, extra):
-    """Alla strängar i programmet som pekar på en fil i projektet, t.ex. "Graphics/hero.png"."""
+    """Every string in the program that points to a file in the project, e.g. "Graphics/hero.png"."""
     assets = set()
     for literal in re.findall(r'"([^"\n]+)"', program):
         path = literal.strip().lstrip("/\\")
@@ -68,7 +68,7 @@ def publish(rid, out_dir):
         check=True)
     for d in ASSET_DIRS_IN_BUILD:
         shutil.rmtree(os.path.join(out_dir, d), ignore_errors=True)
-    # Felsökningsfiler från NuGet-paket (libSkiaSharp.pdb är ensam 80 MB) och länkfiler behövs inte
+    # Debug files from NuGet packages (libSkiaSharp.pdb alone is 80 MB) and link files are not needed
     for f in os.listdir(out_dir):
         if f.endswith((".pdb", ".def", ".dll.a")):
             os.remove(os.path.join(out_dir, f))
@@ -131,7 +131,7 @@ def build_mac(args, program, assets, work):
     os.chmod(os.path.join(app, "Contents", "MacOS", EXE), 0o755)
 
     if shutil.which("codesign"):
-        # Apple Silicon kör bara signerade program; ad hoc-signatur räcker för egen dator
+        # Apple Silicon only runs signed programs; an ad hoc signature is enough for your own computer
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-", app], check=True)
     else:
         print("!! codesign is missing (build on a Mac), the app will not start on Apple Silicon")
@@ -147,7 +147,7 @@ def build_mac(args, program, assets, work):
 
 
 def make_icns(png, dst, work):
-    """Gör en .icns av en PNG (helst 1024x1024) med sips och iconutil."""
+    """Makes an .icns from a PNG (ideally 1024x1024) with sips and iconutil."""
     iconset = os.path.join(work, "AppIcon.iconset")
     shutil.rmtree(iconset, ignore_errors=True)
     os.makedirs(iconset)

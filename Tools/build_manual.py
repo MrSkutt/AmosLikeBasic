@@ -34,7 +34,7 @@ SRC = os.path.join(ROOT, "Documentation", "Manual")
 BUILD = os.path.join(SRC, "build")
 PDF = os.path.join(ROOT, "Documentation", "AMOS Like Basic - Manual.pdf")
 
-# ── Färgmarkering av BASIC ────────────────────────────────────────────
+# ── Colour highlighting of BASIC ──────────────────────────────────────
 
 KEYWORDS = """
 IF THEN ELSE ENDIF END FOR TO STEP NEXT WHILE WEND DO LOOP REPEAT UNTIL EXIT GOTO GOSUB RETURN
@@ -65,7 +65,7 @@ TOKEN = re.compile(r'''
 def highlight_basic(code):
     out = []
     for line in code.split("\n"):
-        # Etikett i början av raden: "Loop:"
+        # Label at the start of the line: "Loop:"
         m = re.match(r"^(\s*)([A-Za-z_]\w*):\s*$", line)
         if m:
             out.append(html.escape(m.group(1)) + f'<span class="lbl">{html.escape(m.group(2))}:</span>')
@@ -108,7 +108,7 @@ def slug(text, used):
 
 
 def inline(text):
-    # Kod först, så att * och _ i kod inte tolkas
+    # Code first, so that * and _ in code are not interpreted
     codes = []
 
     def keep_code(m):

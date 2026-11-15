@@ -5,7 +5,7 @@ using System.Linq;
 namespace AmosLikeBasic;
 
 /// <summary>
-/// Interface för alla AMOS-arrayer (1D och multi-dim)
+/// Interface for all AMOS arrays (1D and multi-dimensional)
 /// </summary>
 public interface IAmosArray
 {
@@ -17,7 +17,7 @@ public interface IAmosArray
 }
 
 /// <summary>
-/// Numerisk array med stöd för multidimensionella index
+/// Number array with support for multi-dimensional indexes
 /// Exempel: DIM A(10,20,5) - 3D array
 /// </summary>
 public sealed class AmosNumericArray : IAmosArray
@@ -26,17 +26,17 @@ public sealed class AmosNumericArray : IAmosArray
     public int[] Dimensions { get; }
     
     /// <summary>
-    /// Skapa en multidimensionell numerisk array
+    /// Create a multi-dimensional number array
     /// </summary>
-    /// <param name="dimensions">Array av dimensioner, t.ex. [10, 20] för 10x20</param>
+    /// <param name="dimensions">Array of dimensions, e.g. [10, 20] for 10x20</param>
     public AmosNumericArray(params int[] dimensions)
     {
         if (dimensions == null || dimensions.Length == 0)
             throw new ArgumentException("An array needs at least one dimension");
             
-        Dimensions = dimensions.Select(d => d).ToArray(); // +1 för AMOS 0-indexering (0 till N inklusivt)
+        Dimensions = dimensions.Select(d => d).ToArray(); // +1 for AMOS 0 indexing (0 to N inclusive)
         
-        // Beräkna total storlek
+        // Work out the total size
         int totalSize = 1;
         foreach (int dim in Dimensions)
             totalSize *= dim;
@@ -47,8 +47,8 @@ public sealed class AmosNumericArray : IAmosArray
     public int Length => Data.Length;
     
     /// <summary>
-    /// Beräkna flat index från multidimensionella koordinater
-    /// Använder row-major order: index = z + y*depth + x*width*depth
+    /// Work out the flat index from multi-dimensional coordinates
+    /// Uses row-major order: index = z + y*depth + x*width*depth
     /// </summary>
     public int CalculateIndex(params int[] indices)
     {
@@ -59,7 +59,7 @@ public sealed class AmosNumericArray : IAmosArray
         int index = 0;
         int multiplier = 1;
         
-        // Bygg index bakifrån (row-major order)
+        // Build the index from the back (row-major order)
         for (int i = indices.Length - 1; i >= 0; i--)
         {
             if (indices[i] < 0 || indices[i] >= Dimensions[i])
@@ -85,7 +85,7 @@ public sealed class AmosNumericArray : IAmosArray
     
     public override string ToString()
     {
-        var dimStr = string.Join("×", Dimensions.Select(d => d - 1)); // -1 för att visa användbar storlek
+        var dimStr = string.Join("×", Dimensions.Select(d => d - 1)); // -1 to show the usable size
         var content = string.Join(", ", Data.Take(5).Select(d => d.ToString("G5", CultureInfo.InvariantCulture)));
         if (Data.Length > 5) content += "...";
         return $"Array({dimStr}) [{content}]";
@@ -93,8 +93,8 @@ public sealed class AmosNumericArray : IAmosArray
 }
 
 /// <summary>
-/// Sträng-array med stöd för multidimensionella index
-/// Exempel: DIM A$(5,10,3) - 3D sträng-array
+/// String array with support for multi-dimensional indexes
+/// Example: DIM A$(5,10,3) - a 3D string array
 /// </summary>
 public sealed class AmosStringArray : IAmosArray
 {

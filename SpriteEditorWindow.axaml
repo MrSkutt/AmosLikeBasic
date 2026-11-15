@@ -46,7 +46,7 @@
           <Button Width="28" Height="28" Background="Cyan" Click="PaletteCyan_OnClick"/>
           <Button Width="28" Height="28" Background="Magenta" Click="PaletteTransparent_OnClick"/>
 
-          <!-- Current Color Indicator - med mer separation -->
+          <!-- Current Color Indicator - with more separation -->
           <Border Width="40" Height="28" BorderBrush="{DynamicResource AmosLabelFg}" BorderThickness="3" Margin="16,0,0,0" Background="Black">
             <Rectangle Name="CurrentColorRect" Fill="White"/>
           </Border>

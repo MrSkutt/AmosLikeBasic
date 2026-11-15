@@ -13,9 +13,9 @@ using Avalonia.Threading;
 
 namespace AmosLikeBasic;
 
-// Spelarläget: kör ett färdigt BASIC-program i ett ScreenWindow, utan editor.
-// Används när appen har ett inbyggt spel (game.amosproj, se Tools/export_app.py)
-// eller startas med --play <fil.amosproj>.
+// Player mode: runs a finished BASIC program in a ScreenWindow, without the editor.
+// Used when the app has a built-in game (game.amosproj, see Tools/export_app.py)
+// or is started with --play <file.amosproj>.
 public sealed class GamePlayer
 {
     public const string EmbeddedGameFile = "game.amosproj";
@@ -27,8 +27,8 @@ public sealed class GamePlayer
     private readonly HashSet<string> _pressedKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _cts = new();
 
-    // Spelet som ska köras: --play <fil> eller game.amosproj bredvid appen (eller i
-    // Resources i ett macOS-paket). null betyder att IDE:n ska starta som vanligt.
+    // The game to run: --play <file> or game.amosproj next to the app (or in
+    // Resources in a macOS bundle). null means the IDE should start as usual.
     public static string? FindGame(string[] args)
     {
         int i = Array.IndexOf(args, "--play");
@@ -50,7 +50,7 @@ public sealed class GamePlayer
         return null;
     }
 
-    // Läser programtexten och en valfri titel ur en .amosproj-fil
+    // Reads the program text and an optional title from a .amosproj file
     public static (string Program, string Title) LoadGame(string path)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
@@ -127,11 +127,11 @@ public sealed class GamePlayer
             if (line.StartsWith("@@", StringComparison.Ordinal))
                 ScreenConsole.Apply(_window, _textScreen, line);
             else
-                ShowMessage(line); // Felmeddelanden m.m. som IDE:n visar i loggen
+                ShowMessage(line); // Error messages etc. that the IDE shows in the log
         }).GetTask();
     }
 
-    // Utan IDE finns ingen logg, så meddelanden skrivs i spelets textkonsol
+    // Without the IDE there is no log, so messages are written in the game's text console
     private void ShowMessage(string message)
     {
         _textScreen.Print(message);
@@ -140,7 +140,7 @@ public sealed class GamePlayer
 
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
-        // F12 växlar helskärm, Escape lämnar helskärm
+        // F12 toggles full screen, Escape leaves full screen
         if (e.Key == Key.F12 || (e.Key == Key.Escape && _window.WindowState == WindowState.FullScreen))
         {
             _window.WindowState = _window.WindowState == WindowState.FullScreen
@@ -150,7 +150,7 @@ public sealed class GamePlayer
             return;
         }
 
-        // F8 slår på och av CRT-filtret
+        // F8 turns the CRT filter on and off
         if (e.Key == Key.F8)
         {
             _gfx.CrtEnabled = !_gfx.CrtEnabled;
@@ -159,10 +159,10 @@ public sealed class GamePlayer
             return;
         }
 
-        // Registrera alltid tangenten först, så att KEYSTATE fungerar
+        // Always register the key first, so that KEYSTATE works
         lock (_pressedKeys) _pressedKeys.Add(e.Key.ToString());
 
-        // INPUT: skriv in text i konsolen
+        // INPUT: type text in the console
         if (e.Key == Key.Return)
             _window.SubmitInput();
         else if (e.Key == Key.Back)

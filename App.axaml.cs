@@ -18,7 +18,7 @@ public partial class App : Application
         {
             if (Program.GamePath is { } gamePath)
             {
-                // Spelarläge: bara spelfönstret, programmet startar direkt
+                // Player mode: only the game window, the program starts straight away
                 var (program, title) = GamePlayer.LoadGame(gamePath);
                 var window = new ScreenWindow { Title = title, WindowStartupLocation = WindowStartupLocation.CenterScreen };
                 var player = new GamePlayer(window);

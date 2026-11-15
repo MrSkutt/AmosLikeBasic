@@ -5,15 +5,15 @@ using Avalonia.Styling;
 
 namespace AmosLikeBasic;
 
-// Lägger det valda temats färger i appens resurser, så att alla fönster (sprite- och
-// karteditorn, tile-paletten, dialoger) följer temat. Fönstren hämtar färgerna med
-// {DynamicResource Amos...}, så de byter färg direkt även när de redan är öppna.
+// Puts the chosen theme's colours in the app's resources, so that all windows (the sprite and
+// map editors, the tile palette, dialogs) follow the theme. The windows get the colours with
+// {DynamicResource Amos...}, so they change colour straight away even when already open.
 //
-// Textfärger väljs så att de alltid går att läsa: temats egen färg används om kontrasten
-// mot bakgrunden räcker, annars nästa kandidat.
+// Text colours are chosen so that they can always be read: the theme's own colour is used if the
+// contrast against the background is enough, otherwise the next candidate.
 public static class ThemeResources
 {
-    // WCAG: 4.5 är gränsen för läsbar vanlig text
+    // WCAG: 4.5 is the limit for readable normal text
     private const double ReadableContrast = 4.5;
 
     public sealed record Palette(
@@ -26,9 +26,9 @@ public static class ThemeResources
         var buttonFg = Readable(t.ButtonBg, t.ButtonFg, t.MenuFg, t.EditorFg);
         bool isDark = Luminance(t.WindowBg) < 0.25;
 
-        // Inmatningsfälten (sifferfält) ska vara ljusa i ljusa teman och mörka i mörka, annars
-        // syns inte pilarna. Temats editorfärg används när den passar, t.ex. inte StosEditors
-        // svarta editor i ett i övrigt ljusgrått tema.
+        // The input fields (number boxes) should be light in light themes and dark in dark ones, otherwise
+        // the arrows do not show. The theme's editor colour is used when it fits, e.g. not StosEditor's
+        // black editor in an otherwise light grey theme.
         var inputBg = (Luminance(t.EditorBg) < 0.25) == isDark
             ? t.EditorBg
             : Mix(t.ToolbarBg, isDark ? Colors.Black : Colors.White, isDark ? 0.5 : 0.7);
@@ -68,8 +68,8 @@ public static class ThemeResources
         Set("AmosButtonBg", p.ButtonBg);
         Set("AmosButtonFg", p.ButtonFg);
 
-        // Fluent-temats egna knappfärger, så att alla knappar utan egen färg följer temat
-        // (förr: halvgenomskinlig mörk knapp med svart text ovanpå de mörkblå panelerna)
+        // The Fluent theme's own button colours, so that all buttons without a colour of their own follow the theme
+        // (before: a half-transparent dark button with black text on top of the dark blue panels)
         Set("ButtonBackground", p.ButtonBg);
         Set("ButtonBackgroundPointerOver", p.ButtonHoverBg);
         Set("ButtonBackgroundPressed", p.ButtonPressedBg);
@@ -82,13 +82,13 @@ public static class ThemeResources
         Set("ButtonBorderBrushPointerOver", p.ButtonFg);
         Set("ButtonBorderBrushPressed", p.ButtonFg);
 
-        // Ljust eller mörkt utseende på övriga kontroller (fält, rullningslister) efter temat,
-        // inte efter datorns inställning
+        // Light or dark look on the other controls (fields, scroll bars) according to the theme,
+        // not the computer's setting
         app.RequestedThemeVariant = p.IsDark ? ThemeVariant.Dark : ThemeVariant.Light;
         return p;
     }
 
-    // Första kandidaten som är läsbar mot bakgrunden, annars svart eller vitt
+    // The first candidate that is readable against the background, otherwise black or white
     public static Color Readable(Color bg, params Color[] candidates)
     {
         foreach (var c in candidates)

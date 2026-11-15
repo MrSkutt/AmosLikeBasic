@@ -73,12 +73,12 @@ public partial class MainWindow : Window
             _ = OpenProjectFromPathAsync(configService.Config.LastProjectPath);
         }
         
-        // KOPPLA IHOP AMOSGRAPHICS MED LOGBOX HÄR
+        // CONNECT AMOSGRAPHICS TO THE LOGBOX HERE
         _gfx.OnError = (msg) => {
-            // Se till att vi är på UI-tråden eftersom vi ska ändra text i en TextBox
+            // Make sure we are on the UI thread since we change text in a TextBox
             Dispatcher.UIThread.Post(() => {
                 Log(msg + Environment.NewLine);
-                // Om du vill att LogBox ska scrolla till slutet automatiskt:
+                // If you want the LogBox to scroll to the end automatically:
                 LogBox.CaretIndex = LogBox.Text?.Length ?? 0;
             });
         };
@@ -104,7 +104,7 @@ public partial class MainWindow : Window
         // Manage breakpoints
         var breakpointMargin = new BreakpointMargin(this);
         Editor.TextArea.LeftMargins.Insert(0, breakpointMargin);
-        Editor.ShowLineNumbers = true; // Aktivera linjenummer för att marginalen ska synas
+        Editor.ShowLineNumbers = true; // Turn on line numbers so that the margin shows
         
         _gfx.Clear(Colors.Black);
 
@@ -119,7 +119,7 @@ public partial class MainWindow : Window
             "UNTIL X = 10\n" +
             "END\n";
         
-        // Nollställ flaggan efter att vi satt starttexten, så den inte tror att vi ändrat något direkt
+        // Reset the flag after setting the start text, so it does not think we changed something straight away
         _isDirty = false;
         UpdateTitleBar();
     }
@@ -135,19 +135,19 @@ public partial class MainWindow : Window
         string selected = Editor.SelectedText;
         if (string.IsNullOrEmpty(selected)) return;
 
-        // Klipp till clipboard
+        // Cut to the clipboard
         var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
         if (clipboard != null)
             await clipboard.SetTextAsync(selected);
 
-        // Spara startpositionen (där texten börjar, oavsett vilket håll man markerat)
+        // Keep the start position (where the text starts, whichever way the selection was made)
         int startPos = Editor.SelectionStart;
         int len = Editor.SelectionLength;
 
-        // Ta bort den valda texten
+        // Remove the selected text
         Editor.Document.Replace(startPos, len, "");
 
-        // Placera caret där texten togs bort
+        // Place the caret where the text was removed
         Editor.CaretOffset = startPos;
         Editor.SelectionLength = 0;
     }
@@ -171,13 +171,13 @@ public partial class MainWindow : Window
             string? text = await clipboard.GetTextAsync();
             if (!string.IsNullOrEmpty(text))
             {
-                // Om vi har en markering, skriv över den (både Insert och Replace hanteras av Replace)
+                // If there is a selection, overwrite it (both Insert and Replace are handled by Replace)
                 int startPos = Editor.SelectionLength > 0 ? Editor.SelectionStart : Editor.CaretOffset;
                 int lengthToReplace = Editor.SelectionLength;
 
                 Editor.Document.Replace(startPos, lengthToReplace, text);
                     
-                // Flytta caret till slutet av den inklistrade texten
+                // Move the caret to the end of the pasted text
                 Editor.CaretOffset = startPos + text.Length;
                 Editor.SelectionLength = 0;
             }
@@ -197,7 +197,7 @@ public partial class MainWindow : Window
     private void UpdateCursorPosition()
     {
         if (Editor.Text == null) return;
-        // TextEditor använder CaretOffset istället för CaretIndex
+        // TextEditor uses CaretOffset instead of CaretIndex
         int caretIndex = Editor.CaretOffset;
         string text = Editor.Text.Substring(0, Math.Min(caretIndex, Editor.Text.Length));
         int line = text.Count(c => c == '\n') + 1;
@@ -220,7 +220,7 @@ public partial class MainWindow : Window
         if (doc == null || doc.LineCount == 0)
             return;
 
-        // Bläddra en skärmsida: så många rader som syns, minus en så att man ser var man var
+        // Page by one screen: as many lines as are visible, minus one so you can see where you were
         var textView = Editor.TextArea.TextView;
         double lineHeight = textView.DefaultLineHeight;
         int page = lineHeight > 0 ? Math.Max(1, (int)(textView.Bounds.Height / lineHeight) - 1) : 20;
@@ -230,8 +230,8 @@ public partial class MainWindow : Window
         int column = caret.Column;
         int targetLine = Math.Clamp(caret.Line + direction * page, 1, doc.LineCount);
 
-        // Rulla texten lika mycket som markören flyttar, så att den stannar på samma plats i fönstret.
-        // (TextEditor.ScrollToVerticalOffset har ingen effekt, så editorns ScrollViewer används direkt.)
+        // Scroll the text as much as the cursor moves, so that it stays at the same place in the window.
+        // (TextEditor.ScrollToVerticalOffset has no effect, so the editor's ScrollViewer is used directly.)
         var scrollViewer = Editor.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
         if (scrollViewer != null)
         {
@@ -250,13 +250,13 @@ public partial class MainWindow : Window
     
     private void HandleGlobalKeyDown(object? sender, KeyEventArgs e)
     {
-        // 1) Registrera alltid tangenten först (så KEYSTATE funkar även om vi "äter" eventet sen)
+        // 1) Always register the key first (so KEYSTATE works even if we "eat" the event later)
         _pressedKeys.Add(e.Key.ToString());
         
-        // Om ScreenWindow är aktiv och väntar på INPUT
+        // If the ScreenWindow is active and waiting for INPUT
         if (_screenWindow?.IsActive == true && _screenWindow != null)
         {
-            // Kolla om vi är i INPUT-läge (du kan lägga till en flag i ScreenWindow)
+            // Check if we are in INPUT mode (you can add a flag in ScreenWindow)
             if (e.Key == Key.Return)
             {
                 _screenWindow.SubmitInput();
@@ -271,7 +271,7 @@ public partial class MainWindow : Window
             }
             else if (e.Key != Key.Escape && e.Key != Key.Tab)
             {
-                // Lägg till ett tecken
+                // Add a character
                 string ch = ScreenConsole.CharFromKey(e.Key, (e.KeyModifiers & KeyModifiers.Shift) != 0);
                 if (!string.IsNullOrEmpty(ch))
                 {
@@ -284,20 +284,20 @@ public partial class MainWindow : Window
         
         if (Editor.IsKeyboardFocusWithin)
         {
-            // Låt editorn hantera navigationstangenter själv, inklusive PageUp/Down
+            // Let the editor handle navigation keys itself, including PageUp/Down
             if (e.Key is Key.PageUp or Key.PageDown
                 or Key.Up or Key.Down
                 or Key.Left or Key.Right
                 or Key.Home or Key.End
                 or Key.Tab)
             {
-                return; // Avbryt här så att e.Handled INTE sätts till true längre ner
+                return; // Stop here so that e.Handled is NOT set to true further down
             }
         }
         
         if (!_isPaused && RunButton.IsEnabled == false)
         {
-            // Om händelsen kommer från editorn, hindra den
+            // If the event comes from the editor, stop it
             if (Editor.IsKeyboardFocusWithin)
             {
                 e.Handled = true;
@@ -348,8 +348,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        // F9 - TOGGLE BREAKPOINT (NYTT!)
-        // F8 - CRT-FILTER I SPELFÖNSTRET
+        // F9 - TOGGLE BREAKPOINT (NEW!)
+        // F8 - CRT FILTER IN THE GAME WINDOW
         if (e.Key == Key.F8)
         {
             ToggleCrt();
@@ -414,13 +414,13 @@ public partial class MainWindow : Window
                 Directory.CreateDirectory(targetDir);
             }
 
-            // 2. Källa: Inuti AppBundle
-            // AppContext.BaseDirectory pekar oftast på .../AmosLikeBasic.app/Contents/MacOS/
-            // Vi vill gå upp ett steg och in i Resources
+            // 2. Source: inside the app bundle
+            // AppContext.BaseDirectory usually points to .../AmosLikeBasic.app/Contents/MacOS/
+            // We want to go up one step and into Resources
             string bundleBase = AppContext.BaseDirectory;
             string sourceDir = Path.Combine(bundleBase, "..", "Resources", "Projects");
                 
-            // Normalisera sökvägen (tar bort ".." ur strängen)
+            // Normalise the path (removes ".." from the string)
             sourceDir = Path.GetFullPath(sourceDir);
 
             if (Directory.Exists(sourceDir))
@@ -431,10 +431,10 @@ public partial class MainWindow : Window
                     string fileName = Path.GetFileName(file);
                     string destFile = Path.Combine(targetDir, fileName);
 
-                    // Kopiera bara om filen inte redan finns (så vi inte skriver över användarens eventuella ändringar)
+                    // Only copy if the file does not already exist (so we do not overwrite the user's changes)
                     if (!File.Exists(destFile))
                     {
-                        // Async copy för att inte låsa UI vid start
+                        // Async copy so that the UI is not locked at start
                         await Task.Run(() => File.Copy(file, destFile));
                     }
                 }
@@ -442,7 +442,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            // Logga eller ignorera tyst om något går fel med rättigheter
+            // Log or quietly ignore it if something goes wrong with permissions
             System.Diagnostics.Debug.WriteLine($"Could not copy example projects: {ex.Message}");
         }
     }
@@ -481,7 +481,7 @@ public partial class MainWindow : Window
     {
         if (!await CheckUnsavedChangesAsync())
         {
-            // Om användaren svarade "Nej" (vill inte förlora ändringar), avbryt stängningen helt
+            // If the user answered "No" (does not want to lose changes), cancel the closing completely
             return;
         }
         
@@ -506,11 +506,11 @@ public partial class MainWindow : Window
     
     private async void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
-        e.Cancel = true; // Stoppa fönstret direkt
+        e.Cancel = true; // Stop the window straight away
 
         if (!await CheckUnsavedChangesAsync())
         {
-            // Om användaren svarade "Nej" (vill inte förlora ändringar), avbryt stängningen helt
+            // If the user answered "No" (does not want to lose changes), cancel the closing completely
             return;
         }
         
@@ -523,22 +523,22 @@ public partial class MainWindow : Window
             configService.Config.WindowWidth = (int)this.Width;
             configService.Config.WindowHeight = (int)this.Height;
             configService.Save();
-            // Stänger fönstret efter dialogen
+            // Closes the window after the dialog
             this.Closing -= MainWindow_Closing; // Undvik loop
             this.Close();
         }
     }
     
-    // NYTT: Hjälpmetod för att kolla osparade ändringar
+    // NEW: Helper method that checks for unsaved changes
     private async Task<bool> CheckUnsavedChangesAsync()
     {
-        if (!_isDirty) return true; // Inga ändringar, kör på!
+        if (!_isDirty) return true; // No changes, go ahead!
 
         var result = await MessageBox(
             "Unsaved changes",
             "You have unsaved changes. Do you want to continue?",
-            "Yes",  // Fortsätt (släng ändringar)
-            "No"  // Avbryt (gå tillbaka och spara)
+            "Yes",  // Continue (throw away the changes)
+            "No"  // Cancel (go back and save)
         );
 
         return result;
@@ -578,7 +578,7 @@ public partial class MainWindow : Window
             }
         };
 
-        await dialog.ShowDialog(this); // Ägare = MainWindow
+        await dialog.ShowDialog(this); // Owner = MainWindow
 
         return await tcs.Task;
     }
@@ -627,8 +627,8 @@ public partial class MainWindow : Window
     
     private Task ClearConsoleAsync()
     {
-        // Vi använder InvokeAsync direkt och returnerar Tasken.
-        // (Det går också att göra metoden 'async Task' och använda 'await' inuti)
+        // We use InvokeAsync directly and return the Task.
+        // (The method could also be 'async Task' and use 'await' inside)
         return Dispatcher.UIThread.InvokeAsync(() =>
         {
             _textScreen.Clear();
@@ -681,7 +681,7 @@ public partial class MainWindow : Window
         foreach(var id in _gfx.GetSpriteIds()) {
             _gfx.SpriteOff(id);
         }
-        // ✅ NYTT: Rensa ALLA sprites och bobs helt och hållet
+        // ✅ NEW: Clear ALL sprites and bobs completely
         _gfx.ClearAllResources();
         if (_screenWindow.Console != null) _screenWindow.Console.Text = "";
         _screenWindow.ScreenControl.Graphics = _gfx;
@@ -689,7 +689,7 @@ public partial class MainWindow : Window
         _runCts = new CancellationTokenSource();
         var token = _runCts.Token;
 
-        // FPS, BASIC- och CPU-belastning i spelfönstrets titel, två gånger i sekunden
+        // FPS, BASIC and CPU load in the game window's title, twice a second
         _gfx.TakeFrameStats();
         var statsTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         statsTimer.Tick += (_, _) => UpdateScreenTitle(_gfx.TakeFrameStats());
@@ -698,14 +698,14 @@ public partial class MainWindow : Window
 
         try
         {
-            // VIKTIGT: async här i lambdan till Task.Run
+            // IMPORTANT: async here in the lambda for Task.Run
             await Task.Run(async () =>
             {
 
                 await AmosRunner.ExecuteAsync(
                     programText: program,
                     appendLineAsync: AppendConsoleLineAsync,
-                    // VIKTIGT: async här också för input
+                    // IMPORTANT: async here too for input
                     getConsoleInputAsync: async () => {
                         if (_screenWindow == null) return "";
                         return await Dispatcher.UIThread.InvokeAsync(() => _screenWindow.RequestInputAsync());
@@ -748,14 +748,14 @@ public partial class MainWindow : Window
                             VariableListBox.ItemsSource = displayItems;
                         });
                     },
-                    // VIKTIGT: async här för debug-steget
+                    // IMPORTANT: async here for the debug step
                     waitForStep: async (pc) => {
-                        // NYTT: Kolla om vi träffade en breakpoint
+                        // NEW: Check whether we hit a breakpoint
                         bool hitBreakpoint = _breakpoints.Contains(pc + 1);
                             
                         if (hitBreakpoint && !_isPaused)
                         {
-                            // Aktivera paus-läge automatiskt
+                            // Turn on pause mode automatically
                             _isPaused = true;
                             Dispatcher.UIThread.Post(() => {
                                 PauseButton.Content = "[ RESUME ]";
@@ -773,15 +773,15 @@ public partial class MainWindow : Window
                                 {
                                     try
                                     {
-                                        // FIXAT: Använd Document API istället för manuell beräkning
+                                        // FIXED: Use the Document API instead of working it out by hand
                                         if (pc >= 0 && pc < Editor.Document.LineCount)
                                         {
-                                            // Få raden från dokumentet (1-baserad -> 0-baserad)
+                                            // Get the line from the document (1-based -> 0-based)
                                             var docLine = Editor.Document.GetLineByNumber(pc + 1);
                                             int lineStart = docLine.Offset;
                                             int lineLength = docLine.Length;
                                                 
-                                            // VIKTIGT: Använd Select() istället för att sätta properties direkt
+                                            // IMPORTANT: Use Select() instead of setting the properties directly
                                             Editor.CaretOffset = lineStart;
                                                 
                                             if (lineLength > 0)
@@ -796,7 +796,7 @@ public partial class MainWindow : Window
                                     }
                                     catch (Exception ex)
                                     {
-                                        // Säkerhetsåtgärd: Om något går fel, sätt bara caret
+                                        // Safety measure: if something goes wrong, just set the caret
                                         System.Diagnostics.Debug.WriteLine($"Error selecting line: {ex.Message}");
                                         if (pc >= 0 && pc < Editor.Document.LineCount)
                                         {
@@ -810,8 +810,8 @@ public partial class MainWindow : Window
                             await _stepSignal.Task;
                         }
                     }
-                ); // Slut på ExecuteAsync
-            }, token); // Slut på Task.Run
+                ); // End of ExecuteAsync
+            }, token); // End of Task.Run
 
             await AppendConsoleLineAsync("OK");
         }
@@ -833,7 +833,7 @@ public partial class MainWindow : Window
 
     private void ToggleCrt_OnClick(object? sender, RoutedEventArgs e) => ToggleCrt();
 
-    // Slår på och av CRT-filtret (bildrörsutseende) i spelfönstret
+    // Turns the CRT filter (picture tube look) on and off in the game window
     private void ToggleCrt()
     {
         _gfx.CrtEnabled = !_gfx.CrtEnabled;
@@ -844,7 +844,7 @@ public partial class MainWindow : Window
     private void UpdateScreenTitle(AmosGraphics.FrameStats stats)
     {
         if (_screenWindow == null) return;
-        // BASIC = andel av tiden interpretatorn arbetar mellan WAIT VBL ("-" utan WAIT VBL)
+        // BASIC = the share of time the interpreter works between WAIT VBL ("-" without WAIT VBL)
         var basic = stats.BasicPercent < 0 ? "-" : $"{stats.BasicPercent:F0}%";
         _screenWindow.Title = $"AMOS Screen | FPS {stats.Fps:F0} | BASIC {basic} | CPU {stats.CpuPercent:F0}%";
     }
@@ -853,7 +853,7 @@ public partial class MainWindow : Window
     {
         if (_isProjectLoading) return;
         
-        // Vi kollar om Shift var nedtryckt när vi klickade, eller anropar med true från kod
+        // We check whether Shift was down when we clicked, or call with true from code
         bool startPaused = (sender == null && e == null) || 
                            (e is KeyEventArgs ke && (ke.KeyModifiers & KeyModifiers.Shift) != 0);
         Editor.IsEnabled = false;
@@ -870,12 +870,12 @@ public partial class MainWindow : Window
         if (!_isPaused) _stepSignal?.TrySetResult(true);
         if (_isPaused)
         {
-            // Pausa musiken (BASS har en global paus eller så pausar vi mixern)
+            // Pause the music (BASS has a global pause, or we pause the mixer)
             ManagedBass.Bass.Pause(); 
         }
         else
         {
-            // Starta musiken igen
+            // Start the music again
             ManagedBass.Bass.Start();
             _stepSignal?.TrySetResult(true);
         }
@@ -886,43 +886,43 @@ public partial class MainWindow : Window
         return _breakpoints.Contains(lineNumber);
     }
     
-    // NYTT: Kolla om en rad är tom eller bara innehåller whitespace/kommentarer
+    // NEW: Check whether a line is empty or only holds whitespace/comments
     public bool IsEmptyOrCommentLine(int lineNumber)
     {
         if (Editor.Document == null) return true;
             
-        // Kolla om radnumret är giltigt
+        // Check that the line number is valid
         if (lineNumber < 1 || lineNumber > Editor.Document.LineCount) return true;
             
         var line = Editor.Document.GetLineByNumber(lineNumber);
         var text = Editor.Document.GetText(line.Offset, line.Length).Trim();
             
-        // Tom rad
+        // Empty line
         if (string.IsNullOrWhiteSpace(text)) return true;
             
-        // Bara kommentar (börjar med ;)
+        // Only a comment (starts with ;)
         if (text.StartsWith(";")) return true;
             
-        // Bara en label (slutar med :)
+        // Only a label (ends with :)
         if (text.EndsWith(":")) return true;
             
-        // Hantera radnummer först (t.ex. "100 REM comment")
-        // Ta bort eventuellt radnummer i början
+        // Handle line numbers first (e.g. "100 REM comment")
+        // Remove a line number at the start, if any
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length > 0)
         {
-            // Om första ordet är ett tal, skippa det
+            // If the first word is a number, skip it
             if (int.TryParse(parts[0], out _) && parts.Length > 1)
             {
                 var commandPart = parts[1].ToUpperInvariant();
                     
-                // REM-rader är också kommentarer
+                // REM lines are comments too
                 if (commandPart == "REM" || commandPart.StartsWith("REM"))
                     return true;
             }
             else
             {
-                // Ingen radnummer, kolla första ordet direkt
+                // No line number, check the first word directly
                 var commandPart = parts[0].ToUpperInvariant();
                 if (commandPart == "REM" || commandPart.StartsWith("REM"))
                     return true;
@@ -932,20 +932,20 @@ public partial class MainWindow : Window
         return false;
     }
     
-    // NYTT: Toggle breakpoint på aktuell rad (F9)
+    // NEW: Toggle a breakpoint on the current line (F9)
     private void ToggleBreakpointAtCurrentLine()
     {
         if (Editor.Document == null) return;
             
-        // Få aktuell rad från caret-positionen
+        // Get the current line from the caret position
         int offset = Editor.CaretOffset;
         var location = Editor.Document.GetLocation(offset);
         int lineNumber = location.Line;
             
-        // NYTT: Hindra breakpoint på tomma rader
+        // NEW: Prevent breakpoints on empty lines
         if (IsEmptyOrCommentLine(lineNumber))
         {
-            return; // Gör ingenting
+            return; // Do nothing
         }
             
         if (_breakpoints.Contains(lineNumber))
@@ -953,7 +953,7 @@ public partial class MainWindow : Window
         else
             _breakpoints.Add(lineNumber);
             
-        // Tvinga en uppdatering av marginalen
+        // Force an update of the margin
         Editor.TextArea.TextView.Redraw();
     }
     
@@ -967,9 +967,9 @@ public partial class MainWindow : Window
         _runCts?.Cancel();
         _audioEngine?.StopMod();
         _audioEngine?.StopAllSamples();
-        ManagedBass.Bass.Start(); // Säkerställ att ljudet inte fastnar i paus
+        ManagedBass.Bass.Start(); // Make sure the sound does not get stuck in pause
 
-        // Stäng spelfönstret om det är öppet
+        // Close the game window if it is open
         if (_screenWindow != null)
         {
             _screenWindow.Close();
@@ -997,7 +997,7 @@ public partial class MainWindow : Window
         win.Show();
     }
 
-    // Bara ett trackerfönster åt gången, eftersom de delar syntens kanaler
+    // Only one tracker window at a time, since they share the synth's channels
     private TrackerWindow? _trackerWindow;
 
     private void TrackerButton_OnClick(object? sender, RoutedEventArgs e)
@@ -1026,22 +1026,22 @@ public partial class MainWindow : Window
         string dirtyMarker = _isDirty ? "*" : "";
             
         FileNameText.Text = name + dirtyMarker;
-        // Valfritt: Uppdatera även fönstertiteln (det som syns i Windows/macOS-listen)
+        // Optional: also update the window title (what shows in the Windows/macOS bar)
         this.Title = $"AMOS Professional IDE - [{name}]";
     }
 
     private async void NewProject_OnClick(object? sender, RoutedEventArgs e)
     {
-        // NYTT: Kolla innan vi rensar
+        // NEW: Check before we clear
         if (!await CheckUnsavedChangesAsync()) return;
         
         Editor.Text = "";
-        _currentProjectFile = null; // Nollställ filreferensen
+        _currentProjectFile = null; // Reset the file reference
         _gfx.Clear(Colors.Black);
         _textScreen.Clear();
         if (_screenWindow?.Console != null) _screenWindow.Console.Text = "";
         LogBox.Text = "New project started.\n";
-        _isDirty = false; // Nollställ flaggan
+        _isDirty = false; // Reset the flag
         
         LogBox.Clear();
         _breakpoints.Clear();
@@ -1049,7 +1049,7 @@ public partial class MainWindow : Window
         _gfx.ClearAllResources();
         Editor.TextArea.Caret.Offset = 0;
         Editor.TextArea.Caret.BringCaretToView();
-        UpdateTitleBar(); // Uppdatera till "Untitled"
+        UpdateTitleBar(); // Update to "Untitled"
     }
 
 
@@ -1077,8 +1077,8 @@ public partial class MainWindow : Window
             await AmosProjectSerializer.SaveAsync(stream, project);
             _currentProjectFile = file;
             
-            _isDirty = false; // NYTT: Markera som sparad
-            UpdateTitleBar(); // Visa det nya namnet (utan stjärna)
+            _isDirty = false; // NEW: Mark as saved
+            UpdateTitleBar(); // Show the new name (without the star)
             await AppendConsoleLineAsync($"Saved: {file.Name}");
         }
         catch (Exception ex) { await AppendConsoleLineAsync($"ERROR saving: {ex.Message}"); }
@@ -1107,8 +1107,8 @@ public partial class MainWindow : Window
             await AmosProjectSerializer.SaveAsync(stream, project);
             _currentProjectFile = file;
             
-            _isDirty = false; // NYTT: Markera som sparad
-            UpdateTitleBar(); // Visa det nya namnet (utan stjärna)
+            _isDirty = false; // NEW: Mark as saved
+            UpdateTitleBar(); // Show the new name (without the star)
             await AppendConsoleLineAsync($"Saved: {file.Name}");
         }
         catch (Exception ex) { await AppendConsoleLineAsync($"ERROR saving: {ex.Message}"); }
@@ -1122,14 +1122,14 @@ public partial class MainWindow : Window
         var sp = StorageProvider;
         if (sp is null) return;
 
-        // FÖRBERED START-MAPPEN
+        // PREPARE THE START FOLDER
         string userProjectsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
             "AmosLikeBasic",
             "Projects"
         );
             
-        // Försök hämta en IStorageFolder referens till mappen
+        // Try to get an IStorageFolder reference to the folder
         var startLocation = await sp.TryGetFolderFromPathAsync(userProjectsPath);
 
         var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -1214,7 +1214,7 @@ public partial class MainWindow : Window
 
             Editor.Text = project.ProgramText ?? string.Empty;
 
-            // Skapa IStorageFile-referens från path
+            // Create an IStorageFile reference from the path
             _currentProjectFile = await StorageProvider.TryGetFileFromPathAsync(filePath);
 
             _isDirty = false;
@@ -1280,15 +1280,15 @@ public partial class MainWindow : Window
     
         ApplyTheme(theme);
 
-        // Spara temat i config
+        // Save the theme in the config
         configService.Config.DefaultTheme = themeName;
         configService.Save();
     }
     
     
     
-    // Project > Export app...: bygger en fristående app av programmet i editorn med
-    // Tools/export_app.py och visar hur det går i loggen
+    // Project > Export app...: builds a stand-alone app from the program in the editor with
+    // Tools/export_app.py and shows how it goes in the log
     private async void ExportApp_OnClick(object? sender, RoutedEventArgs e)
     {
         var sourceRoot = AppExporter.FindSourceRoot();
@@ -1303,7 +1303,7 @@ public partial class MainWindow : Window
         var options = await new ExportDialog(defaultName).ShowDialog<ExportOptions?>(this);
         if (options == null) return;
 
-        // Exportera det som står i editorn, även om det inte är sparat
+        // Export what is in the editor, even if it is not saved
         var tempDir = Path.Combine(Path.GetTempPath(), "AmosLikeBasicExport");
         Directory.CreateDirectory(tempDir);
         var projectFile = Path.Combine(tempDir, options.Name + ".amosproj");
@@ -1356,10 +1356,10 @@ public partial class MainWindow : Window
     {
         var font = new FontFamily(theme.Font);
 
-        // Temafärger till alla fönster (sprite- och karteditorn m.fl.), med läsbara textfärger
+        // Theme colours for all windows (the sprite and map editors etc.), with readable text colours
         var palette = ThemeResources.Apply(theme);
 
-        // Fönster & editor
+        // Window & editor
         this.Background = new SolidColorBrush(theme.WindowBg);
         Editor.Background = new SolidColorBrush(theme.EditorBg);
         Editor.Foreground = new SolidColorBrush(theme.EditorFg);
@@ -1374,7 +1374,7 @@ public partial class MainWindow : Window
         AmosTitleBar.Background = new SolidColorBrush(theme.TitleBarBg);
         FileNameText.Foreground = new SolidColorBrush(theme.TitleBarFg);
 
-        // Statusrad (radnummer)
+        // Status bar (line number)
         CursorPosText.Background = new SolidColorBrush(theme.EditorCursorPosBg);
         CursorPosText.Foreground = new SolidColorBrush(theme.AccentColor);
 
@@ -1391,8 +1391,8 @@ public partial class MainWindow : Window
         StatusText.Foreground = new SolidColorBrush(theme.VarWatchFg);
         CurrentLineText.Foreground = new SolidColorBrush(theme.VarWatchAccentFg);
 
-        // Toolbar-knappar (de utan explicit färg). De känns igen på XAML-färgen första gången;
-        // efter det har de temats färg, så listan sparas för senare temabyten.
+        // Toolbar buttons (those without an explicit colour). They are recognised by their XAML colour the first time;
+        // after that they have the theme's colour, so the list is kept for later theme changes.
         _neutralToolbarButtons ??= ToolbarBorder.GetVisualDescendants().OfType<Button>()
             .Where(btn => btn.Background is SolidColorBrush b && b.Color == Color.Parse("#0A2D8F"))
             .ToList();
@@ -1402,7 +1402,7 @@ public partial class MainWindow : Window
             btn.Foreground = new SolidColorBrush(palette.ButtonFg);
         }
 
-        // Hitta header-bordern i VarWatch
+        // Find the header border in VarWatch
         if (VariableWatchPanel.Child is DockPanel dp)
         {
             var header = dp.Children.OfType<Border>().FirstOrDefault();
@@ -1434,7 +1434,7 @@ public partial class MainWindow : Window
         WindowState = WindowState == WindowState.FullScreen ? WindowState.Normal : WindowState.FullScreen;
     }
 
-    // NYTT: Breakpoint-marginal för editorn
+    // NEW: Breakpoint margin for the editor
     private class BreakpointMargin : AvaloniaEdit.Editing.AbstractMargin
     {
         private readonly MainWindow _window;
@@ -1450,7 +1450,7 @@ public partial class MainWindow : Window
             if (textView == null || !textView.VisualLinesValid)
                 return;
 
-            // Rita bakgrund för marginalen
+            // Draw the background of the margin
             context.FillRectangle(
                 new SolidColorBrush(Color.FromRgb(30, 30, 30)),
                 new Rect(0, 0, Bounds.Width, Bounds.Height));
@@ -1461,10 +1461,10 @@ public partial class MainWindow : Window
                     
                 if (_window._breakpoints.Contains(lineNumber))
                 {
-                    // Rita röd cirkel för breakpoint
+                    // Draw a red circle for a breakpoint
                     var y = line.GetTextLineVisualYPosition(line.TextLines[0], VisualYPosition.LineTop) - textView.VerticalOffset;
                         
-                    // Fyllda cirkel
+                    // Filled circle
                     context.DrawEllipse(
                         Brushes.Red,
                         new Pen(Brushes.DarkRed, 1),
@@ -1481,20 +1481,20 @@ public partial class MainWindow : Window
             var textView = TextView;
             if (textView == null) return;
                 
-            // ÄNDRAT: Få position relativt till DENNA margin, inte textView
+            // CHANGED: Get the position relative to THIS margin, not the textView
             var pos = e.GetPosition(this);
                 
-            // Hitta vilken rad som klickades på
+            // Find which line was clicked
             var line = textView.GetVisualLineFromVisualTop(pos.Y + textView.VerticalOffset);
             if (line != null)
             {
                 int lineNumber = line.FirstDocumentLine.LineNumber;
                     
-                // NYTT: Hindra breakpoint på tomma rader
+                // NEW: Prevent breakpoints on empty lines
                 if (_window.IsEmptyOrCommentLine(lineNumber))
                 {
                     e.Handled = true;
-                    return; // Gör ingenting
+                    return; // Do nothing
                 }
                     
                 if (_window._breakpoints.Contains(lineNumber))
@@ -1504,7 +1504,7 @@ public partial class MainWindow : Window
                     
                 InvalidateVisual();
                     
-                // Uppdatera även textView så att allt ritas om
+                // Also update the textView so that everything is redrawn
                 textView.Redraw();
             }
                 

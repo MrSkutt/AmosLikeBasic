@@ -1,6 +1,6 @@
 // ================================================================
-// GamepadManager.cs — Tråd-baserad version
-// PollLoop körs i bakgrundstråd (~60Hz)
+// GamepadManager.cs - thread-based version
+// PollLoop runs in a background thread (~60Hz)
 // ================================================================
 
 using System;
@@ -48,7 +48,7 @@ public static class GamepadManager
             ["RT"]     = (SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_TRIGGERRIGHT, 5),
         };
     
-    // Lista för snabb iteration i PollLoop
+    // A list for fast iteration in PollLoop
     private static readonly List<(string Name, SDL_GameControllerButton Button, int Slot)> _buttonList = new();
 
     // ── Init / Shutdown ─────────────────────────────────────────
@@ -69,12 +69,12 @@ public static class GamepadManager
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
-            // SDL2 saknas (t.ex. SDL2.dll på Windows): kör vidare utan handkontroll
+            // SDL2 is missing (e.g. SDL2.dll on Windows): carry on without a gamepad
             Debug.WriteLine($"[GamepadManager] SDL2 not available, gamepads disabled: {ex.Message}");
             return;
         }
 
-        // Bygg snabb lookup-lista
+        // Build a fast lookup list
         _buttonList.Clear();
         int slot = 0;
         foreach (var kv in _buttonMap)
@@ -83,7 +83,7 @@ public static class GamepadManager
         for (int i = 0; i < 4; i++)
             _controllers[i] = IntPtr.Zero;
 
-        // Öppna redan anslutna controllers
+        // Open controllers that are already connected
         int count = SDL_NumJoysticks();
         for (int i = 0; i < Math.Min(count, 4); i++)
         {
@@ -127,7 +127,7 @@ public static class GamepadManager
         Debug.WriteLine("[GamepadManager] Stoppad");
     }
 
-    // ── Poll-loop — körs i bakgrundstråd ────────────────────────
+    // ── Poll loop - runs in a background thread ────────────────────────
 
     private static void PollLoop()
     {
@@ -146,7 +146,7 @@ public static class GamepadManager
                     CloseController(e.cdevice.which);
             }
 
-            // Läs knappar
+            // Read the buttons
             for (int i = 0; i < 4; i++)
             {
                 if (_controllers[i] == IntPtr.Zero) continue;
@@ -164,18 +164,18 @@ public static class GamepadManager
                 foreach (var (name, (axis, slot)) in _axisMap)
                 {
                     short raw = SDL_GameControllerGetAxis(_controllers[i], axis);
-                    // SDL returnerar -32768 till 32767, konvertera till -100 till 100
+                    // SDL returns -32768 to 32767, convert to -100 to 100
                     float normalized;
                     if (axis == SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_TRIGGERLEFT ||
                         axis == SDL_GameControllerAxis.SDL_CONTROLLER_AXIS_TRIGGERRIGHT)
                     {
-                        // Triggers går 0 till 32767, mappa till 0-100
+                        // Triggers go from 0 to 32767, map to 0-100
                         normalized = raw / 32767f * 100f;
                     }
                     else
                     {
-                        // Spakar går -32768 till 32767, mappa till -100 till 100
-                        // Lägg till lite deadzone (5%) för att undvika drift
+                        // Sticks go from -32768 to 32767, map to -100 to 100
+                        // Add a small deadzone (5%) to avoid drift
                         normalized = raw / 32767f * 100f;
                         if (Math.Abs(normalized) < 5f) normalized = 0f;
                     }
@@ -184,10 +184,10 @@ public static class GamepadManager
             }
 
             
-            // Debug var 60:e loop (~1 sekund)
+            // Debug every 60th loop (~1 second)
             //loopCount++;
             //if (loopCount % 60 == 0)
-              //  Debug.WriteLine($"[GamepadManager.PollLoop] {loopCount} iterationer");
+              //  Debug.WriteLine($"[GamepadManager.PollLoop] {loopCount} iterations");
 
             Thread.Sleep(16);
         }
@@ -253,7 +253,7 @@ public static class GamepadManager
             for (int s = 0; s < 16; s++)
                 _buttonState[i * 16 + s] = false;
             
-            // Rensa axlar för denna pad
+            // Clear the axes for this pad
             for (int s = 0; s < 6; s++)
                 _axisState[i * 6 + s] = 0f;
 

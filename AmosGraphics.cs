@@ -26,7 +26,7 @@ public sealed class GpuLayer
     public float FadeStep   { get; set; } = 0f;
     public bool Visible { get; set; } = true; 
     public float Timer { get; set; } // For animations
-    // NYTT: Array för att skicka in t.ex. Y-positioner för 50 bars
+    // NEW: Array for passing in e.g. Y positions for 50 bars
     public float[] ShaderParams { get; set; } = new float[50]; 
     public float[] ShaderHeights { get; set; } = new float[50]; 
     public SKColor[] ShaderColors { get; set; } = new SKColor[50]; 
@@ -37,14 +37,14 @@ public sealed class GpuLayer
     // Shader-support
     public string? SkSlCode { get; set; }
     public SKRuntimeEffect? CachedEffect { get; set; }
-    public string? CompiledSkSlCode { get; set; } // Koden som CachedEffect kompilerades från
+    public string? CompiledSkSlCode { get; set; } // The code that CachedEffect was compiled from
 }
 
 
-// Ritar hela spelskärmen: alla lager ritas i spelets egen upplösning (t.ex. 640x480) till en
-// bild på GPU:n, som sedan skalas upp till fönstret en enda gång. Då kostar shaders och
-// raster bars lika mycket oavsett fönsterstorlek (förr kördes de för varje pixel i fönstret,
-// vilket gjorde helskärm på stora skärmar mycket långsamt).
+// Draws the whole game screen: every layer is drawn at the game's own resolution (e.g. 640x480) into an
+// image on the GPU, which is then scaled up to the window just once. That way shaders and
+// raster bars cost the same whatever the window size (before, they ran for every pixel in the window,
+// which made full screen on large screens very slow).
 public sealed class ScreenDrawOperation : ICustomDrawOperation
 {
     private static readonly SKSamplingOptions Nearest = new(SKFilterMode.Nearest, SKMipmapMode.None);
@@ -84,15 +84,15 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
         long start = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
-            // 1. Alla lager i spelets upplösning
+            // 1. All layers at the game's resolution
             using var screen = CreateSurface(gr, w, h);
             screen.Canvas.Clear(SKColors.Transparent);
             foreach (var layer in _layers)
                 layer.DrawTo(screen.Canvas, gr);
             using var image = screen.Snapshot();
 
-            // 2. Skala upp till fönstret. Först med hela pixlar till största heltalsfaktorn
-            //    (skarpa, lika stora pixlar), sedan mjukt resten av vägen ("sharp bilinear").
+            // 2. Scale up to the window. First by whole pixels to the largest integer factor
+            //    (sharp, equally sized pixels), then smoothly the rest of the way ("sharp bilinear").
             var m = canvas.TotalMatrix;
             float scale = Math.Min(Math.Abs(m.ScaleX), Math.Abs(m.ScaleY));
             int factor = Math.Max(1, (int)Math.Floor(scale + 0.001f));
@@ -124,18 +124,18 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
     }
 
     // ── CRT-filter ───────────────────────────────────────────────────
-    // En shader som ritar spelbilden till fönstret som på en bildrörsskärm. Den körs i
-    // spelets koordinater (canvasen är redan uppskalad), så scanlines följer spelets rader
-    // oavsett fönsterstorlek. Det är ett enda pass med lite matematik per skärmpixel.
+    // A shader that draws the game picture to the window like a picture tube screen. It runs in
+    // the game's coordinates (the canvas is already scaled up), so the scanlines follow the game's rows
+    // whatever the window size. It is a single pass with a little maths per screen pixel.
     private const string CrtShaderCode = @"
 uniform shader image;
-uniform float2 res;         // spelets upplösning
+uniform float2 res;         // the game's resolution
 uniform float scanlines;    // 0-1
 uniform float curvature;    // 0-1
-uniform float pixelScale;   // skärmpixlar per spelpixel
+uniform float pixelScale;   // screen pixels per game pixel
 
 half4 main(float2 p) {
-    // Böjd skärm: dra ut koordinaterna mot kanterna
+    // Curved screen: pull the coordinates out towards the edges
     float2 c = p / res * 2.0 - 1.0;
     float k = curvature * 0.12;
     c *= 1.0 + k * float2(c.y * c.y, c.x * c.x);
@@ -146,19 +146,19 @@ half4 main(float2 p) {
     float2 sp = uv * res;
     half4 col = image.eval(sp);
 
-    // Scanlines: ljusast mitt på varje rad i spelbilden, mörkare mellan raderna
+    // Scanlines: brightest in the middle of each row of the game picture, darker between the rows
     float fy = fract(sp.y) - 0.5;
     float line = 1.0 - scanlines * 0.9 * (fy * fy * 4.0);
 
-    // Svag färgmask i röd, grön och blå, som bildrörets fosforränder
+    // A faint colour mask in red, green and blue, like the phosphor stripes of a picture tube
     float m = mod(floor(p.x * pixelScale), 3.0);
     float3 mask = m < 1.0 ? float3(1.0, 0.82, 0.82) : (m < 2.0 ? float3(0.82, 1.0, 0.82) : float3(0.82, 0.82, 1.0));
 
-    // Vinjett: mörkare mot kanterna och hörnen
+    // Vignette: darker towards the edges and corners
     float vig = pow(clamp(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.0, 1.0), 0.18);
 
-    // Lite ljusare totalt, så att scanlines och mask inte gör bilden för mörk.
-    // Färgerna är förmultiplicerade med alpha, så de får inte bli större än alpha.
+    // A little brighter overall, so that the scanlines and mask do not make the picture too dark.
+    // The colours are premultiplied by alpha, so they must not become larger than alpha.
     float3 rgb = clamp(float3(col.rgb) * line * mask * vig * 1.22, 0.0, float(col.a));
     return half4(half3(rgb), col.a);
 }";
@@ -175,12 +175,12 @@ half4 main(float2 p) {
             {
                 System.Diagnostics.Debug.WriteLine($"CRT shader error: {errors}");
                 _crtEffect = null;
-                _crtCompileFailed = true; // försök inte varje bild; vanlig uppskalning används i stället
+                _crtCompileFailed = true; // do not try every frame; ordinary scaling is used instead
             }
         }
         if (_crtEffect == null) return false;
 
-        // Linjär läsning ger mjukare pixlar i sidled; scanlines ger skärpan i höjdled
+        // Linear sampling gives softer pixels horizontally; the scanlines give the sharpness vertically
         using var imageShader = image.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, Linear);
         var children = new SKRuntimeEffectChildren(_crtEffect) { { "image", imageShader } };
         var uniforms = new SKRuntimeEffectUniforms(_crtEffect)
@@ -196,7 +196,7 @@ half4 main(float2 p) {
         return true;
     }
 
-    // RGBA går att rendera till på alla GPU-backends (BGRA inte alltid på OpenGL)
+    // RGBA can be rendered to on every GPU backend (BGRA not always on OpenGL)
     internal static SKSurface CreateSurface(GRContext? gr, int w, int h)
     {
         var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
@@ -204,9 +204,9 @@ half4 main(float2 p) {
     }
 }
 
-// Ritar ett lager: komponerar bitmap + texter + sprites på en Skia-yta (på GPU:n när en
-// finns) och kör sedan lagrets shader med ytan som inputTexture, till spelets skärmbild.
-// Allt sker på render-tråden, utan att något läses tillbaka till CPU:n.
+// Draws a layer: composes the bitmap + texts + sprites on a Skia surface (on the GPU when there
+// is one) and then runs the layer's shader with the surface as inputTexture, into the game's screen image.
+// Everything happens on the render thread, without reading anything back to the CPU.
 public sealed class LayerDrawOperation
 {
     private static readonly SKSamplingOptions Sampling = new(SKFilterMode.Linear, SKMipmapMode.None);
@@ -215,7 +215,7 @@ public sealed class LayerDrawOperation
     private readonly GpuLayer _layer;
     private readonly List<AmosGraphics.QueuedFontText> _texts;
     private readonly List<AmosGraphics.SpriteRenderState> _sprites;
-    private GRContext? _gr; // Satt under Render: GPU-kontexten effekterna körs i
+    private GRContext? _gr; // Set during Render: the GPU context the effects run in
 
     public LayerDrawOperation(Rect bounds, AmosGraphics graphics, GpuLayer layer,
         List<AmosGraphics.QueuedFontText> texts, List<AmosGraphics.SpriteRenderState> sprites)
@@ -258,8 +258,8 @@ public sealed class LayerDrawOperation
         }
     }
 
-    // Kompilera om när koden ändrats (t.ex. RASTER SPACE). Även misslyckade försök
-    // kommer ihåg koden så att en trasig shader inte kompileras om varje frame.
+    // Recompile when the code has changed (e.g. RASTER SPACE). Failed attempts also
+    // remember the code so that a broken shader is not recompiled every frame.
     private SKRuntimeEffect? GetOrCompileEffect()
     {
         var code = _layer.SkSlCode;
@@ -282,7 +282,7 @@ public sealed class LayerDrawOperation
         var input = composite.ToShader();
         if (_layer.Opacity >= 0.999) return input;
 
-        // Skala alla förmultiplicerade kanaler (även alpha) med opacity: fade mot svart/genomskinligt
+        // Scale all premultiplied channels (alpha too) by the opacity: fade towards black/transparent
         byte a = (byte)Math.Round(Math.Clamp(_layer.Opacity, 0, 1) * 255);
         using var fade = SKColorFilter.CreateBlendMode(new SKColor(0, 0, 0, a), SKBlendMode.DstIn);
         using (input)
@@ -293,7 +293,7 @@ public sealed class LayerDrawOperation
     {
         c.Clear(SKColors.Transparent);
 
-        // Rita layer.Bitmap (bakgrund, tiles, PLOT/LINE)
+        // Draw layer.Bitmap (background, tiles, PLOT/LINE)
         using (var bg = ToSkImage(_layer.Bitmap))
             c.DrawImage(bg, 0, 0);
 
@@ -312,7 +312,7 @@ public sealed class LayerDrawOperation
         var textEffects = qt.GetEffects(_graphics);
         if (textEffects.Count > 0)
         {
-            // MED EFFEKTER: hela texten som en bild, roteras/zoomas runt sin mittpunkt
+            // WITH EFFECTS: the whole text as one image, rotated/zoomed around its centre
             if (qt.GetProcessedImage(_graphics, _gr, textEffects) is not var (img, owned)) return;
 
             var pad = qt.GetTotalPadding(textEffects);
@@ -322,7 +322,7 @@ public sealed class LayerDrawOperation
             return;
         }
 
-        // UTAN EFFEKTER: tecken för tecken, hela texten roteras/zoomas runt sin mittpunkt
+        // WITHOUT EFFECTS: character by character, the whole text rotated/zoomed around its centre
         double totalW = qt.Text.Length * f.CharWidth;
         float cX = (float)(totalW / 2.0);
         float cY = f.CharHeight / 2f;
@@ -357,7 +357,7 @@ public sealed class LayerDrawOperation
 
         if (sprite.Effects.Count > 0)
         {
-            // MED EFFEKTER: bilden har padding runt sig, ritas i naturlig storlek
+            // WITH EFFECTS: the image has padding around it, drawn at natural size
             var (img, owned) = sprite.Sprite.GetEffectImage(_gr, sprite.BaseBitmap, sprite.Effects);
             var pad = AmosGraphics.Sprite.GetTotalPadding(sprite.Effects);
 
@@ -367,14 +367,14 @@ public sealed class LayerDrawOperation
         }
         else
         {
-            // UTAN EFFEKT - sprite.X är VÄNSTER KANT, bilden skalas till spritens storlek
+            // WITHOUT EFFECTS - sprite.X is the LEFT EDGE, the image is scaled to the sprite's size
             using var img = ToSkImage(sprite.BaseBitmap);
             DrawTransformed(c, img, sprite.X, sprite.Y, sprite.Width, sprite.Height,
                 sprite.Angle, sprite.ZoomX, sprite.ZoomY, paint, img.Width / 2f, img.Height / 2f);
         }
     }
 
-    // Rita bilden i (x, y, w, h), roterad och zoomad runt pivot (standard: mitten av w/h)
+    // Draw the image in (x, y, w, h), rotated and zoomed around the pivot (default: the middle of w/h)
     private static void DrawTransformed(SKCanvas c, SKImage img, double x, double y, double w, double h,
         double angle, double zoomX, double zoomY, SKPaint? paint, float? pivotX = null, float? pivotY = null)
     {
@@ -390,7 +390,7 @@ public sealed class LayerDrawOperation
         c.Restore();
     }
 
-    // Våra WriteableBitmaps är alltid BGRA (se AmosGraphics.CopyPixelsBgra)
+    // Our WriteableBitmaps are always BGRA (see AmosGraphics.CopyPixelsBgra)
     internal static SKImage ToSkImage(WriteableBitmap bmp)
     {
         using var fb = bmp.Lock();
@@ -405,7 +405,7 @@ public sealed class LayerDrawOperation
         if (effect.Uniforms.Contains("iResolution"))
             uniforms.Add("iResolution", new[] { (float)_layer.Bitmap.Size.Width, (float)_layer.Bitmap.Size.Height });
 
-        // Skärmens storlek separat från bildens storlek
+        // The screen size, separate from the image size
         if (effect.Uniforms.Contains("iScreenResolution"))
             uniforms.Add("iScreenResolution", new[] { (float)Bounds.Width, (float)Bounds.Height });
 
@@ -415,7 +415,7 @@ public sealed class LayerDrawOperation
         if (effect.Uniforms.Contains("uParams"))
         {
             var values = _layer.ShaderValues;
-            float[] uParamData = new float[values.Length * 4]; // varje Vector4 = 4 floats
+            float[] uParamData = new float[values.Length * 4]; // each Vector4 = 4 floats
             for (int i = 0; i < values.Length; i++)
             {
                 uParamData[i * 4 + 0] = values[i].X;
@@ -427,7 +427,7 @@ public sealed class LayerDrawOperation
             uniforms.Add("uParams", uParamData);
         }
 
-        // Säkerställ att uPositions och uHeights är exakt 50 element
+        // Make sure uPositions and uHeights are exactly 50 elements
         if (effect.Uniforms.Contains("uPositions"))
         {
             float[] p50 = new float[50];
@@ -448,7 +448,7 @@ public sealed class LayerDrawOperation
             float[] cTo = new float[50 * 4];
             int colorCount = Math.Min(50, Math.Min(_layer.ShaderColors.Length, _layer.ShaderColorsTo.Length));
 
-            // Slots utan färg blir svart transparent (nollor)
+            // Slots without a colour become transparent black (zeros)
             for (int i = 0; i < colorCount; i++)
             {
                 var from = _layer.ShaderColors[i];
@@ -499,7 +499,7 @@ public sealed class AmosGpuView : Control
 
         var screenRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
 
-        // Ett draw-anrop för hela skärmen; själva ritningen sker på render-tråden i ScreenDrawOperation
+        // One draw call for the whole screen; the drawing itself happens on the render thread in ScreenDrawOperation
         var layers = new List<LayerDrawOperation>();
         for (int layerIndex = 0; layerIndex < layersCopy.Count; layerIndex++)
         {
@@ -529,26 +529,26 @@ public sealed class AmosGraphics
     private readonly System.Diagnostics.Stopwatch _vblTimer = new();
     public double LastCpuUsagePercent { get; private set; } = 0;
 
-    // CRT-filter: spelbilden visas som på en gammal bildrörsskärm när den skalas upp till
-    // fönstret (SCREEN CRT, F8). Styrkorna är 0-1.
+    // CRT filter: the game picture is shown as on an old picture tube screen when it is scaled up to
+    // the window (SCREEN CRT, F8). The strengths are 0-1.
     public bool CrtEnabled { get; set; }
     public float CrtScanlines { get; set; } = 0.55f;
     public float CrtCurvature { get; set; } = 0.5f;
-    public readonly object LockObject = new(); // Korrekt namn för låset
+    public readonly object LockObject = new(); // The correct name for the lock
     private int _currentScreen = 0;
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();
     public double LastCpuUsage { get; private set; }
 
     public int CursorX { get; set; } = 0;
     public int CursorY { get; set; } = 0;
-    public int TextRows { get; private set; } = 30; // Anpassa efter fontstorlek
+    public int TextRows { get; private set; } = 30; // Adjust to the font size
     public int TextCols { get; private set; } = 80;
     public int CharWidth { get; private set; } = 8; // T.ex. 8x16 font
     public int CharHeight { get; private set; } = 16;
     public string Style { get; private set; } = "Normal";
     private string font = "Courier New";
-    private bool _fontConfigured;   // FONT SET har körts: då använder även TEXT den fonten
-    public Color PaperColor { get; set; } = Colors.Transparent; // Bakgrundsfärg för text
+    private bool _fontConfigured;   // FONT SET has run: then TEXT uses that font as well
+    public Color PaperColor { get; set; } = Colors.Transparent; // Background colour for text
     public float Alpha = 255f;
 
     public float FadeTarget = -1f;
@@ -570,7 +570,7 @@ public sealed class AmosGraphics
             ProgramText: programText ?? "");
     }
 
-    // Sätt font-storlek (anropa i början)
+    // Set the font size (call at the start)
     public void ConfigureText(int w, int h, string text)
     {
         CharWidth = w;
@@ -594,7 +594,7 @@ public sealed class AmosGraphics
 
     public void ConsolePrint(string text, bool newLine = true)
     {
-        // Dela upp i rader för att hantera \n korrekt
+        // Split into lines to handle \n correctly
         var lines = text.Replace("\r\n", "\n").Split('\n');
 
         for (int i = 0; i < lines.Length; i++)
@@ -602,11 +602,11 @@ public sealed class AmosGraphics
             string line = lines[i];
             if (line.Length > 0)
             {
-                // Rita texten grafiskt på nuvarande position
+                // Draw the text graphically at the current position
                 DrawStringInternal(line);
             }
 
-            // Om det är sista delen och newLine är false, gör ingen radbrytning (semikolon i BASIC)
+            // If it is the last part and newLine is false, no line break (semicolon in BASIC)
             if (i < lines.Length - 1 || newLine)
             {
                 ConsoleNewLine();
@@ -627,22 +627,22 @@ public sealed class AmosGraphics
 
     private void DrawStringInternal(string s)
     {
-        // Beräkna startposition
+        // Work out the start position
         int px = CursorX * CharWidth;
         int py = CursorY * CharHeight;
 
-        // 1. Rita PAPER (bakgrundsbox) för hela strängen
+        // 1. Draw the PAPER (background box) for the whole string
         if (PaperColor != Colors.Transparent)
             Bar(px, py, px + s.Length * CharWidth - 1, py + CharHeight - 1, PaperColor);
 
-        // 2. Texten, tecken för tecken i rutnätet
+        // 2. The text, character by character in the grid
         DrawTextNow(GetActiveScreen(), px, py, s, font, CharHeight, Ink, CharWidth, CharHeight);
 
-        // Flytta cursorn framåt
+        // Move the cursor forward
         CursorX += s.Length;
     }
 
-    // En hjälpare för att rita PAPER-boxen (samma som din Bar men tar in färg direkt)
+    // A helper for drawing the PAPER box (the same as Bar but takes the colour directly)
     public void Bar(int x1, int y1, int x2, int y2, Color c)
     {
         lock (LockObject)
@@ -691,10 +691,10 @@ public sealed class AmosGraphics
                 int rowBytes = fb.RowBytes;
                 int totalHeight = bmp.PixelSize.Height;
 
-                // 1. Flytta minnet uppåt
-                // Destination: start (rad 0)
-                // Källa: rad 'pixels'
-                // Antal bytes: (totalHeight - pixels) * rowBytes
+                // 1. Move the memory up
+                // Destination: start (row 0)
+                // Source: row 'pixels'
+                // Number of bytes: (totalHeight - pixels) * rowBytes
                 int bytesToMove = (totalHeight - pixels) * rowBytes;
 
                 if (bytesToMove > 0)
@@ -707,8 +707,8 @@ public sealed class AmosGraphics
                     );
                 }
 
-                // 2. Rensa botten-remsan med PAPER-färgen (eller svart/transparent)
-                Color clearCol = PaperColor; // Eller Colors.Transparent om du vill
+                // 2. Clear the bottom strip with the PAPER colour (or black/transparent)
+                Color clearCol = PaperColor; // Or Colors.Transparent if you like
 
                 byte a = clearCol.A;
                 byte r = (byte)(clearCol.R * a / 255);
@@ -747,12 +747,12 @@ public sealed class AmosGraphics
         public string CharMap { get; set; } = "";
         public int Layer { get; set; } = 0;
 
-        // Effekterna hör till fonten (inte till en utskrift) så att de överlever FONT CLEAR
+        // The effects belong to the font (not to one print) so that they survive FONT CLEAR
         public List<SpriteEffect> Effects { get; } = new();
         public int EffectsVersion;
 
-        // Text + statiska effekter (BLUR/COLOR) per textsträng, så de inte räknas om varje frame.
-        // Används bara från render-tråden (LayerDrawOperation). Bilderna ligger på GPU:n.
+        // Text + static effects (BLUR/COLOR) per text string, so they are not recalculated every frame.
+        // Only used from the render thread (LayerDrawOperation). The images live on the GPU.
         public Dictionary<string, SKImage> StaticCache { get; } = new();
         public int StaticCacheVersion = -1;
         public GRContext? StaticCacheContext;
@@ -764,8 +764,8 @@ public sealed class AmosGraphics
         }
     }
 
-    // FONT EFFECT ADD: finns effekttypen redan på fonten uppdateras den i stället (Time behålls),
-    // så att ADD inne i en loop inte staplar nya effekter varje frame.
+    // FONT EFFECT ADD: if the font already has the effect type it is updated instead (Time is kept),
+    // so that ADD inside a loop does not stack up new effects every frame.
     public bool AddFontEffect(int fontId, SpriteEffect effect)
     {
         lock (LockObject)
@@ -780,7 +780,7 @@ public sealed class AmosGraphics
                     f.EffectsVersion++;
                     break;
                 case (WaveEffect w, WaveEffect n):
-                    // WAVE räknas om varje frame, ingen cache att invalidera
+                    // WAVE is recalculated every frame, no cache to invalidate
                     w.AmplitudeX = n.AmplitudeX;
                     w.FrequencyX = n.FrequencyX;
                     w.AmplitudeY = n.AmplitudeY;
@@ -831,7 +831,7 @@ public sealed class AmosGraphics
         }
     }
 
-    // NY: Delad bildbank (som sprites men med stöd för frames)
+    // NEW: Shared image bank (like sprites but with support for frames)
     public sealed class ImageBankEntry
     {
         public List<WriteableBitmap> Frames { get; } = new();
@@ -921,7 +921,7 @@ public sealed class AmosGraphics
     private readonly Dictionary<int, Dictionary<int, RasterBarAllocation>> _rasterBars = new();
 
     private const int WRAP_OFFSET = 25;
-    private const int FIRST_BAR_SLOT = 1; // Slot 0 är reserverad för bakgrunden
+    private const int FIRST_BAR_SLOT = 1; // Slot 0 is reserved for the background
 
     private Dictionary<int, RasterBarAllocation> GetLayerBars(int layerIdx)
     {
@@ -937,7 +937,7 @@ public sealed class AmosGraphics
     private static int CountUsedSlots(Dictionary<int, RasterBarAllocation> bars)
         => FIRST_BAR_SLOT + bars.Values.Sum(b => b.ShaderSlotCount);
 
-    // Hitta första lediga sammanhängande slot-intervall (bars kan ha tagits bort mitt i)
+    // Find the first free run of slots (bars may have been removed in the middle)
     private static int FindFreeSlots(Dictionary<int, RasterBarAllocation> bars, int needed)
     {
         var used = new bool[WRAP_OFFSET];
@@ -1002,7 +1002,7 @@ public sealed class AmosGraphics
 
         int neededSlots = Math.Max(1, colors.Count - 1);
 
-        // Frigör den gamla baren först så att dess slots kan återanvändas
+        // Free the old bar first so that its slots can be reused
         if (bars.Remove(basicBarId, out var existing))
             ClearBarShaderSlots(layerIdx, existing);
 
@@ -1013,7 +1013,7 @@ public sealed class AmosGraphics
                             $"(Total used: {CountUsedSlots(bars)}/{WRAP_OFFSET})");
             if (existing != null)
             {
-                // Återställ den gamla baren
+                // Restore the old bar
                 bars[basicBarId] = existing;
                 ApplyRasterBarToShader(layerIdx, existing);
                 ApplyRasterBarWrap(layerIdx, existing);
@@ -1053,7 +1053,7 @@ public sealed class AmosGraphics
     private void ApplyRasterBarToShader(int layerIdx, RasterBarAllocation bar)
         => WriteBarSlots(layerIdx, bar, bar.FirstShaderSlot, bar.StartY);
 
-    // Wrap-kopian ligger WRAP_OFFSET slots efter originalet, en skärmhöjd bort
+    // The wrap copy is WRAP_OFFSET slots after the original, one screen height away
     private void ApplyRasterBarWrap(int layerIdx, RasterBarAllocation bar)
     {
         int wrapSlot = bar.FirstShaderSlot + WRAP_OFFSET;
@@ -1216,19 +1216,19 @@ public sealed class AmosGraphics
 
     public sealed class Sprite
     {
-        public int ImageBankId { get; set; } = -1; // -1 = använder egna Frames
+        public int ImageBankId { get; set; } = -1; // -1 = uses its own Frames
         public HashSet<string> Groups { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        public List<SpriteEffect> Effects { get; } = new(); // ✅ Inte AmosGraphics.SpriteEffect
+        public List<SpriteEffect> Effects { get; } = new(); // ✅ Not AmosGraphics.SpriteEffect
 
         private int _effectsVersion = 0;
-        // Cache för statiska effekter (BLUR/COLOR). Ägs av render-tråden; ligger på GPU:n
-        // och hör därför ihop med den GRContext den skapades i.
+        // Cache for static effects (BLUR/COLOR). Owned by the render thread; it lives on the GPU
+        // and therefore belongs to the GRContext it was created in.
         private SKImage? _staticEffectsImage;
-        private WriteableBitmap? _staticEffectsSource;   // Frame som cachen bygger på
+        private WriteableBitmap? _staticEffectsSource;   // The frame the cache is built from
         private GRContext? _staticEffectsContext;
         private int _staticEffectsVersion = -1;
     
-        // ✅ Beräkna total padding från alla effekter
+        // ✅ Work out the total padding from all effects
         public static (int left, int right, int top, int bottom) GetTotalPadding(List<SpriteEffect> effects)
         {
             int totalLeft = 0, totalRight = 0, totalTop = 0, totalBottom = 0;
@@ -1260,7 +1260,7 @@ public sealed class AmosGraphics
             Visible = false;
         }
 
-        // Aktuell frame utan effekter (från imagebanken eller spritens egna frames)
+        // The current frame without effects (from the image bank or the sprite's own frames)
         public WriteableBitmap? GetBaseBitmap(Dictionary<int, ImageBankEntry> imageBank)
         {
             if (ImageBankId >= 0 && imageBank.TryGetValue(ImageBankId, out var entry) && entry.Frames.Count > 0)
@@ -1269,12 +1269,12 @@ public sealed class AmosGraphics
             return Frames.Count > 0 ? Frames[Math.Clamp(CurrentFrame, 0, Frames.Count - 1)] : null;
         }
 
-        // Kör effektkedjan på GPU:n. Anropas BARA från render-tråden (LayerDrawOperation), som äger cachen.
-        // Owned = true betyder att anroparen ska Dispose:a bilden; false att den ligger i cachen.
+        // Runs the effect chain on the GPU. Called ONLY from the render thread (LayerDrawOperation), which owns the cache.
+        // Owned = true means the caller must Dispose the image; false that it lives in the cache.
         public (SKImage Image, bool Owned) GetEffectImage(GRContext? gr, WriteableBitmap baseBitmap,
             List<SpriteEffect> allEffects)
         {
-            // Rotation/zoom görs INTE här - det sköts av LayerDrawOperation med en transform
+            // Rotation/zoom is NOT done here - LayerDrawOperation takes care of it with a transform
             var staticEffects = allEffects.Where(e => e is not WaveEffect).ToList();
             var dynamicEffects = allEffects.Where(e => e is WaveEffect).ToList();
 
@@ -1305,7 +1305,7 @@ public sealed class AmosGraphics
                 owned = true;
             }
 
-            // Dynamiska effekter (WAVE) körs varje frame
+            // Dynamic effects (WAVE) run every frame
             foreach (var effect in dynamicEffects)
             {
                 var next = ShaderHelper.Apply(gr, current, effect);
@@ -1336,8 +1336,8 @@ public sealed class AmosGraphics
         public int Layer { get; set; } = 0;
 
         // --- Alpha & Fade ---
-        public float Alpha { get; set; } = 1.0f; // 0.0–1.0 (1.0 = helt ogenomskinlig)
-        public float FadeTarget { get; set; } = -1f; // -1 = ingen aktiv fade
+        public float Alpha { get; set; } = 1.0f; // 0.0–1.0 (1.0 = fully opaque)
+        public float FadeTarget { get; set; } = -1f; // -1 = no active fade
         public float FadeStep { get; set; } = 0f; // delta per frame
 
     }
@@ -1348,11 +1348,11 @@ public sealed class AmosGraphics
         s.ImageBankId = imageBankId;
         s.CurrentFrame = frameId;
 
-        // Hämta bitmap från imagebanken
+        // Get the bitmap from the image bank
         var bmp = s.GetBaseBitmap(GetImageBank());
         if (bmp != null)
         {
-            // Uppdatera bredd/höjd om de inte redan satts manuellt
+            // Update the width/height if they have not been set by hand
             s.Width = (int)bmp.Size.Width;
             s.Height = (int)bmp.Size.Height;
         }
@@ -1361,17 +1361,17 @@ public sealed class AmosGraphics
 
     private readonly Dictionary<int, Sprite> _sprites = new();
 
-    // Allt Render behöver veta om en sprite, kopierat vid ett och samma tillfälle
+    // Everything Render needs to know about a sprite, copied at one and the same moment
     public sealed record SpriteRenderState(
         Sprite Sprite, WriteableBitmap BaseBitmap, List<SpriteEffect> Effects,
         int X, int Y, int Width, int Height,
         double Angle, double ZoomX, double ZoomY, float Alpha, int Layer);
 
-    // Ögonblicksbild från senaste WAIT VBL, gjord på runner-tråden så att Render aldrig
-    // läser en sprite som håller på att ändras. null = programmet använder inte WAIT VBL.
+    // A snapshot from the latest WAIT VBL, made on the runner thread so that Render never
+    // reads a sprite that is being changed. null = the program does not use WAIT VBL.
     private List<SpriteRenderState>? _presentedSprites;
 
-    // Anroparen måste hålla LockObject
+    // The caller must hold LockObject
     private List<SpriteRenderState> BuildSpriteStates()
     {
         var states = new List<SpriteRenderState>();
@@ -1431,7 +1431,7 @@ public sealed class AmosGraphics
         public double ZoomY { get; set; }
         public int Layer { get; set; } = 0;
     
-        // Effekter (BLUR/WAVE/COLOR) som gäller för fonten just nu
+        // Effects (BLUR/WAVE/COLOR) that apply to the font right now
         internal List<SpriteEffect> GetEffects(AmosGraphics graphics)
         {
             var font = graphics.GetFont(FontId);
@@ -1440,7 +1440,7 @@ public sealed class AmosGraphics
                 return font.Effects.Where(e => e.RequiresGpuContext).ToList();
         }
 
-        // ✅ Beräkna total padding från alla effekter
+        // ✅ Work out the total padding from all effects
         public (int left, int right, int top, int bottom) GetTotalPadding(List<SpriteEffect> effects)
         {
             int totalLeft = 0, totalRight = 0, totalTop = 0, totalBottom = 0;
@@ -1457,8 +1457,8 @@ public sealed class AmosGraphics
             return (totalLeft, totalRight, totalTop, totalBottom);
         }
     
-        // Rendera texten med effekter på GPU:n. Anropas bara från render-tråden.
-        // Owned = true betyder att anroparen ska Dispose:a bilden; false att den ligger i fontens cache.
+        // Render the text with effects on the GPU. Only called from the render thread.
+        // Owned = true means the caller must Dispose the image; false that it lives in the font's cache.
         public (SKImage Image, bool Owned)? GetProcessedImage(AmosGraphics graphics, GRContext? gr,
             List<SpriteEffect> effects)
         {
@@ -1468,8 +1468,8 @@ public sealed class AmosGraphics
             var staticEffects = effects.Where(e => e is not WaveEffect).ToList();
             var dynamicEffects = effects.Where(e => e is WaveEffect).ToList();
 
-            // Cachen töms när effekterna ändras, när GPU-kontexten byts,
-            // eller om texten byts ofta (t.ex. en poängräknare)
+            // The cache is cleared when the effects change, when the GPU context changes,
+            // or if the text changes often (e.g. a score counter)
             if (font.StaticCacheVersion != font.EffectsVersion || font.StaticCacheContext != gr ||
                 font.StaticCache.Count > 64)
             {
@@ -1487,7 +1487,7 @@ public sealed class AmosGraphics
                 font.StaticCache[Text] = current;
             }
 
-            // Applicera dynamiska effekter (WAVE) varje frame
+            // Apply dynamic effects (WAVE) every frame
             bool owned = false;
             foreach (var effect in dynamicEffects)
             {
@@ -1503,20 +1503,20 @@ public sealed class AmosGraphics
 
         private WriteableBitmap? RenderText(AmosGraphics graphics, Font font)
         {
-            // Beräkna storlek för hela texten
+            // Work out the size of the whole text
             int baseWidth = Text.Length * font.CharWidth;
             int baseHeight = font.CharHeight;
         
             if (baseWidth <= 0 || baseHeight <= 0) return null;
         
-            // Skapa bas-bitmap med texten
+            // Create a base bitmap with the text
             var baseBitmap = new WriteableBitmap(
                 new PixelSize(baseWidth, baseHeight),
                 new Vector(96, 96),
                 PixelFormat.Bgra8888,
                 AlphaFormat.Premul);
         
-            // Rita texten till bitmap
+            // Draw the text into the bitmap
             using (var fb = baseBitmap.Lock())
             {
                 unsafe
@@ -1524,11 +1524,11 @@ public sealed class AmosGraphics
                     uint* ptr = (uint*)fb.Address;
                     int stride = fb.RowBytes / 4;
                 
-                    // Rensa till transparent
+                    // Clear to transparent
                     for (int i = 0; i < baseWidth * baseHeight; i++)
                         ptr[i] = 0;
                 
-                    // Rita varje tecken
+                    // Draw each character
                     for (int i = 0; i < Text.Length; i++)
                     {
                         char c = Text[i];
@@ -1576,12 +1576,12 @@ public sealed class AmosGraphics
 
     public readonly List<QueuedFontText> _fontTexts = new();
 
-    // Ögonblicksbild från senaste WAIT VBL. Utan den kan skärmen ritas mitt i ett
-    // FONT CLEAR / FONT PRINT / FONT EFFECT ADD-varv och visa texten utan effekter.
-    // null = programmet använder inte WAIT VBL, rita live-listan.
+    // A snapshot from the latest WAIT VBL. Without it the screen can be drawn in the middle of a
+    // FONT CLEAR / FONT PRINT / FONT EFFECT ADD lap and show the text without effects.
+    // null = the program does not use WAIT VBL, draw the live list.
     private List<QueuedFontText>? _presentedFontTexts;
 
-    // Anropas vid WAIT VBL: lås fast det som ska visas för den här framen
+    // Called at WAIT VBL: lock in what should be shown for this frame
     public void PresentFrame()
     {
         lock (LockObject)
@@ -1595,12 +1595,12 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            return (_presentedFontTexts ?? _fontTexts).ToList(); // ✅ Returnera kopia
+            return (_presentedFontTexts ?? _fontTexts).ToList(); // ✅ Return a copy
         }
     }
 
 
-    // ✅ NYTT: Metoder för att rensa allt
+    // ✅ NEW: Methods for clearing everything
     public void ClearAllResources()
     {
         lock (LockObject)
@@ -1643,7 +1643,7 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            // ✅ Rensa tiles först så DrawMap kan upptäcka tom lista
+            // ✅ Clear the tiles first so that DrawMap can detect an empty list
             _tiles.Clear();
             _tilesInWidth = 0;
             _tileWidth = 32;
@@ -1655,7 +1655,7 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            // ✅ Töm map-arrayen säkert
+            // ✅ Empty the map array safely
             _map = new int[0, 0];
         }
     }
@@ -1685,12 +1685,12 @@ public sealed class AmosGraphics
     {
         EnsureScreen();
 
-        // Vi säkerställer att _currentScreen pekar på ett existerande lager
+        // We make sure _currentScreen points to an existing layer
         int index = (_currentScreen >= 0 && _currentScreen < DrawingFrame.Count)
             ? _currentScreen
             : 0;
 
-        // Info.txt: "Alla ritaroperationer sker alltid på den inaktiva framen"
+        // Info.txt: "All drawing operations always happen on the inactive frame"
         return DrawingFrame[index].Bitmap;
     }
 
@@ -1703,7 +1703,7 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            // Vi sätter flaggan på både A och B så att den består även efter SwapBuffers
+            // We set the flag on both A and B so that it lasts even after SwapBuffers
             if (layerIdx >= 0 && layerIdx < _layers.Count) _layers[layerIdx].Visible = visible;
         }
     }
@@ -1713,7 +1713,7 @@ public sealed class AmosGraphics
         lock (LockObject)
         {
 
-            // Single buffer: Använd DrawingFrame som vanligt
+            // Single buffer: use DrawingFrame as usual
             var frame = DrawingFrame;
             if (layerIdx >= 0 && layerIdx < frame.Count)
             {
@@ -1736,7 +1736,7 @@ public sealed class AmosGraphics
             {
                 var layer = frame[layerIdx];
 
-                // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
+                // ✅ SAFETY CHECK: Upgrade the arrays if they are too small
                 EnsureShaderArraySize(layer);
 
                 if (slot >= 0 && slot < layer.ShaderParams.Length)
@@ -1759,7 +1759,7 @@ public sealed class AmosGraphics
             {
                 var layer = frame[layerIdx];
 
-                // ✅ SÄKERHETSKOLL: Uppgradera arrayer om de är för små
+                // ✅ SAFETY CHECK: Upgrade the arrays if they are too small
                 EnsureShaderArraySize(layer);
 
                 if (slot >= 0 && slot < layer.ShaderColors.Length)
@@ -1776,7 +1776,7 @@ public sealed class AmosGraphics
     }
 
     /// <summary>
-    /// ✅ HJÄLPMETOD: Uppgraderar gamla 22-slots arrayer till 50 slots
+    /// ✅ HELPER: Upgrades old 22-slot arrays to 50 slots
     /// </summary>
     private void EnsureShaderArraySize(GpuLayer layer)
     {
@@ -1820,38 +1820,38 @@ public sealed class AmosGraphics
     public void EndFrame(double targetVblMs = 16.67) // ~60Hz = 16.67 ms per VBL
     {
         _vblTimer.Stop();
-        // CPU-tid som procent av VBL
+        // CPU time as a percentage of the VBL
         LastCpuUsagePercent = Math.Min(100, (_vblTimer.Elapsed.TotalMilliseconds / targetVblMs) * 100);
 
         Interlocked.Add(ref _statBasicTicks, _vblTimer.ElapsedTicks);
         Interlocked.Increment(ref _statVblFrames);
     }
 
-    // ── Mätvärden för fönstertiteln ──────────────────────────────────
-    // Samlas in löpande och läses av (och nollställs) med TakeFrameStats.
+    // ── Measurements for the window title ──────────────────────────────
+    // Collected continuously and read (and reset) with TakeFrameStats.
 
-    private long _statBasicTicks;     // Stopwatch-tid BASIC-koden kört mellan WAIT VBL
+    private long _statBasicTicks;     // Stopwatch time the BASIC code has run between WAIT VBLs
     private int _statVblFrames;       // Antal WAIT VBL
-    private int _statRenderedFrames;  // Bilder som ritats (render-tråden)
-    private long _statRenderTicks;    // Tid för att rita dem
+    private int _statRenderedFrames;  // Frames drawn (render thread)
+    private long _statRenderTicks;    // Time spent drawing them
     private long _statLastTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
     private TimeSpan _statLastCpu = System.Diagnostics.Process.GetCurrentProcess().TotalProcessorTime;
     private readonly System.Diagnostics.Process _process = System.Diagnostics.Process.GetCurrentProcess();
 
     public readonly record struct FrameStats(
-        double Fps,            // ritade bilder per sekund
-        double BasicPercent,   // andel av tiden BASIC-koden arbetat (-1 = inga WAIT VBL att mäta mellan)
-        double RenderMs,       // genomsnittlig tid att rita en bild på render-tråden
-        double CpuPercent);    // hela appens processortid, 100 % = en kärna (som Aktivitetskontrollen)
+        double Fps,            // frames drawn per second
+        double BasicPercent,   // share of the time the BASIC code has been working (-1 = no WAIT VBLs to measure between)
+        double RenderMs,       // average time to draw a frame on the render thread
+        double CpuPercent);    // the whole app's CPU time, 100 % = one core (like Activity Monitor)
 
-    // Anropas av ScreenDrawOperation för varje ritad bild
+    // Called by ScreenDrawOperation for every frame drawn
     public void CountRenderedFrame(long elapsedTicks)
     {
         Interlocked.Increment(ref _statRenderedFrames);
         Interlocked.Add(ref _statRenderTicks, elapsedTicks);
     }
 
-    // Genomsnitt sedan förra anropet
+    // Average since the previous call
     public FrameStats TakeFrameStats()
     {
         long now = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -1899,7 +1899,7 @@ public sealed class AmosGraphics
                 lB.ShaderHeights[i] = 0;
             }
 
-            // Tvinga fram korrekt storlek på alla arrayer
+            // Force the correct size on all arrays
             lA.ShaderParams = new float[50];
             lA.ShaderHeights = new float[50];
             lA.ShaderColors = new SKColor[50];
@@ -1913,11 +1913,11 @@ public sealed class AmosGraphics
             _currentScreen = 0;
         }
 
-        // Tvinga UI-tråden att uppdatera storleken på vyn
+        // Force the UI thread to update the size of the view
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            // Detta tvingar Viewbox att räkna om skalningen
-            // Vi gör det via ett anrop till InvalidateMeasure i MainWindow
+            // This forces the Viewbox to recalculate the scaling
+            // We do it via a call to InvalidateMeasure in MainWindow
             OnScreenResolutionChanged?.Invoke(w, h);
         }, Avalonia.Threading.DispatcherPriority.Render);
     }
@@ -1928,7 +1928,7 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            // Vi måste se till att lagret finns i BÅDA listorna
+            // We must make sure the layer exists in BOTH lists
             while (ActiveFrame.Count <= id)
             {
                 var layer = new GpuLayer
@@ -1936,7 +1936,7 @@ public sealed class AmosGraphics
                     Bitmap = CreateEmptyBitmap(Width > 0 ? Width : 640, Height > 0 ? Height : 480),
                     Offset = new Point(0, 0), Opacity = 1.0
                 };
-                // Initiera ShaderHeights till 0 så att lagret är transparent som standard
+                // Initialise ShaderHeights to 0 so that the layer is transparent by default
                 for (int i = 0; i < 22; i++) layer.ShaderHeights[i] = 0;
                 ActiveFrame.Add(layer);
             }
@@ -1947,12 +1947,12 @@ public sealed class AmosGraphics
 
     private void EnsureScreen()
     {
-        // Vi kollar om listorna är tomma istället för om de är null
+        // We check whether the lists are empty instead of whether they are null
         if (_layers.Count == 0 || _layers.Count == 0)
         {
             lock (LockObject)
             {
-                // Om de är tomma, initiera standardstorlek (t.ex. 640x480)
+                // If they are empty, initialise the default size (e.g. 640x480)
                 _layers.Clear();
 
                 _layers.Add(new GpuLayer
@@ -1972,7 +1972,7 @@ public sealed class AmosGraphics
             PixelFormat.Bgra8888,
             AlphaFormat.Premul);
 
-        // Om ingen bakgrund anges: helt transparent
+        // If no background is given: fully transparent
         Color bg = background ?? Colors.Transparent;
 
         using (var fb = bmp.Lock())
@@ -2002,14 +2002,14 @@ public sealed class AmosGraphics
     public void Clear(Color color)
     {
         EnsureScreen();
-        // Rensa bara den nuvarande aktiva skärmen/lagret
+        // Only clear the current active screen/layer
         ClearBitmap(GetActiveScreen(), color);
     }
 
     public void ClearAll(Color color)
     {
         EnsureScreen();
-        // Rensa alla lager
+        // Clear all layers
         foreach (var lay in ActiveFrame)
         {
             ClearBitmap(lay.Bitmap, color);
@@ -2022,20 +2022,20 @@ public sealed class AmosGraphics
 
         lock (LockObject)
         {
-            // 2. Nollställ shader-parametrarna för lagret vi just rensade
-            // Vi gör detta för BÅDE Active och Inactive frame så att ingen gammal data hänger kvar
+            // 2. Reset the shader parameters for the layer we just cleared
+            // We do this for BOTH the active and inactive frame so that no old data is left
             foreach (var frame in new[] { ActiveFrame, ActiveFrame })
             {
                 foreach (var layer in ActiveFrame)
                 {
-                    // Nollställ höjderna så att inga rasters/rainbows ritas
+                    // Reset the heights so that no rasters/rainbows are drawn
                     for (int i = 0; i < 22; i++) layer.ShaderHeights[i] = 0;
-                    // Nollställ väder/scroll-parametrar
+                    // Reset the weather/scroll parameters
                     for (int i = 0; i < layer.ShaderValues.Length; i++) layer.ShaderValues[i] = Vector4.Zero;
                 }
             }
 
-            // 3. Om det är huvudskärmen, rensa även systemlistorna
+            // 3. If it is the main screen, clear the system lists too
             // if (_currentScreen == 0) 
             //{
             _fontTexts.Clear();
@@ -2096,7 +2096,7 @@ public sealed class AmosGraphics
                 // BGRA format: [B][G][R][A] i minnet
                 uint val = (uint)((c.A << 24) | (c.R << 16) | (c.G << 8) | c.B);
 
-                if ((val & 0xFFFFFF00) == 0) // Alpha, röd och grön = 0 ger genomskinligt (som förut)
+                if ((val & 0xFFFFFF00) == 0) // Alpha, red and green = 0 give transparent (as before)
                     p[y * (fb.RowBytes / 4) + x] = 0;
                 else
                     p[y * (fb.RowBytes / 4) + x] = val;
@@ -2194,7 +2194,7 @@ public sealed class AmosGraphics
             int w = bmp.PixelSize.Width;
             int h = bmp.PixelSize.Height;
 
-            // Konvertera Ink till uint (BGRA)
+            // Convert Ink to uint (BGRA)
             uint cVal = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
 
             unsafe
@@ -2202,7 +2202,7 @@ public sealed class AmosGraphics
                 uint* ptr = (uint*)fb.Address;
                 int stride = fb.RowBytes / 4;
 
-                // Lokal funktion för säker pixel-sättning
+                // Local function for safe pixel setting
                 void SetPixel(int px, int py)
                 {
                     if (px >= 0 && px < w && py >= 0 && py < h)
@@ -2262,7 +2262,7 @@ public sealed class AmosGraphics
                 }
 
                 int x = 0, y = r2;
-                long rx = r1, ry = r2; // Använd long för att undvika overflow vid kvadrat
+                long rx = r1, ry = r2; // Use long to avoid overflow when squaring
                 long rxSq = rx * rx;
                 long rySq = ry * ry;
                 long twoRxSq = 2 * rxSq;
@@ -2335,10 +2335,10 @@ public sealed class AmosGraphics
                 uint* ptr = (uint*)fb.Address;
                 int stride = fb.RowBytes / 4;
 
-                // Iterera genom höjden (Y-axeln)
+                // Iterate through the height (Y axis)
                 for (int y = -r2; y <= r2; y++)
                 {
-                    // Beräkna bredden vid denna Y-koordinat baserat på ellips-ekvationen
+                    // Work out the width at this Y coordinate from the ellipse equation
                     // x = r1 * sqrt(1 - y^2/r2^2)
                     int halfWidth = (int)(r1 * Math.Sqrt(1.0 - (double)(y * y) / (r2 * r2)));
 
@@ -2377,7 +2377,7 @@ public sealed class AmosGraphics
 
             if (x1 < 0 || x1 >= w || y1 < 0 || y1 >= h) return;
 
-            // FIX: Skapa färg i BGRA-format
+            // FIX: Create the colour in BGRA format
             uint fillColor = (uint)((Ink.A << 24) | (Ink.R << 16) | (Ink.G << 8) | Ink.B);
 
             unsafe
@@ -2385,7 +2385,7 @@ public sealed class AmosGraphics
                 uint* ptr = (uint*)fb.Address;
                 int stride = fb.RowBytes / 4;
 
-                // Nu är både targetColor och fillColor i samma format (BGRA)
+                // Now both targetColor and fillColor are in the same format (BGRA)
                 uint targetColor = ptr[y1 * stride + x1];
 
                 if (targetColor == fillColor) return;
@@ -2399,26 +2399,26 @@ public sealed class AmosGraphics
                     var (cx, cy) = stack.Pop();
                     int offset = cy * stride + cx;
 
-                    // Flytta vänster så långt det går
+                    // Move left as far as possible
                     int lx = cx;
                     while (lx >= 0 && ptr[cy * stride + lx] == targetColor)
                     {
                         lx--;
                     }
 
-                    lx++; // Gå tillbaka ett steg till sista giltiga pixel
+                    lx++; // Go back one step to the last valid pixel
 
-                    // Flytta höger och fyll, samt scanna raderna ovanför och under
+                    // Move right and fill, and scan the rows above and below
                     bool spanAbove = false;
                     bool spanBelow = false;
 
                     int rx = lx;
                     while (rx < w && ptr[cy * stride + rx] == targetColor)
                     {
-                        // Fyll pixel
+                        // Fill the pixel
                         ptr[cy * stride + rx] = fillColor;
 
-                        // Kolla raden ovanför
+                        // Check the row above
                         if (cy > 0)
                         {
                             uint colorAbove = ptr[(cy - 1) * stride + rx];
@@ -2433,7 +2433,7 @@ public sealed class AmosGraphics
                             }
                         }
 
-                        // Kolla raden under
+                        // Check the row below
                         if (cy < h - 1)
                         {
                             uint colorBelow = ptr[(cy + 1) * stride + rx];
@@ -2459,15 +2459,15 @@ public sealed class AmosGraphics
     public void DrawText(int x, int y, string t)
     {
         if (string.IsNullOrEmpty(t)) return;
-        // Utan FONT SET: Arial 20, som TEXT alltid har haft
+        // Without FONT SET: Arial 20, as TEXT has always had
         if (_fontConfigured) DrawTextNow(GetActiveScreen(), x, y, t, font, CharHeight, Ink, 0, 0);
         else DrawTextNow(GetActiveScreen(), x, y, t, "Arial", 20, Ink, 0, 0);
     }
 
-    // Ritar text direkt i lagrets bitmapp med SkiaSharp, i tråden som anropar. Då hamnar texten
-    // i rätt lager och i rätt ordning med allt annat som ritas, även när programmet byter lager
-    // varje bild. Med cellWidth > 0 ritas varje tecken i en egen ruta och utan mjuka kanter,
-    // som i PRINTG, så att pixelfonter som C64-fonten blir skarpa.
+    // Draws text straight into the layer's bitmap with SkiaSharp, in the calling thread. Then the text lands
+    // in the right layer and in the right order with everything else that is drawn, even when the program swaps layers
+    // every frame. With cellWidth > 0 every character is drawn in a cell of its own and without soft edges,
+    // as in PRINTG, so that pixel fonts such as the C64 font are sharp.
     private void DrawTextNow(WriteableBitmap target, int x, int y, string text, string family, float size,
         Color ink, int cellWidth, int cellHeight)
     {
@@ -2526,7 +2526,7 @@ public sealed class AmosGraphics
 
                     using (var fb = t.Lock())
                     {
-                        // 1. KOPIERA PIXLAR FRÅN FONT-ATLAS
+                        // 1. COPY PIXELS FROM THE FONT ATLAS
                         CopyPixelsBgra(b, new PixelRect(x * tw, y * th, tw, th), fb);
 
                         unsafe
@@ -2625,7 +2625,7 @@ public sealed class AmosGraphics
                 Angle = f.Angle,
                 ZoomX = f.ZoomX,
                 ZoomY = f.ZoomY,
-                Layer = _currentScreen // ← ärv aktivt lager automatiskt
+                Layer = _currentScreen // ← inherit the active layer automatically
             });
         }
     }
@@ -2650,7 +2650,7 @@ public sealed class AmosGraphics
                 FontId = id,
                 X = x,
                 Y = y,
-                Text = c[0].ToString(), // Enskilt tecken som sträng
+                Text = c[0].ToString(), // A single character as a string
                 Angle = f.Angle,
                 ZoomX = f.ZoomX,
                 ZoomY = f.ZoomY,
@@ -2660,11 +2660,11 @@ public sealed class AmosGraphics
     }
 
     // -------------------------------------------------------------------------------
-    //  HJÄLPMETOD FÖR FÄRGKORRIGERING (MAC vs PC)
+    //  HELPER FOR COLOUR CORRECTION (MAC vs PC)
     // -------------------------------------------------------------------------------
-    // Alla våra WriteableBitmaps lagrar pixlar som BGRA (förmultiplicerad alpha), precis som deras
-    // PixelFormat säger. Bilder från disk och RenderTargetBitmap har plattformens ordning
-    // (RGBA på macOS, BGRA på Windows), så de konverteras när de kopieras in.
+    // All our WriteableBitmaps store pixels as BGRA (premultiplied alpha), just as their
+    // PixelFormat says. Images from disk and RenderTargetBitmap have the platform's order
+    // (RGBA on macOS, BGRA on Windows), so they are converted when they are copied in.
     public static void CopyPixelsBgra(Bitmap src, PixelRect rect, ILockedFramebuffer fb)
     {
         src.CopyPixels(rect, fb.Address, fb.RowBytes * rect.Height, fb.RowBytes);
@@ -2694,12 +2694,12 @@ public sealed class AmosGraphics
         {
             uint pixel = p[i];
 
-            // Plocka ut färgkanaler (BGRA format i WriteableBitmap)
+            // Pick out the colour channels (BGRA format in the WriteableBitmap)
             uint b = (pixel >> 16) & 0xFF;
             uint g = (pixel >> 8) & 0xFF;
             uint r = pixel & 0xFF;
 
-            // Gör svart (0,0,0) transparent
+            // Make black (0,0,0) transparent
             if (r == 0 && g == 0 && b == 0)
             {
                 p[i] = 0;
@@ -2737,7 +2737,7 @@ public sealed class AmosGraphics
     }
 
     // ---------------- Tiles ----------------
-    public int GetTilesInWidth() => _tilesInWidth; // NYTT: Getter
+    public int GetTilesInWidth() => _tilesInWidth; // NEW: Getter
 
     public void LoadTileBank(string f, int tw, int th)
     {
@@ -2750,7 +2750,7 @@ public sealed class AmosGraphics
             _tileHeight = th;
             _tiles.Clear();
 
-            // Uppdatera klassvariabeln för att undvika division med noll i paletten
+            // Update the class variable to avoid division by zero in the palette
             _tilesInWidth = (int)b.Size.Width / tw;
 
             int cs = _tilesInWidth;
@@ -2789,7 +2789,7 @@ public sealed class AmosGraphics
             _tileHeight = th;
             _tiles.Clear();
 
-            // Deklarera tilesInWidth här och spara den i klassvariabeln _tilesInWidth
+            // Declare tilesInWidth here and keep it in the class variable _tilesInWidth
             int tilesInWidth = (int)b.Size.Width / tw;
             _tilesInWidth = tilesInWidth;
 
@@ -2802,7 +2802,7 @@ public sealed class AmosGraphics
                     var t = CreateEmptyBitmap(tw, th);
                     using (var fb = t.Lock())
                     {
-                        // Kopiera exakt den rutan från källbilden
+                        // Copy exactly that cell from the source image
                         CopyPixelsBgra(b, new PixelRect(x * tw, y * th, tw, th), fb);
                         unsafe
                         {
@@ -2834,7 +2834,7 @@ public sealed class AmosGraphics
         int pixelW = newW * _tileWidth;
         int pixelH = newH * _tileHeight;
 
-        // Uppdatera bitmappen i det aktuella GPU-lagret istället för i den gamla _screens-listan
+        // Update the bitmap in the current GPU layer instead of in the old _screens list
         if (_currentScreen < ActiveFrame.Count)
         {
             var layerI = ActiveFrame[_currentScreen];
@@ -2846,7 +2846,7 @@ public sealed class AmosGraphics
                 Visible = layerI.Visible,
                 Timer = layerI.Timer,
                 SkSlCode = layerI.SkSlCode,
-                CachedEffect = null, // Tvingas kompileras om för nya dimensioner
+                CachedEffect = null, // Forced to recompile for new dimensions
                 ShaderParams = (float[])layerI.ShaderParams.Clone(),
                 ShaderHeights = (float[])layerI.ShaderHeights.Clone(),
                 ShaderColors = (SKColor[])layerI.ShaderColors.Clone(),
@@ -2855,12 +2855,12 @@ public sealed class AmosGraphics
             };
         }
 
-        // Initiera banan med -1 (tomt) istället för 0 (första tilen)
+        // Initialise the map with -1 (empty) instead of 0 (the first tile)
         for (int y = 0; y < newH; y++)
         for (int x = 0; x < newW; x++)
             _map[x, y] = -1;
 
-        // Kopiera över gamla datan om den fanns
+        // Copy over the old data if there was any
         int copyW = Math.Min(newW, oldMap.GetLength(0));
         int copyH = Math.Min(newH, oldMap.GetLength(1));
 
@@ -2886,11 +2886,11 @@ public sealed class AmosGraphics
 
     public void DrawMap(int ox, int oy)
     {
-        lock (LockObject) // ✅ LÄGG TILL DETTA
+        lock (LockObject) // ✅ ADD THIS
         {
             if (_map.GetLength(0) == 0 || _tiles.Count == 0) return;
 
-            // Hämta det lagret vi ska rita på
+            // Get the layer we are going to draw on
             var target = GetActiveScreen();
             int targetW = target.PixelSize.Width;
             int targetH = target.PixelSize.Height;
@@ -2902,11 +2902,11 @@ public sealed class AmosGraphics
                     int tid = _map[x, y];
                     if (tid < 0 || tid >= _tiles.Count) continue;
 
-                    // Beräkna koordinaterna i det stora lagret
+                    // Work out the coordinates in the big layer
                     int dx = x * _tileWidth - ox;
                     int dy = y * _tileHeight - oy;
 
-                    // VIKTIGT: Rita bara om vi är inom lagrets gränser
+                    // IMPORTANT: Only draw if we are inside the layer's bounds
                     if (dx >= 0 && dx < targetW && dy >= 0 && dy < targetH)
                     {
                         DrawTileToBackbuffer(_tiles[tid], dx, dy);
@@ -2918,10 +2918,10 @@ public sealed class AmosGraphics
 
     private void DrawTileToBackbuffer(WriteableBitmap t, int dx, int dy)
     {
-        if (t == null) return; // ✅ LÄGG TILL NULL-CHECK
+        if (t == null) return; // ✅ ADD A NULL CHECK
 
         var target = GetActiveScreen();
-        if (target == null) return; // ✅ EXTRA SÄKERHET
+        if (target == null) return; // ✅ EXTRA SAFETY
 
         using var dst = target.Lock();
         using var src = t.Lock();
@@ -2930,7 +2930,7 @@ public sealed class AmosGraphics
         {
             var dp = (byte*)dst.Address;
             var sp = (byte*)src.Address;
-            // VIKTIGT: Använd target.PixelSize istället för globala Width/Height
+            // IMPORTANT: Use target.PixelSize instead of the global Width/Height
             int tw = target.PixelSize.Width;
             int th = target.PixelSize.Height;
 
@@ -2946,13 +2946,13 @@ public sealed class AmosGraphics
                     if (tx < 0 || tx >= tw) continue;
                     int si = x * 4, di = tx * 4;
 
-                    // Kolla om käll-pixeln (tilen) faktiskt har någon alfa (inte är helt transparent)
+                    // Check whether the source pixel (the tile) actually has any alpha (is not fully transparent)
                     if (sr[si + 3] > 0)
                     {
                         dr[di + 0] = sr[si + 0];
                         dr[di + 1] = sr[si + 1];
                         dr[di + 2] = sr[si + 2];
-                        dr[di + 3] = sr[si + 3]; // Använd källans alfa istället för hårdkodat 255
+                        dr[di + 3] = sr[si + 3]; // Use the source's alpha instead of a hard-coded 255
                     }
                 }
             }
@@ -3014,13 +3014,13 @@ public sealed class AmosGraphics
 
                 unsafe
                 {
-                    // Fixa färger först
+                    // Fix the colours first
                     FixupImageColors(fb.Address.ToPointer(), w * h);
 
-                    // Läs sedan av transparent key från den fixade datan (första pixeln)
+                    // Then read the transparent key from the fixed data (the first pixel)
                     var p = (byte*)fb.Address;
-                    // Skia/WriteableBitmap är BGRA (Little Endian uint: B, G, R, A)
-                    // Så p[0]=B, p[1]=G, p[2]=R, p[3]=A
+                    // Skia/WriteableBitmap is BGRA (little-endian uint: B, G, R, A)
+                    // So p[0]=B, p[1]=G, p[2]=R, p[3]=A
                     s.TransparentKey = Color.FromArgb(p[3], p[2], p[1], p[0]);
                 }
             }
@@ -3087,20 +3087,20 @@ public sealed class AmosGraphics
         }
     }
 
-    // NY metod med smart filnamns-parsing
+    // NEW method with smart file name parsing
     public void LoadSpriteSheetAuto(int id, string fileName, int? width = null, int? height = null,
         int? frameCount = null)
     {
         try
         {
-            // Parse från filnamnet om parametrar saknas
+            // Parse from the file name if parameters are missing
             string fileNameOnly = System.IO.Path.GetFileNameWithoutExtension(fileName);
 
             int w = width ?? ParseSpriteSheetParam(fileNameOnly, "W", 32);
             int h = height ?? ParseSpriteSheetParam(fileNameOnly, "H", 32);
             int count = frameCount ?? ParseSpriteSheetParam(fileNameOnly, "[BF]", 8);
 
-            // Anropa vanliga metoden
+            // Call the ordinary method
             LoadSpriteSheet(id, fileName, w, h, count);
         }
         catch (Exception ex)
@@ -3168,7 +3168,7 @@ public sealed class AmosGraphics
     public void SpriteOn(int id) => GetSprite(id).Visible = true;
     public void SpriteOff(int id) => GetSprite(id).Visible = false;
 
-    /// <summary>Sätter alpha omedelbart (0–255). Avbryter eventuell pågående fade.</summary>
+    /// <summary>Sets the alpha immediately (0–255). Cancels any fade in progress.</summary>
     public void SpriteAlpha(int id, int alpha255)
     {
         var s = GetSprite(id);
@@ -3177,7 +3177,7 @@ public sealed class AmosGraphics
         s.FadeStep = 0f;
     }
 
-    /// <summary>Startar en automatisk fade mot targetAlpha255 på 'frames' frames.</summary>
+    /// <summary>Starts an automatic fade towards targetAlpha255 over 'frames' frames.</summary>
     public void StartSpriteFade(int id, int targetAlpha255, int frames)
     {
         var s = GetSprite(id);
@@ -3185,7 +3185,7 @@ public sealed class AmosGraphics
 
         if (frames <= 0 || Math.Abs(target - s.Alpha) < 0.001f)
         {
-            // Omedelbar sättning om 0 frames eller redan på målet
+            // Set immediately if 0 frames or already at the target
             s.Alpha = target;
             s.FadeTarget = -1f;
             s.FadeStep = 0f;
@@ -3196,18 +3196,18 @@ public sealed class AmosGraphics
         s.FadeTarget = target;
         s.FadeStep = (target - s.Alpha) / frames;
 
-        // Om vi fadar in från osynlig: aktivera spriten direkt
+        // If we fade in from invisible: turn the sprite on straight away
         if (target > 0f && !s.Visible)
             s.Visible = true;
     }
 
-    /// <summary>Returnerar true om spriten har en pågående fade.</summary>
+    /// <summary>Returns true if the sprite has a fade in progress.</summary>
     public bool IsSpriteAFading(int id) =>
         _sprites.TryGetValue(id, out var s) && s.FadeStep != 0f;
 
     /// <summary>
-    /// Anropas av WAIT VBL en gång per frame.
-    /// Stegar alla aktiva sprite-fades framåt och auto-hide vid fade-out till 0.
+    /// Called by WAIT VBL once per frame.
+    /// Steps all active sprite fades forward, with auto-hide on a fade out to 0.
     /// </summary>
     public void TickSpriteFades()
     {
@@ -3231,7 +3231,7 @@ public sealed class AmosGraphics
                     sp.FadeTarget = -1f;
 
                     if (sp.Alpha <= 0f)
-                        sp.Visible = false; // auto-hide vid fade-out till 0
+                        sp.Visible = false; // auto-hide on a fade out to 0
                 }
             }
         }
@@ -3252,7 +3252,7 @@ public sealed class AmosGraphics
                 }
             }
         
-            // Samma för font-effekter (en gång per font, oavsett hur många texter som skrivits)
+            // The same for font effects (once per font, however many texts have been written)
             foreach (var font in _fonts.Values)
             {
                 foreach (var effect in font.Effects)
@@ -3287,7 +3287,7 @@ public sealed class AmosGraphics
         }
     }
 
-    /// <summary>Sätter opacity på ett lager omedelbart (0–255).</summary>
+    /// <summary>Sets the opacity of a layer immediately (0–255).</summary>
     public void ScreenAlpha(int layerIdx, int alpha255)
     {
         float val = Math.Clamp(alpha255 / 255f, 0f, 1f);
@@ -3302,7 +3302,7 @@ public sealed class AmosGraphics
         }
     }
 
-    /// <summary>Startar en fade på ett helt lager.</summary>
+    /// <summary>Starts a fade on a whole layer.</summary>
     public void StartScreenFade(int layerIdx, int targetAlpha255, int frames)
     {
         float target = Math.Clamp(targetAlpha255 / 255f, 0f, 1f);
@@ -3327,7 +3327,7 @@ public sealed class AmosGraphics
         }
     }
 
-    /// <summary>Returnerar true om lagret har en pågående fade.</summary>
+    /// <summary>Returns true if the layer has a fade in progress.</summary>
     public bool IsLayerFading(int layerIdx) =>
         layerIdx >= 0 && layerIdx < _layers.Count && _layers[layerIdx].FadeStep != 0f;
 
@@ -3493,7 +3493,7 @@ public sealed class AmosGraphics
         set.Clear();
     }
 
-    // ── HITBOX — rektangel mot rektangel ────────────────────────
+    // ── HITBOX - rectangle against rectangle ────────────────────
 
     public bool SpriteHitBox(int id1, int id2)
     {
@@ -3508,7 +3508,7 @@ public sealed class AmosGraphics
                y1 < y2 + s2.Height && y1 + s1.Height > y2;
     }
 
-// ── HITCIRCLE — cirkel mot cirkel ───────────────────────────
+// ── HITCIRCLE - circle against circle ───────────────────────
 
     public bool SpriteHitCircle(int id1, int id2)
     {
@@ -3516,7 +3516,7 @@ public sealed class AmosGraphics
             !_sprites.TryGetValue(id2, out var s2)) return false;
         if (!s1.Visible || !s2.Visible) return false;
 
-        // Mittpunkt och radie för varje sprite
+        // Centre and radius of each sprite
         double cx1 = s1.X - s1.HandleX + s1.Width / 2.0;
         double cy1 = s1.Y - s1.HandleY + s1.Height / 2.0;
         double cx2 = s2.X - s2.HandleX + s2.Width / 2.0;
@@ -3530,7 +3530,7 @@ public sealed class AmosGraphics
         return (dx * dx + dy * dy) <= (r1 + r2) * (r1 + r2);
     }
 
-// ── Grupp-kollisioner ────────────────────────────────────────
+// ── Group collisions ─────────────────────────────────────────
 
     public int SpriteHitGroup(int id, string group)
     {
@@ -3602,12 +3602,12 @@ public sealed class AmosGraphics
         if (y2 < y1) (y1, y2) = (y2, y1);
     }
 }
-// Kör sprite-/font-effekter som shaders. Med en GRContext sker allt på GPU:n och resultatet
-// stannar där som en textur; utan (headless) används en CPU-yta.
+// Runs sprite/font effects as shaders. With a GRContext everything happens on the GPU and the result
+// stays there as a texture; without one (headless) a CPU surface is used.
 public static class ShaderHelper
 {
-    // Kör en effekt och returnera en ny bild som anroparen äger, eller null om effekten misslyckades.
-    // Bilden blir större än input enligt effektens padding.
+    // Runs one effect and returns a new image owned by the caller, or null if the effect failed.
+    // The image becomes larger than the input according to the effect's padding.
     public static SKImage? Apply(GRContext? gr, SKImage input, SpriteEffect effect)
     {
         try
@@ -3631,7 +3631,7 @@ public static class ShaderHelper
         }
     }
 
-    // Kör effekterna i tur och ordning. Tar över ägandet av input och returnerar en bild anroparen äger.
+    // Runs the effects in order. Takes ownership of the input and returns an image the caller owns.
     public static SKImage ApplyChain(GRContext? gr, SKImage input, IEnumerable<SpriteEffect> effects)
     {
         var current = input;
@@ -3647,7 +3647,7 @@ public static class ShaderHelper
     }
 }
 
-// LÄGG TILL DESSA I SLUTET AV AmosGraphics.cs (före sista })
+// ADD THESE AT THE END OF AmosGraphics.cs (before the last })
 
 public abstract class SpriteEffect
 {
@@ -3655,7 +3655,7 @@ public abstract class SpriteEffect
 
     public virtual bool RequiresGpuContext => false;
     
-    // ✅ NYTT: Hur mycket effekten expanderar bilden (för korrekt positionering)
+    // ✅ NEW: How much the effect enlarges the image (for correct positioning)
     public virtual (int leftPadding, int rightPadding, int topPadding, int bottomPadding) GetPadding() 
         => (0, 0, 0, 0);
 }
@@ -3762,8 +3762,8 @@ public class WaveEffect : SpriteEffect
     public float FrequencyX { get; set; } = 0.1f;
     public float AmplitudeY { get; set; } = 0f;
     public float FrequencyY { get; set; } = 0f;
-    public float PhaseX { get; set; } = 0f;  // ✅ NYTT: Fasförskjutning för X
-    public float PhaseY { get; set; } = 0f;  // ✅ NYTT: Fasförskjutning för Y
+    public float PhaseX { get; set; } = 0f;  // ✅ NEW: Phase offset for X
+    public float PhaseY { get; set; } = 0f;  // ✅ NEW: Phase offset for Y
     public float Time { get; set; } = 0f;
     
     private static SKRuntimeEffect? _globalCachedEffect;
@@ -3854,8 +3854,8 @@ half4 main(float2 fragCoord) {
             uniforms.Add("uFrequencyX", FrequencyX);
             uniforms.Add("uAmplitudeY", AmplitudeY);
             uniforms.Add("uFrequencyY", FrequencyY);
-            uniforms.Add("uPhaseX", PhaseX);  // ✅ NYTT
-            uniforms.Add("uPhaseY", PhaseY);  // ✅ NYTT
+            uniforms.Add("uPhaseX", PhaseX);  // ✅ NEW
+            uniforms.Add("uPhaseY", PhaseY);  // ✅ NEW
             uniforms.Add("uTime", Time);
 
             var shader = _globalCachedEffect.ToShader(uniforms, children);

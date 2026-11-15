@@ -5,7 +5,7 @@ namespace AmosLikeBasic;
 
 internal static class Program
 {
-    // Satt när appen ska köra ett färdigt spel i stället för IDE:n (se GamePlayer)
+    // Set when the app should run a finished game instead of the IDE (see GamePlayer)
     public static string? GamePath { get; private set; }
 
     [STAThread]

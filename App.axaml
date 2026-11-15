@@ -5,7 +5,7 @@
              RequestedThemeVariant="Default">
              <!-- "Default" ThemeVariant follows system theme variant. "Dark" or "Light" are other available options. -->
 
-    <!-- Temafärger. Sätts av ThemeResources.Apply när ett tema väljs; detta är Classic Blue. -->
+    <!-- Theme colours. Set by ThemeResources.Apply when a theme is chosen; this is Classic Blue. -->
     <Application.Resources>
         <SolidColorBrush x:Key="AmosWindowBg" Color="#0B2A9B"/>
         <SolidColorBrush x:Key="AmosPanelBg" Color="#06206F"/>
@@ -22,7 +22,7 @@
     <Application.Styles>
         <FluentTheme />
         
-        <!-- VIKTIGT: Denna rad laddar AvaloniaEdit så att den fungerar! -->
+        <!-- IMPORTANT: This line loads AvaloniaEdit so that it works! -->
         <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
 
         <!-- AMOS-ish palette + chunky controls -->
@@ -37,7 +37,7 @@
             <Setter Property="CornerRadius" Value="0"/>
         </Style>
 
-        <!-- Uppdaterad stil för TextEditor -->
+        <!-- Updated style for TextEditor -->
         <Style Selector="avaloniaEdit|TextEditor.amos-editor">
             <Setter Property="FontFamily" Value="Courier New, Monospace"/>
             <Setter Property="Background" Value="#00134D"/>
@@ -54,7 +54,7 @@
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="Margin" Value="0"/>
-            <!-- Tvinga bort scrollbarer helt -->
+            <!-- Remove the scroll bars completely -->
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
             <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled"/>
         </Style>
@@ -85,7 +85,7 @@
             <Setter Property="FontSize" Value="14" />
         </Style>
 
-        <!-- Etiketter i editorernas paneler -->
+        <!-- Labels in the editors' panels -->
         <Style Selector="TextBlock.amos-label">
             <Setter Property="Foreground" Value="{DynamicResource AmosLabelFg}"/>
         </Style>

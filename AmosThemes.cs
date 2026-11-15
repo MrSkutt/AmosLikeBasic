@@ -13,7 +13,7 @@ public record AmosTheme(
     Color TitleBarFg,
     Color AccentColor,
     string Font,
-    // Nya:
+    // New:
     Color MenuBg,
     Color MenuFg,
     Color VarWatchBg,

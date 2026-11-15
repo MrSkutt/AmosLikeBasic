@@ -7,48 +7,48 @@
     {
         public static string GetPath(string relativePath)
         {
-            // 0. Om sökvägen redan är absolut och filen finns, använd den direkt (Fix för SAM PLAY med fullständiga sökvägar)
+            // 0. If the path is already absolute and the file exists, use it directly (fix for SAM PLAY with full paths)
             if (Path.IsPathRooted(relativePath) && File.Exists(relativePath))
             {
                 return relativePath;
             }
 
-            // 1. Tvätta bort inledande slash så Path.Combine inte tror det är en absolut sökväg
+            // 1. Strip a leading slash so Path.Combine does not think it is an absolute path
             var cleanPath = relativePath.TrimStart('/', '\\');
 
-            // 2. Ta fram exakt var exekverbaren ligger (säkrare än AppContext.BaseDirectory i vissa bundles)
+            // 2. Find out exactly where the executable is (safer than AppContext.BaseDirectory in some bundles)
             string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
             string baseDir = !string.IsNullOrEmpty(exePath) 
                 ? Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory 
                 : AppContext.BaseDirectory;
 
-            // 3. Lista över möjliga platser att leta på
+            // 3. List of possible places to look
             var searchPaths = new List<string>
             {
                 // Alt A: Standard macOS bundle resources (../Resources)
                 Path.GetFullPath(Path.Combine(baseDir, "..", "Resources", cleanPath)),
             
-                // Alt B: Direkt bredvid exekverbaren (standard .NET publish beteende)
+                // Alt B: Directly next to the executable (standard .NET publish behaviour)
                 Path.GetFullPath(Path.Combine(baseDir, cleanPath)),
             
-                // Alt C: En Resources-mapp bredvid exekverbaren (om strukturen kopierats rakt av)
+                // Alt C: A Resources folder next to the executable (if the structure was copied as is)
                 Path.GetFullPath(Path.Combine(baseDir, "Resources", cleanPath)),
             
-                // Alt D: Fallback till nuvarande arbetskatalog (Development)
+                // Alt D: Fall back to the current working directory (development)
                 Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, cleanPath))
             };
 
-            // 4. Loopa och se var filen finns
+            // 4. Loop and see where the file is
             foreach (var path in searchPaths)
             {
                 if (File.Exists(path))
                 {
-                    // Console.WriteLine($"[ResourceLoader] Found: {path}"); // Avkommentera för debug
+                    // Console.WriteLine($"[ResourceLoader] Found: {path}"); // Uncomment for debugging
                     return path;
                 }
             }
 
-            // 5. Om inget hittades, kasta fel med tydlig info om var vi letade
+            // 5. If nothing was found, throw an error that says clearly where we looked
             var checkedPaths = string.Join("\n - ", searchPaths);
             throw new FileNotFoundException($"Resource not found: '{relativePath}'.\nChecked locations:\n - {checkedPaths}");
         }

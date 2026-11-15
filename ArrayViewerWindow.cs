@@ -18,7 +18,7 @@ public class ArrayViewerWindow : Window
         CanResize = true;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
 
-        // Bygg visningslista — iterera platt index och räkna ut koordinater
+        // Build the display list - iterate over the flat index and work out the coordinates
         var items = new List<string>();
 
         if (array is AmosNumericArray numArr)
@@ -40,7 +40,7 @@ public class ArrayViewerWindow : Window
             }
         }
 
-        var allItems = items; // spara för filtrering
+        var allItems = items; // keep for filtering
 
         var header = new TextBlock
         {
@@ -94,7 +94,7 @@ public class ArrayViewerWindow : Window
         };
     }
 
-// Konverterar platt index → koordinater för multidim-array
+// Converts a flat index → coordinates for a multi-dimensional array
     private static int[] FlatToCoords(int flatIndex, int[] dimensions)
     {
         var coords = new int[dimensions.Length];

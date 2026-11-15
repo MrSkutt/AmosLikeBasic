@@ -1,50 +1,50 @@
-1. Övergripande design / arkitektur
-- Grafiken hanteras primärt av GPU
-- Skärmen använder double buffering på frame-nivå
-- Två kompletta render-frames används:
-    en aktiv frame (presenteras)
-    en inaktiv frame (byggs upp)
-- Varje frame innehåller flera RenderLayer i Z-ordning (t.ex. background, sprites, text, UI)
-- ActiveFrame pekar på aktuell render-frame
-- InactiveFrame pekar på frame som skrivs till
-- Alla ritaroperationer sker alltid på den inaktiva framen
-- Frame-byte sker genom pekarswap, ingen pixelkopiering
-- Eventuell CPU-rendering används endast för debug, mätning eller statistik
+1. Overall design / architecture
+- The graphics are mainly handled by the GPU
+- The screen uses double buffering at frame level
+- Two complete render frames are used:
+    an active frame (presented)
+    an inactive frame (being built)
+- Each frame holds several RenderLayers in Z order (e.g. background, sprites, text, UI)
+- ActiveFrame points to the current render frame
+- InactiveFrame points to the frame being written to
+- All drawing operations always happen on the inactive frame
+- Frames are switched by swapping pointers, no pixel copying
+- Any CPU rendering is only used for debugging, measuring or statistics
 
-2. Viktiga krav och begränsningar
-- Använd riktiga pekare (unsafe) där det är motiverat
-- Plot() och alla ritfunktioner skriver alltid till den inaktiva framen
-- SwapBuffers() byter endast frame-referenser, aldrig innehåll
-- Inga individuella lager får swappa sig själva
-- Premultiplied alpha används konsekvent i GPU-rendering
-- Arkitekturen måste fungera både med:
-    GPU-rendering (huvudfall)
-    CPU-rendering (fallback / debug)
+2. Important requirements and limits
+- Use real pointers (unsafe) where it is justified
+- Plot() and all drawing functions always write to the inactive frame
+- SwapBuffers() only switches frame references, never contents
+- No individual layer may swap itself
+- Premultiplied alpha is used consistently in GPU rendering
+- The architecture must work with both:
+    GPU rendering (the main case)
+    CPU rendering (fallback / debug)
 
-3. Beslut vi redan fattat
-- Skärmen äger double buffering (inte render-lagren)
-- Två listor används för frames:
+3. Decisions already made
+- The screen owns the double buffering (not the render layers)
+- Two lists are used for frames:
     FrameA
     FrameB
-- En bool (eller motsvarande) avgör vilken frame som är aktiv
-- RenderLayer representerar ett Z-ordnat renderplan, inte en buffer
-- Inga bitmap- eller pixelkopior vid frame-byte
-- Premultiplied alpha används i alla GPU-lager
-- Alla bakgrundsberäkningar sker på den inaktiva framen
+- A bool (or equivalent) decides which frame is active
+- A RenderLayer represents a Z-ordered render plane, not a buffer
+- No bitmap or pixel copies when switching frames
+- Premultiplied alpha is used in all GPU layers
+- All background calculations happen on the inactive frame
 
-4. Senaste ändringar / pågående problem
-- Ny SwapBuffers()-implementation testad och fungerar korrekt med GPU-lager
-- CPU-baserad VBL-belastningsräknare behöver anpassas till GPU-pipeline
-- Nya ritfunktioner måste strikt följa:
+4. Latest changes / open problems
+- The new SwapBuffers() implementation is tested and works correctly with GPU layers
+- The CPU-based VBL load counter needs adapting to the GPU pipeline
+- New drawing functions must strictly follow:
     build on inactive frame
     present active frame
-- Terminologi håller på att konsolideras:
-    Frame = buffer-nivå
-    RenderLayer = Z-ordningsnivå
+- The terminology is being consolidated:
+    Frame = buffer level
+    RenderLayer = Z order level
 …
 
 
-Bra saker att ha koll på
-- Bygg för PC:
+Good things to keep track of
+- Build for PC:
     dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 

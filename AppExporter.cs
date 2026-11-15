@@ -8,14 +8,14 @@ using System.Threading.Tasks;
 
 namespace AmosLikeBasic;
 
-// Kör Tools/export_app.py från IDE:n och skickar utskrifterna vidare rad för rad.
-// Exporten bygger appen med dotnet publish, så den kräver källkoden och .NET SDK.
+// Runs Tools/export_app.py from the IDE and passes its output on line by line.
+// The export builds the app with dotnet publish, so it needs the source code and the .NET SDK.
 public static class AppExporter
 {
     public const string ScriptPath = "Tools/export_app.py";
 
-    // Mappen med AmosLikeBasic.csproj och Tools/export_app.py, sökt uppåt från programmet
-    // (t.ex. bin/Debug/net9.0/osx-arm64 -> projektmappen). null om källkoden inte finns.
+    // The folder with AmosLikeBasic.csproj and Tools/export_app.py, searched upwards from the program
+    // (e.g. bin/Debug/net9.0/osx-arm64 -> the project folder). null if the source code is not there.
     public static string? FindSourceRoot()
     {
         foreach (var start in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
@@ -32,13 +32,13 @@ public static class AppExporter
         return null;
     }
 
-    // Kör exporten. Returnerar processens slutkod (0 = lyckades).
+    // Runs the export. Returns the exit code of the process (0 = success).
     public static async Task<int> RunAsync(string sourceRoot, string projectFile, string name, string platform,
         Action<string> log)
     {
         var args = new List<string>
         {
-            "-u", // obuffrad utskrift, så att loggen uppdateras medan det pågår
+            "-u", // unbuffered output, so that the log updates while it runs
             Path.Combine(sourceRoot, ScriptPath), projectFile, "--name", name, "--platform", platform
         };
 
@@ -64,7 +64,7 @@ public static class AppExporter
             }
             catch (Win32Exception ex)
             {
-                // Den här Python-varianten finns inte, prova nästa
+                // This Python variant does not exist, try the next one
                 lastError = ex;
                 continue;
             }
@@ -85,7 +85,7 @@ public static class AppExporter
             lastError);
     }
 
-    // Startas IDE:n från Finder är PATH kort och saknar ofta dotnet; lägg till vanliga platser
+    // When the IDE is started from Finder, PATH is short and often lacks dotnet; add the usual places
     private static string PathWithDotnet(string? path)
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -105,7 +105,7 @@ public static class AppExporter
         return string.Join(Path.PathSeparator, parts);
     }
 
-    // Visar en mapp i Finder / Utforskaren
+    // Shows a folder in Finder / Explorer
     public static void OpenFolder(string folder)
     {
         try

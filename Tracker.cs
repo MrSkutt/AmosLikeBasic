@@ -7,12 +7,12 @@ using System.Text.Json.Serialization;
 
 namespace AmosLikeBasic
 {
-    // En låt för trackern: instrument, mönster (patterns) och i vilken ordning mönstren spelas.
+    // A song for the tracker: instruments, patterns and the order the patterns play in.
     //
-    // Sparas som JSON (.amostrk). Raderna i ett mönster sparas som text, en sträng per rad
-    // och kanalerna åtskilda med |, så att filen går att läsa och diffa:
+    // Saved as JSON (.amostrk). The rows of a pattern are saved as text, one string per row
+    // with the channels separated by |, so that the file can be read and diffed:
     //   "C-4 01 A04|--- .. ...|=== .. ...|E-3 02 C20"
-    // Varje cell är not, instrument (hex) och effekt (bokstav/siffra + två hexsiffror).
+    // Each cell is note, instrument (hex) and effect (letter/digit + two hex digits).
     public sealed class TrackerSong
     {
         public const int ChannelCount = 4;
@@ -22,8 +22,8 @@ namespace AmosLikeBasic
         public const int FormatVersion = 1;
 
         public string Title { get; set; } = "";
-        public int Speed { get; set; } = 6;      // tick per rad
-        public int Tempo { get; set; } = 125;    // som i ProTracker: 125 ger 50 tick per sekund
+        public int Speed { get; set; } = 6;      // ticks per row
+        public int Tempo { get; set; } = 125;    // as in ProTracker: 125 gives 50 ticks per second
         public List<TrackerInstrument> Instruments { get; set; } = new();
         public List<int> Order { get; set; } = new() { 0 };
         public List<TrackerPattern> Patterns { get; set; } = new() { new TrackerPattern() };
@@ -136,7 +136,7 @@ namespace AmosLikeBasic
         }
     }
 
-    // Ett ljud i trackern. Enheterna är desamma som i PLAY-kommandona.
+    // A sound in the tracker. The units are the same as in the PLAY commands.
     public sealed class TrackerInstrument
     {
         public string Name { get; set; } = "";
@@ -157,11 +157,11 @@ namespace AmosLikeBasic
         public double FilterEnvDecay { get; set; } = 200;  // ms
         public double Vibrato { get; set; }                // cent
         public double VibratoRate { get; set; } = 6;       // Hz
-        public int Ring { get; set; }                      // kanal, 0 = av
-        public int Sync { get; set; }                      // kanal, 0 = av
+        public int Ring { get; set; }                      // channel, 0 = off
+        public int Sync { get; set; }                      // channel, 0 = off
 
-        // Ett steg per tick från noten startar: "NOISE +24", "PULSE", "-12", "P30" (pulsbredd).
-        // TableLoop är steget tabellen hoppar tillbaka till, -1 stannar på sista steget.
+        // One step per tick from when the note starts: "NOISE +24", "PULSE", "-12", "P30" (pulse width).
+        // TableLoop is the step the table jumps back to, -1 stays on the last step.
         public List<string> Table { get; set; } = new();
         public int TableLoop { get; set; } = -1;
     }
@@ -196,7 +196,7 @@ namespace AmosLikeBasic
                 _cells[r, c] = TrackerCell.Empty;
         }
 
-        // Ändrar antalet rader och behåller det som får plats
+        // Changes the number of rows and keeps what fits
         public void Resize(int rows)
         {
             var old = _cells;
@@ -213,9 +213,9 @@ namespace AmosLikeBasic
         public const int NoNote = -1;
         public const int NoteOff = -2;
 
-        public readonly int Note;        // MIDI-nummer (A-4 = 69), NoNote eller NoteOff
-        public readonly int Instrument;  // 1 – 255, 0 = inget
-        public readonly char Effect;     // '0' – '9', 'A' – 'Z', '\0' = ingen
+        public readonly int Note;        // MIDI number (A-4 = 69), NoNote or NoteOff
+        public readonly int Instrument;  // 1 – 255, 0 = none
+        public readonly char Effect;     // '0' – '9', 'A' – 'Z', '\0' = none
         public readonly int Param;       // 0 – 255
 
         public static readonly TrackerCell Empty = new(NoNote, 0, '\0', 0);
@@ -239,7 +239,7 @@ namespace AmosLikeBasic
             _ => NoteNames[note % 12] + (note / 12 - 1).ToString(CultureInfo.InvariantCulture)
         };
 
-        // "C-4", "C#4", "---" (ingen), "===" eller "OFF" (släpp tonen)
+        // "C-4", "C#4", "---" (none), "===" or "OFF" (let go of the note)
         public static int ParseNote(string text)
         {
             text = text.Trim().ToUpperInvariant();

@@ -8,15 +8,15 @@ using Avalonia.Media;
 
 namespace AmosLikeBasic;
 
-// Mönstret i trackern: fyra kanaler med not, instrument och effekt per rad.
-// Raden med markören står still mitt i vyn och mönstret rullar förbi, som i ProTracker.
+// The pattern in the tracker: four channels with note, instrument and effect per row.
+// The cursor row stays still in the middle of the view and the pattern scrolls past, as in ProTracker.
 public class PatternView : Control
 {
-    // Kolumner i en kanal: not, instrument (två siffror), effekt, parameter (två siffror)
+    // Columns in a channel: note, instrument (two digits), effect, parameter (two digits)
     private const int ColNote = 0, ColInstHi = 1, ColInstLo = 2, ColEffect = 3, ColParamHi = 4, ColParamLo = 5;
     private const int ColumnsPerChannel = 6;
 
-    // Teckenposition för varje kolumn inom cellen "C-4 01 A04"
+    // Character position of each column within the cell "C-4 01 A04"
     private static readonly int[] ColumnChar = { 0, 4, 5, 7, 8, 9 };
     private static readonly int[] ColumnWidth = { 3, 1, 1, 1, 1, 1 };
     private const int CellChars = 10;
@@ -30,28 +30,28 @@ public class PatternView : Control
     public int CursorColumn { get; private set; }
     public int Octave { get; set; } = 4;
     public int EditStep { get; set; } = 1;
-    public int Instrument { get; set; } = 1;   // instrumentet som nya noter får
+    public int Instrument { get; set; } = 1;   // the instrument new notes get
     public bool EditMode { get; set; } = true;
-    public int PlayRow { get; set; } = -1;     // raden som spelas, -1 = ingen
+    public int PlayRow { get; set; } = -1;     // the row being played, -1 = none
     public bool[] Muted { get; } = new bool[TrackerSong.ChannelCount];
 
-    // Händelser till fönstret
-    public event Action? BeforeEdit;                 // innan mönstret ändras, för ångra
-    public event Action? Edited;                     // efter en ändring
-    public event Action<int, int>? NotePreview;      // kanal (1 – 4), not
-    public event Action<int>? NoteRelease;           // kanal (1 – 4)
+    // Events to the window
+    public event Action? BeforeEdit;                 // before the pattern changes, for undo
+    public event Action? Edited;                     // after a change
+    public event Action<int, int>? NotePreview;      // channel (1 – 4), note
+    public event Action<int>? NoteRelease;           // channel (1 – 4)
     public event Action<string>? Command;            // "play-song", "play-pattern", "play-cursor", "stop", "toggle-edit", "octave", "undo", "redo", "save"
     public event Action? MuteChanged;
     public event Action? CursorMoved;
 
-    // Markering: ett block av hela celler, från ankaret till markören
+    // Selection: a block of whole cells, from the anchor to the cursor
     private int _anchorRow = -1, _anchorChannel;
     private bool _dragging;
 
-    // Urklipp delas mellan alla mönster
+    // The clipboard is shared between all patterns
     private static TrackerCell[,]? _clipboard;
 
-    private readonly Dictionary<Key, int> _heldNotes = new();   // tangent → kanal som provspelar
+    private readonly Dictionary<Key, int> _heldNotes = new();   // key → channel that is previewing
 
     private Typeface _typeface = new("Menlo, Consolas, Courier New, monospace");
     private const double FontSize = 15;
@@ -63,7 +63,7 @@ public class PatternView : Control
         Focusable = true;
         ClipToBounds = true;
         MeasureFont();
-        // Rita om med nya färger när temat byts
+        // Redraw with new colours when the theme changes
         ResourcesChanged += (_, _) =>
         {
             _textCache.Clear();
@@ -89,7 +89,7 @@ public class PatternView : Control
         new(PreferredWidth, double.IsInfinity(availableSize.Height) ? 400 : availableSize.Height);
 
     // ════════════════════════════════════════════════════════════════
-    //  Markören
+    //  The cursor
     // ════════════════════════════════════════════════════════════════
 
     public void SetCursor(int row, int channel, int column, bool extendSelection = false)
@@ -110,7 +110,7 @@ public class PatternView : Control
         CursorMoved?.Invoke();
     }
 
-    // Följer uppspelningen utan att röra markeringen
+    // Follows the playback without touching the selection
     public void FollowRow(int row)
     {
         CursorRow = Math.Clamp(row, 0, Rows - 1);
@@ -173,7 +173,7 @@ public class PatternView : Control
         int center = visible / 2;
         int top = CursorRow - center;
 
-        // Taktmarkeringar i textfärgen, så att de syns i både ljusa och mörka teman
+        // Beat markers in the text colour, so that they show in both light and dark themes
         var fgColor = fg is ISolidColorBrush sb ? sb.Color : Colors.White;
         var beatBrush = new SolidColorBrush(Color.FromArgb(24, fgColor.R, fgColor.G, fgColor.B));
         var barBrush = new SolidColorBrush(Color.FromArgb(44, fgColor.R, fgColor.G, fgColor.B));
@@ -217,7 +217,7 @@ public class PatternView : Control
             }
         }
 
-        // Markören
+        // The cursor
         {
             double y = headerH + center * _rowH;
             double x = ChannelX(CursorChannel) + ColumnChar[CursorColumn] * _charW;
@@ -235,7 +235,7 @@ public class PatternView : Control
         }
         ctx.DrawText(Text(PatternIndex.ToString("D2", CultureInfo.InvariantCulture), label), new Point(8, 3));
 
-        // Linjer mellan kanalerna
+        // Lines between the channels
         var linePen = new Pen(new SolidColorBrush(Color.FromArgb(70, 128, 160, 255)), 1);
         for (int c = 0; c < TrackerSong.ChannelCount; c++)
         {
@@ -272,10 +272,10 @@ public class PatternView : Control
 
         if (p.Y < HeaderH)
         {
-            // Vänsterklick: tysta kanalen. Högerklick: spela bara den kanalen (solo).
+            // Left click: mute the channel. Right click: play only that channel (solo).
             if (props.IsRightButtonPressed)
             {
-                // Är kanalen redan ensam hörs alla igen
+                // If the channel is already alone, all are heard again
                 bool alreadySolo = !Muted[channel] && CountUnmuted() == 1;
                 for (int c = 0; c < Muted.Length; c++) Muted[c] = !alreadySolo && c != channel;
             }
@@ -352,7 +352,7 @@ public class PatternView : Control
     //  Tangentbord
     // ════════════════════════════════════════════════════════════════
 
-    // Pianotangenter som i ProTracker: nedre raden är en oktav, övre raden nästa
+    // Piano keys as in ProTracker: the bottom row is one octave, the top row the next
     private static readonly Dictionary<Key, int> PianoKeys = new()
     {
         [Key.Z] = 0, [Key.S] = 1, [Key.X] = 2, [Key.D] = 3, [Key.C] = 4, [Key.V] = 5, [Key.G] = 6,
@@ -371,7 +371,7 @@ public class PatternView : Control
         _ => -1
     };
 
-    // Effektkolumnen tar också bokstäver efter F (G, H, I ...)
+    // The effect column also takes letters after F (G, H, I ...)
     private static char EffectChar(Key key) => key switch
     {
         >= Key.D0 and <= Key.D9 => (char)('0' + (key - Key.D0)),
@@ -401,7 +401,7 @@ public class PatternView : Control
                 case Key.S: Command?.Invoke("save"); return;
                 case Key.Up: Transpose(shift ? 12 : 1); return;
                 case Key.Down: Transpose(shift ? -12 : -1); return;
-                // Mac-tangentbord saknar Insert, och deras delete-tangent är Backspace
+                // Mac keyboards have no Insert, and their delete key is Backspace
                 case Key.I: if (EditMode) InsertRow(shift); return;
                 case Key.Back: if (EditMode) DeleteRow(shift); return;
             }
@@ -499,7 +499,7 @@ public class PatternView : Control
     private void Advance() => SetCursor(Math.Min(Rows - 1, CursorRow + EditStep), CursorChannel, CursorColumn);
 
     // ════════════════════════════════════════════════════════════════
-    //  Ändringar
+    //  Changes
     // ════════════════════════════════════════════════════════════════
 
     private void Change(Action action)
@@ -613,7 +613,7 @@ public class PatternView : Control
         });
     }
 
-    // Skjuter ned raderna från markören och lämnar en tom rad. Med allChannels i alla kanaler.
+    // Pushes the rows from the cursor down and leaves an empty row. With allChannels in all channels.
     private void InsertRow(bool allChannels) => Change(() =>
     {
         var p = Pattern!;
@@ -625,7 +625,7 @@ public class PatternView : Control
         }
     });
 
-    // Tar bort raden vid markören och drar upp raderna under
+    // Removes the row at the cursor and pulls up the rows below
     private void DeleteRow(bool allChannels) => Change(() =>
     {
         var p = Pattern!;

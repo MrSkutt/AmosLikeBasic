@@ -7,19 +7,19 @@ using System.Threading;
 
 namespace AmosLikeBasic
 {
-    // Trackern spelar en TrackerSong på kanal 1 – 4, som i ProTracker: varje rad delas i ett
-    // antal tick (speed), och effekterna verkar tick för tick. Allt körs i ljudtråden, så
-    // låten går exakt i takt. Kanal 5 – 8 är fria för PLAY MUSIC och ljud medan låten spelar.
+    // The tracker plays a TrackerSong on channels 1 – 4, as in ProTracker: every row is split into a
+    // number of ticks (speed), and the effects work tick by tick. Everything runs in the audio thread, so
+    // the song stays exactly in step. Channels 5 – 8 are free for PLAY MUSIC and sounds while the song plays.
     public partial class ChiptuneSynth
     {
-        // ── Låten, färdig att spela ─────────────────────────────────
-        // Byggs i BASIC-tråden av en TrackerSong och ändras aldrig efteråt, så att ljudtråden
-        // kan läsa den utan lås även om låten redigeras medan den spelar.
+        // ── The song, ready to play ──────────────────────────────────
+        // Built in the BASIC thread from a TrackerSong and never changed afterwards, so that the audio thread
+        // can read it without locks even if the song is edited while it plays.
 
         private readonly struct TableStep
         {
             public readonly WaveformType? Wave;
-            public readonly int Offset;          // halvtoner från noten
+            public readonly int Offset;          // semitones from the note
             public readonly double? PulseWidth;  // 0 – 1
 
             public TableStep(WaveformType? wave, int offset, double? pulseWidth)
@@ -46,7 +46,7 @@ namespace AmosLikeBasic
 
         private sealed class TrackData
         {
-            public TrackerCell[][][] Patterns = Array.Empty<TrackerCell[][]>();   // [mönster][rad][kanal]
+            public TrackerCell[][][] Patterns = Array.Empty<TrackerCell[][]>();   // [pattern][row][channel]
             public int[] Order = Array.Empty<int>();
             public TrackInstrument[] Instruments = Array.Empty<TrackInstrument>();
             public int Speed = 6, Tempo = 125;
@@ -54,7 +54,7 @@ namespace AmosLikeBasic
 
         private sealed class TrackRequest
         {
-            public readonly TrackData? Data;   // null = stoppa
+            public readonly TrackData? Data;   // null = stop
             public readonly int Order, Row;
             public readonly bool Loop;
             public TrackRequest(TrackData? data, int order, int row, bool loop)
@@ -66,25 +66,25 @@ namespace AmosLikeBasic
             }
         }
 
-        // ── En trackerkanals tillstånd (ägs av ljudtråden) ─────────
+        // ── The state of a tracker channel (owned by the audio thread) ────────
 
         private sealed class TrackChannel
         {
             public TrackInstrument? Inst;
-            public int InstNumber;         // för att hitta instrumentet igen när låten uppdateras
+            public int InstNumber;         // to find the instrument again when the song is updated
             public bool Active;
-            public double Note;            // halvtoner, MIDI-skala, kan vara bråkdel under glidning
+            public double Note;            // semitones, MIDI scale, can be a fraction while gliding
             public double PortaTarget;
             public int PortaSpeed;
             public int VibSpeed, VibDepth, VibPhase;
-            public int Vol = 64;           // 0 – 64 som i ProTracker
+            public int Vol = 64;           // 0 – 64 as in ProTracker
             public char Effect;
             public int Param;
             public int TableIndex, TableOffset;
             public int DelayNote = TrackerCell.NoNote;
-            // Satta med G, H och I. Gäller tills kanalen byter instrument.
+            // Set with G, H and I. Apply until the channel changes instrument.
             public double? Cutoff, Resonance, PulseWidth;
-            // Ljudeffekt: sampel kvar tills tonen släpps, och kanalens PLAY-inställningar från innan
+            // Sound effect: samples left until the note is released, and the channel's PLAY settings from before
             public bool Sfx;
             public long SfxReleaseLeft;
             public Voice? SavedSettings;
@@ -92,7 +92,7 @@ namespace AmosLikeBasic
 
         private static readonly TrackInstrument DefaultInstrument = new();
         private static readonly TrackRequest TrackStopRequest = new(null, 0, 0, false);
-        // Kanal 1 – 4 spelar låten, 5 – 8 används av ljudeffekterna (TRACK SFX)
+        // Channels 1 – 4 play the song, 5 – 8 are used by the sound effects (TRACK SFX)
         private static readonly TrackChannel[] _trackChannels = CreateTrackChannels();
 
         private static TrackChannel[] CreateTrackChannels()
@@ -111,17 +111,17 @@ namespace AmosLikeBasic
         private static int _trackJumpOrder, _trackBreakRow;
         private static int _trackPosOrder, _trackPosRow;
         private static double _trackVolume = 1.0;
-        private static bool _trackPreview;   // editorn provspelar noter utan att en låt spelar
+        private static bool _trackPreview;   // the editor previews notes without a song playing
 
-        // Ändringar från editorn som ljudtråden gör vid nästa sampel
+        // Changes from the editor that the audio thread makes at the next sample
         private static readonly ConcurrentQueue<Action> _trackCommands = new();
         private static readonly bool[] _trackMute = new bool[TrackerSong.ChannelCount];
 
         // ════════════════════════════════════════════════════════════════
-        //  Från BASIC och editorn
+        //  From BASIC and the editor
         // ════════════════════════════════════════════════════════════════
 
-        // Spelar låten från en plats i ordningslistan. Med loop börjar den om när den är slut.
+        // Plays the song from a place in the order list. With loop it starts again when it ends.
         public static void TrackPlay(TrackerSong song, int order = 0, int row = 0, bool loop = true)
         {
             var data = CompileSong(song);
@@ -130,7 +130,7 @@ namespace AmosLikeBasic
             EnsureStarted();
         }
 
-        // Spelar ett enda mönster om och om igen, för editorn
+        // Plays a single pattern over and over, for the editor
         public static void TrackPlayPattern(TrackerSong song, int pattern, int row = 0)
         {
             var data = CompileSong(song, pattern);
@@ -138,14 +138,14 @@ namespace AmosLikeBasic
             EnsureStarted();
         }
 
-        // Byter till en ändrad version av låten utan att börja om. Med pattern spelas bara det mönstret.
+        // Switches to a changed version of the song without starting again. With pattern only that pattern plays.
         public static void TrackUpdate(TrackerSong song, int? pattern = null)
         {
             var data = CompileSong(song, pattern);
             _trackCommands.Enqueue(() => ApplyTrackUpdate(data));
         }
 
-        // Provspelar en not med ett instrument (från 1) på en kanal (1 – 4), tills TrackPreviewRelease
+        // Previews a note with an instrument (from 1) on a channel (1 – 4), until TrackPreviewRelease
         public static void TrackPreview(TrackerSong song, int instrument, int note, int channel)
         {
             if (channel < 1 || channel > TrackerSong.ChannelCount) return;
@@ -178,7 +178,7 @@ namespace AmosLikeBasic
             _trackCommands.Enqueue(() => ReleaseTrackVoice(channel - 1));
         }
 
-        // Släpper kanalerna efter provspelning, så att PLAY-kommandona får dem igen
+        // Releases the channels after previewing, so that the PLAY commands get them back
         public static void TrackPreviewStop()
         {
             _trackCommands.Enqueue(() =>
@@ -191,19 +191,19 @@ namespace AmosLikeBasic
         }
 
         // ════════════════════════════════════════════════════════════════
-        //  Ljudeffekter: ett trackerinstrument som spelas en kort stund
+        //  Sound effects: a tracker instrument played for a short while
         // ════════════════════════════════════════════════════════════════
 
         public const int FirstSfxChannel = 5;
-        private const double SfxTickRate = 50;   // som en C64, oberoende av låtens tempo
+        private const double SfxTickRate = 50;   // like a C64, independent of the song's tempo
         private static double _sfxVolume = 1.0;
         private static double _sfxTickLeft;
-        private static int _sfxCount;            // kanaler som spelar en effekt (ljudtråden)
-        private static readonly long[] _sfxEnds = new long[Channels];   // när effekten väntas vara klar (BASIC-tråden)
+        private static int _sfxCount;            // channels playing an effect (audio thread)
+        private static readonly long[] _sfxEnds = new long[Channels];   // when the effect is expected to be done (BASIC thread)
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TrackerInstrument, TrackInstrument> _sfxInstruments = new();
 
-        // Spelar instrumentet som ljudeffekt. Utan kanal väljs den av kanal 5 – 8 som blir ledig först.
-        // Utan längd (ms < 0) klingar ljudet så länge instrumentet är gjort för. Returnerar kanalen.
+        // Plays the instrument as a sound effect. Without a channel, the one of channels 5 – 8 that frees up first is chosen.
+        // Without a length (ms < 0) the sound lasts as long as the instrument is made for. Returns the channel.
         public static int PlayTrackSfx(TrackerInstrument instrument, int number, int note, double ms = -1, int channel = 0)
         {
             var inst = _sfxInstruments.GetValue(instrument, i => CompileInstrument(i, number));
@@ -227,9 +227,9 @@ namespace AmosLikeBasic
                 {
                     ch.SavedSettings = v.CopySettings();
                     ch.Sfx = true;
-                    // Första effekten startar klockan, så att ett ljud alltid låter likadant
+                    // The first effect starts the clock, so that a sound always sounds the same
                     if (_sfxCount++ == 0) _sfxTickLeft = SampleRate / SfxTickRate;
-                    Volatile.Write(ref v.Seq, null);   // effekten tar över kanalen från PLAY MUSIC
+                    Volatile.Write(ref v.Seq, null);   // the effect takes the channel over from PLAY MUSIC
                 }
                 ch.Inst = inst;
                 ch.InstNumber = number;
@@ -244,8 +244,8 @@ namespace AmosLikeBasic
             return channel;
         }
 
-        // Hur länge tonen hålls om man inte anger det: ett ljud som klingar ut av sig självt (sustain 0)
-        // får klinga klart, ett med en tabell utan loop hålls tills tabellen är slut, annars en kvarts sekund
+        // How long the note is held if not given: a sound that fades by itself (sustain 0)
+        // may fade out fully, one with a table without a loop is held until the table ends, otherwise a quarter of a second
         private static double AutoSfxLength(TrackInstrument inst)
         {
             if (inst.Sustain <= 0) return inst.Attack + inst.Decay;
@@ -255,14 +255,14 @@ namespace AmosLikeBasic
 
         public static void SetSfxVolume(double volume) => _sfxVolume = Math.Clamp(volume, 0, 1);
 
-        // Med restore = false lämnas kanalernas inställningar som de är (när ett program startar om)
+        // With restore = false the channels' settings are left as they are (when a program restarts)
         public static void StopSfx(bool restore = true) => _trackCommands.Enqueue(() =>
         {
             for (int c = 0; c < Channels; c++)
                 if (_trackChannels[c].Sfx) EndSfx(c, restore);
         });
 
-        // Anropas varje sampel så länge någon effekt spelar
+        // Called every sample as long as any effect is playing
         private static void SfxSample()
         {
             for (int c = 0; c < Channels; c++)
@@ -279,7 +279,7 @@ namespace AmosLikeBasic
                 if (_trackChannels[c].Sfx) UpdateTrackVoice(c);
         }
 
-        // Effekten är slut: lämna tillbaka kanalen till PLAY-kommandona
+        // The effect is over: give the channel back to the PLAY commands
         private static void EndSfx(int c, bool restore = true)
         {
             var ch = _trackChannels[c];
@@ -305,7 +305,7 @@ namespace AmosLikeBasic
             return Volatile.Read(ref _track) != null;
         }
 
-        // Platsen i ordningslistan och raden som spelas just nu
+        // The place in the order list and the row being played right now
         public static int TrackPosition => Volatile.Read(ref _trackPosOrder);
         public static int TrackRow => Volatile.Read(ref _trackPosRow);
 
@@ -317,10 +317,10 @@ namespace AmosLikeBasic
         }
 
         // ════════════════════════════════════════════════════════════════
-        //  Bygga låten
+        //  Building the song
         // ════════════════════════════════════════════════════════════════
 
-        // Med onlyPattern blir ordningslistan bara det mönstret
+        // With onlyPattern the order list is just that pattern
         private static TrackData CompileSong(TrackerSong song, int? onlyPattern = null)
         {
             var data = new TrackData
@@ -354,7 +354,7 @@ namespace AmosLikeBasic
             return data;
         }
 
-        // Ger FormatException om instrumentet har ett felaktigt tabellsteg
+        // Throws FormatException if the instrument has a bad table step
         public static void ValidateInstrument(TrackerInstrument instrument, int number) =>
             CompileInstrument(instrument, number);
 
@@ -413,10 +413,10 @@ namespace AmosLikeBasic
         }
 
         // ════════════════════════════════════════════════════════════════
-        //  Ljudtråden
+        //  The audio thread
         // ════════════════════════════════════════════════════════════════
 
-        // Anropas en gång per sampel, före rösterna
+        // Called once per sample, before the voices
         private static void TrackSample()
         {
             var req = Volatile.Read(ref _trackPending);
@@ -432,7 +432,7 @@ namespace AmosLikeBasic
             _trackTickLeft--;
             if (_trackTickLeft > 0) return;
             TrackTick();
-            // ProTracker: tempo 125 ger 50 tick per sekund
+            // ProTracker: tempo 125 gives 50 ticks per second
             _trackTickLeft += SampleRate / (_trackTempo * 0.4);
         }
 
@@ -506,7 +506,7 @@ namespace AmosLikeBasic
             var d = _track;
             if (d == null)
             {
-                // Bara provspelning: instrumentens tabeller ska gå ändå
+                // Only previewing: the instruments' tables should still run
                 for (int c = 0; c < TrackerSong.ChannelCount; c++) UpdateTrackVoice(c);
                 return;
             }
@@ -556,7 +556,7 @@ namespace AmosLikeBasic
                     if ((eff == '3' || eff == '5') && ch.Active)
                         ch.PortaTarget = cell.Note;
                     else if (eff == 'E' && x == 0xD && y > 0)
-                        ch.DelayNote = cell.Note;   // spelas på tick y
+                        ch.DelayNote = cell.Note;   // played on tick y
                     else
                         TriggerTrackNote(c, cell.Note);
                 }
@@ -577,7 +577,7 @@ namespace AmosLikeBasic
                         ch.Vol = Math.Min(p, 64);
                         break;
                     case 'D':
-                        breakRow = x * 10 + y;   // som i ProTracker: decimalt
+                        breakRow = x * 10 + y;   // as in ProTracker: decimal
                         break;
                     case 'E':
                         if (x == 0xC && y == 0) ch.Vol = 0;
@@ -652,7 +652,7 @@ namespace AmosLikeBasic
             }
         }
 
-        // Fart i sextondels halvton per tick: 310 glider en hel halvton på tre tick
+        // Speed in sixteenths of a semitone per tick: 310 glides a whole semitone in three ticks
         private static void TonePorta(TrackChannel ch)
         {
             double step = ch.PortaSpeed / 16.0;
@@ -699,7 +699,7 @@ namespace AmosLikeBasic
             v.CutoffSlideLeft = 0;
             v.VolumeSlideLeft = 0;
             v.Drum = null;
-            v.Stage = EnvStage.Attack;   // från nuvarande nivå, utan klick
+            v.Stage = EnvStage.Attack;   // from the current level, without a click
             v.FilterEnvRising = true;
             v.LfoPhase = 0;
         }
@@ -710,7 +710,7 @@ namespace AmosLikeBasic
             if (v.Stage is EnvStage.Attack or EnvStage.Decay or EnvStage.Sustain) v.Stage = EnvStage.Release;
         }
 
-        // Räknar ut tonhöjd och volym för kanalen och skriver dem till rösten
+        // Works out the pitch and volume of the channel and writes them to the voice
         private static void UpdateTrackVoice(int c)
         {
             var ch = _trackChannels[c];

@@ -10,10 +10,10 @@ using Avalonia.VisualTree;
 
 namespace AmosLikeBasic;
 
-// Det som både IDE:n (MainWindow) och spelarläget (GamePlayer) behöver för att köra ett
-// program i ett ScreenWindow: textkonsolen och tolkningen av tangenter.
+// What both the IDE (MainWindow) and player mode (GamePlayer) need to run a
+// program in a ScreenWindow: the text console and the handling of keys.
 
-// Textkonsolen (80x30 tecken) som PRINT, LOCATE och CLS skriver till
+// The text console (80x30 characters) that PRINT, LOCATE and CLS write to
 internal sealed class TextScreen
 {
     private readonly int _rows;
@@ -102,15 +102,15 @@ internal sealed class TextScreen
 
 internal static class ScreenConsole
 {
-    // Utför ett "@@"-kommando från interpretatorn (PRINT, LOCATE, CLS, INK, PAPER) i fönstrets
-    // textkonsol. Måste anropas på UI-tråden.
+    // Carries out a "@@" command from the interpreter (PRINT, LOCATE, CLS, INK, PAPER) in the window's
+    // text console. Must be called on the UI thread.
     public static void Apply(ScreenWindow window, TextScreen textScreen, string line)
     {
         if (window.Console is null) return;
 
         if (line.StartsWith("@@PAPER ", StringComparison.Ordinal))
         {
-            var arg = line.Substring(8).Trim(); // efter "@@PAPER "
+            var arg = line.Substring(8).Trim(); // after "@@PAPER "
             try
             {
                 var c = Color.Parse(arg);
@@ -118,7 +118,7 @@ internal static class ScreenConsole
             }
             catch
             {
-                // Om färgen inte kan tolkas: ignorera eller sätt default
+                // If the colour cannot be parsed: ignore it or set the default
                 window.Console.Background = Brushes.Black;
             }
         }
@@ -152,18 +152,18 @@ internal static class ScreenConsole
             textScreen.Clear();
         }
 
-        // Viktigt: trailing newline ger ScrollViewer “plats” att scrolla så sista raden blir hel
+        // Important: a trailing newline gives the ScrollViewer "room" to scroll so the last line is whole
         window.Console.Text = textScreen.Render() + "\n";
 
-        // Flytta caret sist
+        // Move the caret to the end
         window.Console.CaretIndex = window.Console.Text?.Length ?? 0;
         window.Console.SelectionStart = window.Console.CaretIndex;
         window.Console.SelectionEnd = window.Console.CaretIndex;
 
-        // Scrolla längst ner (låt ScrollViewer själv klampa till max)
+        // Scroll to the bottom (let the ScrollViewer clamp to the max itself)
         Dispatcher.UIThread.Post(() => ScrollToEnd(window), DispatcherPriority.Render);
 
-        // En extra “sen” post kan hjälpa om font/layout uppdateras efter Render-pass
+        // An extra "late" post can help if the font/layout updates after the render pass
         Dispatcher.UIThread.Post(() => ScrollToEnd(window), DispatcherPriority.Background);
     }
 
@@ -179,7 +179,7 @@ internal static class ScreenConsole
         sv.Offset = new Vector(sv.Offset.X, double.MaxValue);
     }
 
-    // Tecknet en tangent ger när man skriver vid INPUT
+    // The character a key gives when typing at INPUT
     public static string CharFromKey(Key key, bool shift)
     {
         return key switch

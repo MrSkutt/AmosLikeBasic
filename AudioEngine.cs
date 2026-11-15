@@ -30,14 +30,14 @@ public sealed class AudioEngine : IDisposable
     {
         string fullPath = ResourceLoader.GetPath(filePath);
             
-        // Läs in filen till minnet i C# först (kringgår filsystemsproblem i BASS på Mac)
+        // Read the file into memory in C# first (works around file system problems in BASS on the Mac)
         if (!File.Exists(fullPath))
         {
             Console.WriteLine($"File missing: {fullPath}");
             return;
         }
 
-        // Städa undan gammal musik
+        // Clean up old music
         if (_musicStream != 0)
         {
             BassMix.MixerRemoveChannel(_musicStream);
@@ -49,13 +49,13 @@ public sealed class AudioEngine : IDisposable
         {
             byte[] data = File.ReadAllBytes(fullPath);
 
-            // Använd överlagringen som tar en byte-array (data) istället för filnamn
+            // Use the overload that takes a byte array (data) instead of a file name
             // Parametrar: Data, Offset, Length, Flags, Frequency (0 = default)
             _musicStream = Bass.MusicLoad(data, 0, data.Length, BassFlags.MusicRamp | BassFlags.Decode | BassFlags.Float | BassFlags.Prescan, 0);
             
             if (_musicStream != 0)
             {
-                // Lägg till i mixern
+                // Add to the mixer
                 bool added = BassMix.MixerAddChannel(_mixer, _musicStream, BassFlags.Default | (BassFlags)0x2000);
             
                 if (added)
@@ -84,28 +84,28 @@ public sealed class AudioEngine : IDisposable
             string fullPath = ResourceLoader.GetPath(filePath);
             if (!File.Exists(fullPath)) return;
 
-            // Stoppa eventuell gammal instans av samma sample först
+            // Stop any old instance of the same sample first
             StopSample(fullPath);
         
-            // Lägg till Loop-flaggan om det önskas
+            // Add the loop flag if wanted
             var flags = BassFlags.Default;
             if (loop) flags |= BassFlags.Loop;
         
-            // Vi skapar en vanlig stream som INTE går via mixern. 
-            // Utan BassFlags.Decode spelas den direkt på ljudkortet.
-            // ÄNDRAT HÄR: Använder variabeln 'flags' istället för BassFlags.Default
+            // We create an ordinary stream that does NOT go through the mixer.
+            // Without BassFlags.Decode it plays straight on the sound card.
+            // CHANGED HERE: Uses the variable 'flags' instead of BassFlags.Default
             int effectStream = Bass.CreateStream(fullPath, 0, 0, flags);
         
             if (effectStream != 0)
             {
-                // Spara handle så vi kan stoppa den senare
+                // Keep the handle so we can stop it later
                 _activeSamples[fullPath] = effectStream;
             
-                // Sätt volymen lite högre för effekter om det behövs
+                // Set the volume a bit higher for effects if needed
                 Bass.ChannelSetAttribute(effectStream, ChannelAttribute.Volume, 1.0);
             
-                // Sätt callback för att ta bort från listan när den spelat klart (SyncEnd)
-                // OBS: Om den loopar körs aldrig SyncEnd, så vi slipper städa bort den för tidigt.
+                // Set a callback that removes it from the list when it has finished (SyncEnd)
+                // NOTE: If it loops, SyncEnd never runs, so we avoid removing it too early.
                 if (!loop)
                 {
                     string capturedPath = fullPath;
@@ -127,7 +127,7 @@ public sealed class AudioEngine : IDisposable
                     });
                 }
             
-                // Spela direkt! Detta går förbi mixern och har minimal latency.
+                // Play straight away! This bypasses the mixer and has minimal latency.
                 Bass.ChannelPlay(effectStream);
             }
             else
@@ -177,8 +177,8 @@ public sealed class AudioEngine : IDisposable
     public void Dispose()
     {
         if (_isDisposed) return;
-        StopAllSamples(); // Stoppa alla ljudeffekter
-        StopMod();        // Stoppa modulen
+        StopAllSamples(); // Stop all sound effects
+        StopMod();        // Stop the module
         Bass.StreamFree(_mixer);
         Bass.Free();
         _isDisposed = true;

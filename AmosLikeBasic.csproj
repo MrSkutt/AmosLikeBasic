@@ -11,7 +11,7 @@
              Kostar ungefär 50 ms längre start av appen. -->
         <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
 
-        <!-- Vi använder RuntimeIdentifiers (plural) för att stödja båda plattformarna -->
+        <!-- We use RuntimeIdentifiers (plural) to support both platforms -->
         <RuntimeIdentifiers>osx-arm64;win-x64</RuntimeIdentifiers>
         <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx-arm64</RuntimeIdentifier>
         <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</RuntimeIdentifier>
@@ -45,7 +45,7 @@
         <None Include="Projects/**/*" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
-    <!-- Native bibliotek för Windows -->
+    <!-- Native libraries for Windows -->
     <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('win'))">
         <None Include="libs/windows/*">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -53,7 +53,7 @@
         </None>
     </ItemGroup>
 
-    <!-- Native bibliotek för macOS -->
+    <!-- Native libraries for macOS -->
     <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
         <None Include="libs/mac/*">
             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

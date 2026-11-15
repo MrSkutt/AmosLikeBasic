@@ -6,19 +6,19 @@ using System.Linq;
 
 namespace AmosLikeBasic;
 
-// Förkompilering av uttryck och villkor.
+// Precompiling expressions and conditions.
 //
-// Tidigare tolkades varje uttryck från text varje gång det kördes. Nu översätts varje
-// uttryckssträng en gång till ett träd av noder, som cachas och sedan bara räknas ut.
-// Kompilatorn följer exakt samma grammatik som den gamla tolken (ParseExpr/ParseTerm/
-// ParseFactor) och använder samma Tokenizer, så resultaten blir desamma.
+// Before, every expression was parsed from text every time it ran. Now every
+// expression string is translated once into a tree of nodes, which is cached and then only evaluated.
+// The compiler follows exactly the same grammar as the old interpreter (ParseExpr/ParseTerm/
+// ParseFactor) and uses the same Tokenizer, so the results are the same.
 //
-// Inbyggda funktioner (SIN, MID$, KEYSTATE ...) körs fortfarande av den gamla tolken,
-// men bara på själva anropet. Den gamla uttryckstolken (EvalValueInterpreted) finns kvar
-// som reserv för uttryck som kompilatorn inte förstår.
+// Built-in functions (SIN, MID$, KEYSTATE ...) are still run by the old interpreter,
+// but only for the call itself. The old expression interpreter (EvalValueInterpreted) is kept
+// as a fallback for expressions the compiler does not understand.
 public static partial class AmosRunner
 {
-    // Det en nod behöver för att räknas ut
+    // What a node needs in order to be evaluated
     private readonly struct EvalContext
     {
         public readonly Dictionary<string, object> Vars;
@@ -41,12 +41,12 @@ public static partial class AmosRunner
     private static readonly ConcurrentDictionary<string, ExprNode> ExprCache = new();
     private static readonly ConcurrentDictionary<string, CondNode> CondCache = new();
 
-    // Uppdelade kommandoargument, per argumenttext
+    // Split command arguments, per argument text
     private static readonly ConcurrentDictionary<string, string[]> CsvOrSpacesCache = new();
     private static readonly ConcurrentDictionary<string, string[]> TopLevelCsvCache = new();
     private static readonly ConcurrentDictionary<string, (int?, string)> ScreenPrefixCache = new();
 
-    // Töms när ett nytt program startar, så att cachen inte växer mellan körningar
+    // Cleared when a new program starts, so that the cache does not grow between runs
     private static void ClearCompiledCache()
     {
         ExprCache.Clear();
@@ -77,7 +77,7 @@ public static partial class AmosRunner
 
     private static readonly object Zero = 0.0;
 
-    // Namn som ParseFactor hanterar som inbyggda funktioner. De går före arrayer med samma namn.
+    // Names that ParseFactor treats as built-in functions. They take precedence over arrays with the same name.
     private static readonly HashSet<string> BuiltinFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
         "ABS", "ANYPLAYING", "ASC", "ATN", "CHR$", "COS", "DEC", "DIM", "EOF", "EXP", "FADING", "FIND",
@@ -102,7 +102,7 @@ public static partial class AmosRunner
         }
         catch
         {
-            // Något kompilatorn inte förstår: tolka som förut varje gång
+            // Something the compiler does not understand: interpret it as before every time
             return new InterpretedExpr(text);
         }
     }
@@ -127,7 +127,7 @@ public static partial class AmosRunner
     private static ExprNode CompileNot(ref Tokenizer t) =>
         t.TryConsumeWord("NOT") ? new NotNode(CompileNot(ref t)) : CompileCompare(ref t);
 
-    // Compare := Sum { ('=' | '<>' | '<' | '>' | '<=' | '>=') Sum }, ger 1 eller 0
+    // Compare := Sum { ('=' | '<>' | '<' | '>' | '<=' | '>=') Sum }, gives 1 or 0
     private static ExprNode CompileCompare(ref Tokenizer t)
     {
         var res = CompileSum(ref t);
@@ -164,7 +164,7 @@ public static partial class AmosRunner
         return res;
     }
 
-    // Power := Factor [ '^' Power ], högerassociativ: 2^3^2 = 2^9
+    // Power := Factor [ '^' Power ], right-associative: 2^3^2 = 2^9
     private static ExprNode CompilePower(ref Tokenizer t)
     {
         var res = CompileFactor(ref t);
@@ -181,7 +181,7 @@ public static partial class AmosRunner
             t.TryConsume(')');
             return inner;
         }
-        // Minus före talet, så att -2^2 blir -(2^2) som i matematiken
+        // Minus before the number, so that -2^2 becomes -(2^2) as in maths
         if (t.TryConsume('-')) return new NegNode(CompilePower(ref t));
         if (t.TryReadDouble(out var n)) return new ConstNode(n);
         if (t.TryConsume('+')) return CompilePower(ref t);
@@ -204,7 +204,7 @@ public static partial class AmosRunner
                 var args = TryCompileArgs(ref t);
                 if (args == null)
                 {
-                    // Argument som inte är en vanlig uttryckslista: låt den gamla tolken ta hela anropet
+                    // Arguments that are not an ordinary expression list: let the old interpreter take the whole call
                     t.Pos = FindClosingParen(t.Source, openPos);
                     return new InterpretedFactorNode(t.Source[start..t.Pos]);
                 }
@@ -214,11 +214,11 @@ public static partial class AmosRunner
             return new VarNode(id);
         }
 
-        // Inget känt: samma som den gamla tolken
+        // Nothing known: the same as the old interpreter
         return new ConstNode(0.0);
     }
 
-    // Läser "a, b, c)" efter en öppningsparentes. null om det inte går.
+    // Reads "a, b, c)" after an opening bracket. null if it cannot.
     private static ExprNode[]? TryCompileArgs(ref Tokenizer t)
     {
         var args = new List<ExprNode>();
@@ -232,7 +232,7 @@ public static partial class AmosRunner
         }
     }
 
-    // Positionen efter parentesen som matchar den på 'openPos' (hoppar över strängar)
+    // The position after the bracket that matches the one at 'openPos' (skips strings)
     private static int FindClosingParen(string s, int openPos)
     {
         int depth = 0;
@@ -328,12 +328,12 @@ public static partial class AmosRunner
         public override object Eval(in EvalContext c) => IsTrue(_inner.Eval(c)) ? Zero : One;
     }
 
-    // Allt utom 0 (och tom text) är sant, som i villkor
+    // Everything except 0 (and empty text) is true, as in conditions
     private static bool IsTrue(object o) => o is string str
         ? str.Length > 0
         : Math.Abs(Num(o)) > 0.000001;
 
-    // Gemensam jämförelse för villkor och uttryck. Text jämförs tecken för tecken.
+    // Shared comparison for conditions and expressions. Text is compared character by character.
     private static bool CompareValues(string op, object lV, object rV)
     {
         if (lV is string || rV is string)
@@ -453,7 +453,7 @@ public static partial class AmosRunner
         }
     }
 
-    // NAMN(argument): egen FUNCTION, inbyggd funktion eller array, i samma ordning som ParseFactor
+    // NAME(arguments): own FUNCTION, built-in function or array, in the same order as ParseFactor
     private sealed class CallNode : ExprNode
     {
         private readonly string _id;
@@ -468,8 +468,8 @@ public static partial class AmosRunner
             _args = args;
             _text = text;
             _isBuiltin = BuiltinFunctions.Contains(id);
-            // Kompilerad variant bara när antalet argument är det funktionen förväntar sig;
-            // annars tar den gamla tolken hand om det, med samma beteende som förut
+            // A compiled variant only when the number of arguments is what the function expects;
+            // otherwise the old interpreter handles it, with the same behaviour as before
             if (NativeBuiltins.TryGetValue(id, out var nb) && args.Length >= nb.MinArgs && args.Length <= nb.MaxArgs)
                 _native = nb;
         }
@@ -500,14 +500,14 @@ public static partial class AmosRunner
                 return array.Get(indices);
             }
 
-            // Inbyggd funktion (eller okänt namn, som ger samma fel som förut)
+            // Built-in function (or an unknown name, which gives the same error as before)
             return InterpretFactor(_text, c);
         }
     }
 
-    // ── Inbyggda funktioner som räknas ut direkt ───────────────────────
-    // Samma uträkning som motsvarande kod i ParseFactor (argumenten tolkas i samma ordning,
-    // samma avrundning och samma returtyper). Övriga inbyggda funktioner körs av ParseFactor.
+    // ── Built-in functions that are evaluated directly ─────────────────────
+    // The same calculation as the matching code in ParseFactor (the arguments are evaluated in the same order,
+    // the same rounding and the same return types). Other built-in functions are run by ParseFactor.
 
     private sealed record NativeBuiltin(int MinArgs, int MaxArgs, Func<object[], EvalContext, object> Fn);
 
@@ -586,7 +586,7 @@ public static partial class AmosRunner
         ["JOYSTATE"] = new(2, 2, (a, _) => GamepadManager.IsButtonDown(Round(a[0]), ValueToString(a[1])) ? 1.0 : 0.0),
         ["TILE"] = new(2, 3, (a, c) =>
         {
-            Round(a[0]); // lagret används inte, men räknas om till tal först som förut
+            Round(a[0]); // the layer is not used, but is converted to a number first as before
             int px = Round(a[1]);
             int py = a.Length == 3 ? Round(a[2]) : 0;
             return (double)c.Graphics.GetMapTile(px / 32, py / 32);
@@ -625,7 +625,7 @@ public static partial class AmosRunner
 
     private static readonly string[] CompareOps = { "<>", "<=", ">=", "=", "<", ">" };
 
-    // Villkor delas upp i OR, sedan AND, sedan NOT, sedan jämförelse
+    // Conditions are split into OR, then AND, then NOT, then comparison
     private static CondNode CompileCondition(string c)
     {
         c = StripOuterParens(c.Trim());
@@ -673,7 +673,7 @@ public static partial class AmosRunner
         public override bool Eval(in EvalContext c) => !_inner.Eval(c);
     }
 
-    // Ett uttryck som villkor: allt utom 0 är sant
+    // An expression as a condition: everything except 0 is true
     private sealed class TruthyCond : CondNode
     {
         private readonly string _text;
@@ -705,15 +705,15 @@ public static partial class AmosRunner
     //  Programrader
     // ════════════════════════════════════════════════════════════════
 
-    // En programrad förberedd en gång: tom/kommentar/etikett hoppas över, annars färdigt
-    // uppdelad i satser med kommando och argument.
+    // A program line prepared once: empty/comment/label is skipped, otherwise it is already
+    // split into statements with command and arguments.
     private sealed class PreparedLine
     {
         public bool Skip;
         public string Text = "";
         public PreparedCommand[] Commands = Array.Empty<PreparedCommand>();
-        public int SourceLine;          // 1-baserat radnummer i editorn
-        public bool FirstOfSourceLine;  // Debuggern stannar bara en gång per källrad
+        public int SourceLine;          // 1-based line number in the editor
+        public bool FirstOfSourceLine;  // The debugger only stops once per source line
     }
 
     private sealed class PreparedCommand
@@ -722,18 +722,18 @@ public static partial class AmosRunner
         public string Cmd = "";
         public string Arg = "";
 
-        // Fylls i första gången satsen körs
+        // Filled in the first time the statement runs
         public string? IfCondition;
         public PreparedAssignment? Assignment;
     }
 
-    // "X = uttryck" eller "A(i, j) = uttryck", uppdelat en gång
+    // "X = expression" or "A(i, j) = expression", split once
     private sealed class PreparedAssignment
     {
         public string Target = "";
         public string Value = "";
-        public bool IsArray;             // Vänstersidan innehåller '('
-        public string? ArrayName;        // null om parenteserna inte går att tolka
+        public bool IsArray;             // The left side contains '('
+        public string? ArrayName;        // null if the brackets cannot be parsed
         public string[]? IndexParts;
     }
 
@@ -755,14 +755,14 @@ public static partial class AmosRunner
         return asg;
     }
 
-    // Villkoret i "IF villkor THEN", som IF-kommandot tidigare tog fram varje gång
+    // The condition in "IF condition THEN", which the IF command used to work out every time
     private static string IfConditionText(string arg)
     {
         int tIdx = IndexOfWord(arg, "THEN");
         return tIdx >= 0 ? arg[..tIdx].Trim() : arg;
     }
 
-    // Samma steg som huvudloopen tidigare gjorde på varje rad varje gång den kördes
+    // The same steps the main loop used to do on every line every time it ran
     private static PreparedLine[] PrepareLines(string[] lines, int[] sourceLine)
     {
         var prepared = new PreparedLine[lines.Length];
@@ -796,7 +796,7 @@ public static partial class AmosRunner
                 .ToArray();
         }
 
-        // En källrad som delats upp (enradig IF) stannar debuggern på första riktiga raden av
+        // A source line that has been split up (single-line IF) makes the debugger stop on the first real line of
         FixFirstOfSourceLine(prepared);
         return prepared;
     }

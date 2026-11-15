@@ -10,7 +10,7 @@ uniform float2 iScreenResolution;
 uniform float iTime;
 uniform vec4 uParams[2];
 
-// ✅ UPPDATERAT: 50 slots istället för 22
+// ✅ UPDATED: 50 slots instead of 22
 uniform float uPositions[50];
 uniform float uHeights[50];
 uniform float4 uColors[50];
@@ -41,7 +41,7 @@ half4 main(float2 fragCoord) {
     float y = fragCoord.y;
     float2 uv = fragCoord / iScreenResolution.xy;
     
-    // ✅ Mode-flagga flyttad till uParams för att frigöra slot 21
+    // ✅ Mode flag moved to uParams to free slot 21
     float mode = uParams[0].z;
     float weatherType = uParams[1].x;
     float weatherDensity = uParams[1].y;
@@ -69,7 +69,7 @@ for (int i = 1; i < 10; i++) {
     }
 }
 
-// ✅ STEG 2: Wrap-kopior av bakgrunds-rasters (slot 25-34)
+// ✅ STEP 2: Wrap copies of the background rasters (slot 25-34)
 for (int i = 25; i < 35; i++) {
     float h = uHeights[i];
     if (h > 0.1) {
@@ -82,7 +82,7 @@ for (int i = 25; i < 35; i++) {
     }
 }
 
-// ✅ STEG 3: Overlay raster bars (slot 10-24, skärmfasta)
+// ✅ STEP 3: Overlay raster bars (slot 10-24, fixed to the screen)
 for (int i = 10; i < 25; i++) {
     float h = uHeights[i];
     if (h > 0.1) {
@@ -95,7 +95,7 @@ for (int i = 10; i < 25; i++) {
     }
 }
 
-// ✅ STEG 4: Wrap-kopior av overlay (slot 35-49)
+// ✅ STEP 4: Wrap copies of the overlay (slot 35-49)
 for (int i = 35; i < 50; i++) {
     float h = uHeights[i];
     if (h > 0.1) {
@@ -108,7 +108,7 @@ for (int i = 35; i < 50; i++) {
     }
 }
 
-    // 2. WEATHER (Oförändrad)
+    // 2. WEATHER (unchanged)
     half3 pCol = half3(0.0);
     if (weatherType > 0.5) {
         float size = 15.0 + weatherDensity;
@@ -133,7 +133,7 @@ for (int i = 35; i < 50; i++) {
         
         float2 pOffset = float2(h2 - 0.5, h3 - 0.5) * 0.8;
 
-        if (weatherType < 1.5) { // SNÖ
+        if (weatherType < 1.5) { // SNOW
             float windStrength = baseWindStrength * 2.5;
             float speed = (3.4 + h1 * 0.4) * depthScale;
             
@@ -197,7 +197,7 @@ for (int i = 35; i < 50; i++) {
             pCol = pCol * (1.0 - half(a)) + col * half(a);
         }
 
-        else { // STJÄRNOR
+        else { // STARS
             float blinkSpeed = 0.8 + h2 * 1.4;
             float shimmer = sin(iTime * blinkSpeed + h1 * 10.0) * 0.5 + 0.5;
             
@@ -228,13 +228,13 @@ for (int i = 35; i < 50; i++) {
     half3 combinedBG = hasR ? finalRGB + pCol : pCol;
     
 if (mode > 0.5) {
-    // GFX-mode: visa alltid texturen, multiplicera med raster om det finns
+    // GFX mode: always show the texture, multiply by the raster if there is one
     if (mask.a < 0.01) return half4(0.0, 0.0, 0.0, 0.0);
     if (hasR) return half4(mask.rgb * combinedBG, mask.a);
-    return mask;  // Ingen raster → passthrough
+    return mask;  // No raster → passthrough
 } else {
     // Bakgrundsmode
-    if (mask.a > 0.1) return mask;  // ← FÖRST: visa textur om den finns
+    if (mask.a > 0.1) return mask;  // ← FIRST: show the texture if there is one
     if (!hasR && weatherType < 0.5) return half4(0.0, 0.0, 0.0, 0.0);
     float outA = (hasR || weatherType > 2.5) ? 1.0 : half(length(pCol));
     return half4(combinedBG, outA);
@@ -469,7 +469,7 @@ half4 main(float2 fragCoord)
             clamp(skytint * skycolour + cloudcolour, 0.0, 1.0),
             cloudMask);
 
-    // Extra safety clamp (RuntimeEffect gillar detta)
+    // Extra safety clamp (RuntimeEffect likes this)
     result = clamp(result, 0.0, 1.0);
 
     return half4(result, 1.0);

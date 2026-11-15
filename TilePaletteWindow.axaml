@@ -6,7 +6,7 @@
         Topmost="True">
     <Border Margin="2" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="1">
         <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-            <!-- Vi skapar ett rutnät som vi fyller helt manuellt från C# -->
+            <!-- A grid that we fill in entirely by hand from C# -->
             <Canvas Name="PaletteCanvas" Background="{DynamicResource AmosCanvasBg}" />
         </ScrollViewer>
     </Border>

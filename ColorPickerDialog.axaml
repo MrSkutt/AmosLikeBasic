@@ -43,7 +43,7 @@
       <Setter Property="BorderBrush" Value="#2A2A3A"/>
       <Setter Property="Cursor" Value="Hand"/>
     </Style>
-    <!-- Lägg till HorizontalContentAlignment och VerticalContentAlignment i styles -->
+    <!-- Add HorizontalContentAlignment and VerticalContentAlignment in the styles -->
     <Style Selector="Button.primary">
       <Setter Property="Background" Value="#7C6FFF"/>
       <Setter Property="Foreground" Value="White"/>

@@ -12,7 +12,7 @@ public class AppConfig
     public bool IsMaximized { get; set; } = false;
     public string DefaultTheme { get; set; } = "ClassicBlue";
 
-    // Lägg till fler inställningar här
+    // Add more settings here
 }
 
 public class ConfigService
@@ -27,11 +27,11 @@ public class ConfigService
     {
         _appName = appName;
         _configFolder = GetConfigFolder(appName);
-        Directory.CreateDirectory(_configFolder); // Skapa mappen om den inte finns
+        Directory.CreateDirectory(_configFolder); // Create the folder if it does not exist
         _configFilePath = Path.Combine(_configFolder, "config.json");
     }
 
-    // Load config från fil eller skapa ny med standardvärden
+    // Load the config from a file or create a new one with default values
     public void Load()
     {
         if (File.Exists(_configFilePath))
@@ -43,7 +43,7 @@ public class ConfigService
             }
             catch
             {
-                // Om något går fel, fallback till default
+                // If something goes wrong, fall back to the defaults
                 Config = new AppConfig();
             }
         }
@@ -53,7 +53,7 @@ public class ConfigService
         }
     }
 
-    // Spara config till fil
+    // Save the config to a file
     public void Save()
     {
         string json = JsonSerializer.Serialize(Config, new JsonSerializerOptions { WriteIndented = true });
@@ -71,7 +71,7 @@ public class ConfigService
         {
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), "Library", "Application Support", appName);
         }
-        else // Linux och fallback
+        else // Linux and fallback
         {
             return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".config", appName);
         }

@@ -126,7 +126,7 @@ public partial class ScreenWindow : Window
 
     private void UpdateInputDisplay()
     {
-        // Uppdatera Console-texten för att visa prompt + det användaren skriver
+        // Update the console text to show the prompt + what the user types
         Console.Text = _inputBaseText + " " + _currentPrompt + _currentInput;
     }
     

@@ -15,8 +15,8 @@ using Avalonia.Threading;
 
 namespace AmosLikeBasic;
 
-// Trackern: skriv musik för synten i mönster med noter och effekter, som i ProTracker.
-// Låten sparas som .amostrk och spelas i BASIC med TRACK LOAD och TRACK PLAY.
+// The tracker: write music for the synth in patterns with notes and effects, as in ProTracker.
+// The song is saved as .amostrk and played in BASIC with TRACK LOAD and TRACK PLAY.
 public partial class TrackerWindow : Window
 {
     private enum PlayMode { None, Song, Pattern }
@@ -24,12 +24,12 @@ public partial class TrackerWindow : Window
     private TrackerSong _song;
     private string? _path;
     private bool _dirty;
-    private bool _loading;          // sant medan kontrollerna fylls i, så att deras händelser inte räknas som ändringar
+    private bool _loading;          // true while the controls are being filled in, so their events do not count as changes
     private bool _forceClose;
     private int _orderPos;
     private PlayMode _playMode;
 
-    // Ångra: hela låten som JSON före varje ändring
+    // Undo: the whole song as JSON before each change
     private readonly List<string> _undo = new();
     private readonly List<string> _redo = new();
     private const int MaxUndo = 200;
@@ -70,7 +70,7 @@ public partial class TrackerWindow : Window
 
         TitleBox.TextChanged += (_, _) =>
         {
-            // TextChanged kan komma i efterhand, så jämför med låten
+            // TextChanged can arrive later, so compare with the song
             if (_loading || (TitleBox.Text ?? "") == _song.Title) return;
             PushUndo("title");
             _song.Title = TitleBox.Text ?? "";
@@ -125,7 +125,7 @@ public partial class TrackerWindow : Window
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  Ny låt med några färdiga instrument att börja med
+    //  A new song with some ready-made instruments to start with
     // ════════════════════════════════════════════════════════════════
 
     private static TrackerSong CreateNewSong()
@@ -165,7 +165,7 @@ public partial class TrackerWindow : Window
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  Fylla i kontrollerna från låten
+    //  Filling in the controls from the song
     // ════════════════════════════════════════════════════════════════
 
     private void LoadSongIntoUi(bool keepPositions = false)
@@ -227,7 +227,7 @@ public partial class TrackerWindow : Window
         if (OrderList.SelectedIndex != _orderPos) OrderList.SelectedIndex = _orderPos;
         _loading = was;
 
-        // Spelas ett mönster medan man byter, spela det nya i stället
+        // If a pattern is playing while switching, play the new one instead
         if (_playMode == PlayMode.Pattern) TryEngine(() => ChiptuneSynth.TrackPlayPattern(_song, pattern, 0));
     }
 
@@ -377,7 +377,7 @@ public partial class TrackerWindow : Window
         SongChanged();
     }
 
-    // Röd ram runt tabellen om något steg är fel
+    // Red frame around the table if a step is wrong
     private void ValidateTable()
     {
         if (_tableBox == null) return;
@@ -393,11 +393,11 @@ public partial class TrackerWindow : Window
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  Ändringar, ångra
+    //  Changes, undo
     // ════════════════════════════════════════════════════════════════
 
-    // Sparar låten före en ändring. Ändringar med samma nyckel tätt efter varandra
-    // (som när man håller i pilen på ett nummerfält) blir ett enda steg att ångra.
+    // Saves the song before a change. Changes with the same key close after each other
+    // (like holding the arrow of a number box) become a single undo step.
     private void PushUndo(string? key = null)
     {
         var now = DateTime.UtcNow;
@@ -439,7 +439,7 @@ public partial class TrackerWindow : Window
         else if (_playMode == PlayMode.Pattern) TryEngine(() => ChiptuneSynth.TrackUpdate(_song, Pattern.PatternIndex));
     }
 
-    // Låten kan inte spelas om ett instrument har ett felaktigt tabellsteg
+    // The song cannot be played if an instrument has a bad table step
     private bool TryEngine(Action action)
     {
         try
@@ -543,7 +543,7 @@ public partial class TrackerWindow : Window
         Pattern.InvalidateVisual();
     }
 
-    // Tangenter som ska fungera även när fokus är i listorna
+    // Keys that should work even when the focus is in the lists
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Handled) return;
@@ -568,7 +568,7 @@ public partial class TrackerWindow : Window
     private void EditToggle_OnClick(object? sender, RoutedEventArgs e) { SetEditMode(EditToggle.IsChecked == true); Pattern.Focus(); }
 
     // ════════════════════════════════════════════════════════════════
-    //  Ordningslistan och mönster
+    //  The order list and patterns
     // ════════════════════════════════════════════════════════════════
 
     private void OrderInsert_OnClick(object? sender, RoutedEventArgs e)
@@ -602,7 +602,7 @@ public partial class TrackerWindow : Window
         PushUndo();
         if (p >= _song.Patterns.Count)
         {
-            // Efter sista mönstret: gör ett nytt tomt med lika många rader
+            // After the last pattern: make a new empty one with the same number of rows
             p = _song.Patterns.Count;
             _song.Patterns.Add(new TrackerPattern(_song.Patterns[Pattern.PatternIndex].Rows));
         }
@@ -641,7 +641,7 @@ public partial class TrackerWindow : Window
     {
         var inst = CurrentInstrument;
         if (inst == null) return;
-        // En kopia via JSON, så att listor inte delas
+        // A copy via JSON, so that lists are not shared
         var json = System.Text.Json.JsonSerializer.Serialize(inst);
         var copy = System.Text.Json.JsonSerializer.Deserialize<TrackerInstrument>(json)!;
         copy.Name = inst.Name + " copy";
@@ -659,7 +659,7 @@ public partial class TrackerWindow : Window
         SongChanged();
     }
 
-    // Tar bort instrumentet och numrerar om de efter det i alla mönster
+    // Removes the instrument and renumbers the ones after it in all patterns
     private void InstDelete_OnClick(object? sender, RoutedEventArgs e)
     {
         int n = Pattern.Instrument;
@@ -787,7 +787,7 @@ public partial class TrackerWindow : Window
         return name.Length == 0 ? "song" : name.ToLowerInvariant().Replace(' ', '_');
     }
 
-    // Raden som laddar låten i BASIC. Sökvägen räknas från projektmappen, som för bilder och ljud.
+    // The line that loads the song in BASIC. The path counts from the project folder, as for images and sounds.
     private string LoadLine()
     {
         if (_path == null) return "";
@@ -843,7 +843,7 @@ public partial class TrackerWindow : Window
     }
 
     // ════════════════════════════════════════════════════════════════
-    //  Titel och statusrad
+    //  Title and status bar
     // ════════════════════════════════════════════════════════════════
 
     private void UpdateTitle()
@@ -860,7 +860,7 @@ public partial class TrackerWindow : Window
         _message = message;
         _messageTime = DateTime.UtcNow;
         UpdateStatus();
-        // Meddelandet står kvar en stund, sedan visas tangenterna igen
+        // The message stays for a while, then the keys are shown again
         DispatcherTimer.RunOnce(UpdateStatus, TimeSpan.FromSeconds(6.1));
     }
 
