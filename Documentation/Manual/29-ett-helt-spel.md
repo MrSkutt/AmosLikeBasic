@@ -84,7 +84,6 @@ MainLoop:
   UpdateSparkle
   UpdateCamera
   DrawText
-  IF PLAYING(4)=0 THEN StartMusic
   WAIT VBL
 GOTO MainLoop
 ```
@@ -165,7 +164,7 @@ SCROLL 4,SX,0
 
 ## Text och musik
 
-Poängen skrivs om i varje bild med en egen font i lager 5, och titeln får en `WAVE`-effekt. Musiken är tre kanaler från synten, som startas om när de har spelat klart.
+Poängen skrivs om i varje bild med en egen font i lager 5, och titeln får en `WAVE`-effekt. Musiken är en egen låt på fyra kanaler från synten: melodi, bas, ackord och trummor. Proceduren `StartMusic` ställer in ljudet för varje kanal och startar dem med `PLAY LOOP`, så att låten går runt av sig själv. Inne i notsträngarna finns effekter inom `{ }` som byter ackord, ändrar melodins klang och öppnar basens filter medan låten spelar; de beskrivs i kapitlet om ljud.
 
 ## Grafiken
 

@@ -79,7 +79,7 @@ Noterna kan också ligga i en textvariabel: `PLAY MUSIC 1, MELODI$`.
 IF PLAYING(4) = 0 THEN StartaMusiken
 ```
 
-Skogshopp gör så, med en procedur som innehåller alla `PLAY MUSIC`-rader. Ska en kanal bara upprepa samma sak, som ett trumkomp, är `PLAY LOOP` enklare.
+Ska låten bara upprepas är `PLAY LOOP` enklare. Skogshopp startar alla fyra kanalerna med `PLAY LOOP`, och eftersom kanalerna är exakt lika långa håller de takten varv efter varv.
 
 ## Forma ljudet
 
@@ -208,6 +208,51 @@ Två specialeffekter från SID-kretsen i C64. Båda kopplar ihop en kanal med en
 | `PLAY SYNC kanal, källa` | kanalens våg börjar om varje gång källkanalen gör det; ger skarpa, skrikande ljud |
 
 `PLAY RING kanal, 0` och `PLAY SYNC kanal, 0` stänger av. Källkanalen måste spela en ton för att något ska hända.
+
+### Effekter i noterna
+
+Inställningarna ovan kan också stå *inne i* notsträngen, inom klamrar `{ }`. Då ändras ljudet precis där i melodin, utan att ditt program behöver göra något medan låten spelar. Effekterna tar ingen tid, så takten påverkas inte:
+
+```basic
+PLAY WAVE 1, "Sawtooth"
+PLAY MUSIC 1, "{FILTER LOW 300 40} C3:8 C3 C4 C3 {CUT 3000} C3 C3 C4 C3 {SWEEP 300 1000} C3 C3 C4 C3 C3 C3 C4 C3"
+WAIT MUSIC
+```
+
+Basen låter dov, blir skarp mitt i takten och glider sedan tillbaka under en sekund. Flera effekter på samma ställe skiljs åt med semikolon: `{WAVE PULSE; PULSE 12; VIBRATO 30}`.
+
+Effekterna har samma namn och värden som `PLAY`-kommandona, fast utan kanalnummer och citattecken:
+
+| Effekt | Gör |
+|---|---|
+| `{WAVE SAW}` | byter ljudtyp |
+| `{VOLUME 0.3}` | volym 0 – 1 |
+| `{FADE 0, 2000}` | volymen glider till ett nytt värde under ett antal millisekunder |
+| `{ADSR 5, 100, 60, 200}` | envelope |
+| `{GATE 50}` | hur stor del av notlängden tonen hålls |
+| `{PULSE 30}` | pulsbredd; med två värden till även PWM: `{PULSE 30, 15, 2}` |
+| `{FILTER LOW, 800, 50}` | filtertyp, och om du vill frekvens och resonans |
+| `{CUT 800}` | bara filtrets frekvens |
+| `{RES 70}` | bara filtrets resonans |
+| `{SWEEP 4000, 1500}` | filtret glider till en ny frekvens under ett antal millisekunder |
+| `{FILTERENV 2000, 5, 200}` | filter-envelope |
+| `{VIBRATO 20, 6}` | vibrato; `{VIBRATO 0}` stänger av |
+| `{ARP 0 4 7}` | arpeggio; `{ARP}` stänger av |
+| `{ARPRATE 50}` | arpeggiots fart |
+| `{GLIDE 50}` | glidning mellan noter |
+| `{BEND 2}` | flyttar tonhöjden ett antal halvtoner |
+| `{RING 2}`, `{SYNC 2}` | ringmodulering och synk mot en annan kanal |
+
+Ett vanligt knep från C64-musik är att byta ackord med arpeggio för varje takt. Då räcker en enda kanal till ett helt ackordkomp:
+
+```basic
+PLAY WAVE 3, "Pulse"
+PLAY VOLUME 3, 0.15
+PLAY MUSIC 3, "{ARP 0 4 7} C4:2 {ARP 0 3 7} A3:2 {ARP 0 4 7} F3:2 G3:2"
+WAIT MUSIC
+```
+
+Inställningar som ändras av en effekt ligger kvar när melodin är slut, precis som om du hade skrivit `PLAY`-kommandot. I en loopad melodi är det därför bra att sätta ljudet i början av strängen, så att varje varv börjar likadant. Skogshopps låt gör så: melodin byter till en tunnare pulsvåg med glidning i andra halvan och tillbaka när den börjar om, och basens filter öppnas sakta med `SWEEP`.
 
 Alla inställningar nollställs när programmet startar om.
 

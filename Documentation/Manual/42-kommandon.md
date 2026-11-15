@@ -458,7 +458,7 @@ Synten har åtta kanaler, 1 – 8. Allt utom `MUSIC`, `LOOP` och `STOP` är inst
 | `PLAY BPM` | tempo i slag per minut |
 | `PLAY WAVE` | ljudtyp: `Square`, `Pulse`, `Triangle`, `Sawtooth`, `Sine`, `Noise` eller `Drums` |
 | `PLAY VOLUME` | volym 0 – 1 |
-| `PLAY MUSIC` | spelar noter på en kanal en gång, se *Tabeller*; noterna kan vara en textvariabel |
+| `PLAY MUSIC` | spelar noter på en kanal en gång, se *Tabeller*; noterna kan vara en textvariabel och innehålla effekter inom `{ }` |
 | `PLAY LOOP` | som `MUSIC`, men börjar om när noterna är slut |
 | `PLAY STOP` | stoppar en kanal, eller all syntmusik |
 | `PLAY ADSR` | envelope: attack, decay och release i millisekunder, sustain 0 – 100 (standard 20, 50, 70, 100) |
@@ -478,7 +478,7 @@ Inställningarna nollställs när programmet startar.
 ```basic nocheck
 PLAY BPM 140
 PLAY WAVE 1, "Square"
-PLAY MUSIC 1, "C5:8 E5 G5 C6:4"
+PLAY MUSIC 1, "C5:8 E5 G5 C6:4 {CUT 500; ARP 0 4 7} C5:2"
 ```
 
 ### PLOT

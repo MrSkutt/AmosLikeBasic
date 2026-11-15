@@ -35,12 +35,22 @@ namespace AmosLikeBasic
             public readonly double Freq;       // 0 = paus
             public readonly float[]? Drum;     // trumljud på en trumkanal
             public readonly double Length;     // del av helnot, 0.25 = fjärdedel
+            public readonly Action<Voice>? Effect;   // {effekt} i notsträngen, tar ingen tid
 
             public NoteEvent(double freq, float[]? drum, double length)
             {
                 Freq = freq;
                 Drum = drum;
                 Length = length;
+                Effect = null;
+            }
+
+            public NoteEvent(Action<Voice> effect)
+            {
+                Freq = 0;
+                Drum = null;
+                Length = 0;
+                Effect = effect;
             }
         }
 
@@ -76,6 +86,10 @@ namespace AmosLikeBasic
             public double Bend;                            // halvtoner
             public int RingSource = -1, SyncSource = -1;
             public double Gate = 0.9;                      // del av notlängden som tonen hålls
+
+            // Glidningar från {SWEEP} och {FADE}: ändring per sampel och antal sampel kvar
+            public double CutoffSlide, VolumeSlide;
+            public int CutoffSlideLeft, VolumeSlideLeft;
 
             // Sequencer
             public Sequence? Pending;
@@ -114,6 +128,7 @@ namespace AmosLikeBasic
                 Glide = 0; Bend = 0;
                 RingSource = -1; SyncSource = -1;
                 Gate = 0.9;
+                CutoffSlideLeft = 0; VolumeSlideLeft = 0;
             }
         }
 
@@ -219,7 +234,12 @@ namespace AmosLikeBasic
 
         public static void SetWave(int channel, string wave)
         {
-            _voices[ChIdx(channel)].Wave = wave.Trim().ToUpperInvariant() switch
+            _voices[ChIdx(channel)].Wave = ParseWave(wave);
+        }
+
+        private static WaveformType ParseWave(string wave)
+        {
+            return wave.Trim().ToUpperInvariant() switch
             {
                 "SQUARE" => WaveformType.Square,
                 "TRIANGLE" => WaveformType.Triangle,
@@ -232,8 +252,12 @@ namespace AmosLikeBasic
             };
         }
 
-        public static void SetVolume(int channel, double volume) =>
-            _voices[ChIdx(channel)].Volume = Math.Clamp(volume, 0.0, 1.0);
+        public static void SetVolume(int channel, double volume)
+        {
+            var v = _voices[ChIdx(channel)];
+            v.VolumeSlideLeft = 0;
+            v.Volume = Math.Clamp(volume, 0.0, 1.0);
+        }
 
         // Pulsbredd i procent, och valfri pulsbreddsmodulering (djup i procent, fart i Hz)
         public static void SetPulse(int channel, double widthPercent, double pwmDepthPercent = 0, double pwmRate = 0)
@@ -257,16 +281,19 @@ namespace AmosLikeBasic
         public static void SetFilter(int channel, string mode, double cutoffHz, double resonancePercent)
         {
             var v = _voices[ChIdx(channel)];
-            v.Filter = mode.Trim().ToUpperInvariant() switch
-            {
-                "LOW" or "LOWPASS" or "LP" => FilterMode.Low,
-                "HIGH" or "HIGHPASS" or "HP" => FilterMode.High,
-                "BAND" or "BANDPASS" or "BP" => FilterMode.Band,
-                _ => FilterMode.Off
-            };
+            v.Filter = ParseFilterMode(mode);
+            v.CutoffSlideLeft = 0;
             v.Cutoff = Math.Clamp(cutoffHz, 20, 18000);
             v.Resonance = Math.Clamp(resonancePercent / 100.0, 0, 0.98);
         }
+
+        private static FilterMode ParseFilterMode(string mode) => mode.Trim().ToUpperInvariant() switch
+        {
+            "LOW" or "LOWPASS" or "LP" => FilterMode.Low,
+            "HIGH" or "HIGHPASS" or "HP" => FilterMode.High,
+            "BAND" or "BANDPASS" or "BP" => FilterMode.Band,
+            _ => FilterMode.Off
+        };
 
         // Filtret öppnas med upp till djup Hz vid varje ny not och stängs sedan igen.
         // Attack och decay i millisekunder. Negativt djup stänger filtret i stället.
@@ -351,14 +378,21 @@ namespace AmosLikeBasic
 
         // "C5:8 E5 G5:4. R:4 BD SD" → händelser. Längden gäller tills en ny anges,
         // och en punkt efter längden gör noten en halv gång längre.
+        // Inom klamrar står effekter som ändrar ljudet just där i melodin: "{CUT 400; ARP 0 4 7} C4:8 E4"
         private static NoteEvent[] ParseSequence(string sequence, bool drums)
         {
             var result = new List<NoteEvent>();
             double length = 0.25;
             int octave = 4;
-            foreach (var raw in sequence.Trim().Trim('"').Split(new[] { ' ', ',', '\t', '\n', '\r' },
-                         StringSplitOptions.RemoveEmptyEntries))
+            foreach (var raw in SplitSequence(sequence.Trim().Trim('"')))
             {
+                if (raw.StartsWith('{'))
+                {
+                    foreach (var cmd in raw.Trim('{', '}').Split(';', StringSplitOptions.RemoveEmptyEntries))
+                        if (cmd.Trim().Length > 0) result.Add(new NoteEvent(ParseEffect(cmd)));
+                    continue;
+                }
+
                 var parts = raw.Split(':');
                 string name = parts[0].Trim();
                 if (parts.Length >= 2)
@@ -378,6 +412,194 @@ namespace AmosLikeBasic
                     result.Add(new NoteEvent(NoteNameToFreq(name, ref octave), null, length));
             }
             return result.ToArray();
+        }
+
+        // Delar vid mellanslag och komman, men håller ihop allt inom {}
+        private static List<string> SplitSequence(string text)
+        {
+            var tokens = new List<string>();
+            var sb = new System.Text.StringBuilder();
+            bool inBraces = false;
+            foreach (char c in text)
+            {
+                if (inBraces)
+                {
+                    sb.Append(c);
+                    if (c == '}') { tokens.Add(sb.ToString()); sb.Clear(); inBraces = false; }
+                }
+                else if (c == '{')
+                {
+                    if (sb.Length > 0) { tokens.Add(sb.ToString()); sb.Clear(); }
+                    sb.Append(c);
+                    inBraces = true;
+                }
+                else if (char.IsWhiteSpace(c) || c == ',')
+                {
+                    if (sb.Length > 0) { tokens.Add(sb.ToString()); sb.Clear(); }
+                }
+                else sb.Append(c);
+            }
+            if (inBraces) throw new FormatException("PLAY MUSIC: '{' utan '}'");
+            if (sb.Length > 0) tokens.Add(sb.ToString());
+            return tokens;
+        }
+
+        // En effekt som "CUT 800" eller "ADSR 5, 80, 60, 200". Samma namn och värden som
+        // PLAY-kommandona, fast utan kanalnummer. Körs i ljudtråden när melodin kommer dit.
+        private static Action<Voice> ParseEffect(string text)
+        {
+            var words = text.Split(new[] { ' ', ',', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            string name = words[0].ToUpperInvariant();
+
+            double Num(int i, double fallback)
+            {
+                if (i >= words.Length) return fallback;
+                if (double.TryParse(words[i], System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var d)) return d;
+                throw new FormatException($"PLAY MUSIC: '{words[i]}' är inget tal i {{{text.Trim()}}}");
+            }
+            void Need(int count)
+            {
+                if (words.Length - 1 < count)
+                    throw new FormatException($"PLAY MUSIC: {{{text.Trim()}}} behöver " +
+                                              (count == 1 ? "ett värde" : $"{count} värden"));
+            }
+
+            switch (name)
+            {
+                case "WAVE":
+                {
+                    Need(1);
+                    var wave = ParseWave(words[1]);
+                    return v => v.Wave = wave;
+                }
+                case "VOLUME":
+                {
+                    Need(1);
+                    double vol = Math.Clamp(Num(1, 0), 0, 1);
+                    return v => { v.VolumeSlideLeft = 0; v.Volume = vol; };
+                }
+                case "PULSE":
+                {
+                    Need(1);
+                    double w = Math.Clamp(Num(1, 25) / 100.0, 0.01, 0.99);
+                    bool pwm = words.Length > 2;
+                    double depth = Math.Clamp(Num(2, 0) / 100.0, 0, 0.49), rate = Math.Max(0, Num(3, 0));
+                    return v => { v.PulseWidth = w; if (pwm) { v.PwmDepth = depth; v.PwmRate = rate; } };
+                }
+                case "ADSR":
+                {
+                    Need(4);
+                    double a = Math.Max(0, Num(1, 0)) / 1000.0, d = Math.Max(0, Num(2, 0)) / 1000.0;
+                    double su = Math.Clamp(Num(3, 0) / 100.0, 0, 1), r = Math.Max(0, Num(4, 0)) / 1000.0;
+                    return v => { v.Attack = a; v.Decay = d; v.Sustain = su; v.Release = r; };
+                }
+                case "FILTER":
+                {
+                    Need(1);
+                    var mode = ParseFilterMode(words[1]);
+                    bool hasCut = words.Length > 2, hasRes = words.Length > 3;
+                    double cut = Math.Clamp(Num(2, 2000), 20, 18000), res = Math.Clamp(Num(3, 0) / 100.0, 0, 0.98);
+                    return v =>
+                    {
+                        v.Filter = mode;
+                        if (hasCut) { v.Cutoff = cut; v.CutoffSlideLeft = 0; }
+                        if (hasRes) v.Resonance = res;
+                    };
+                }
+                case "CUT":
+                {
+                    Need(1);
+                    double cut = Math.Clamp(Num(1, 2000), 20, 18000);
+                    return v => { v.Cutoff = cut; v.CutoffSlideLeft = 0; };
+                }
+                case "RES":
+                {
+                    Need(1);
+                    double res = Math.Clamp(Num(1, 0) / 100.0, 0, 0.98);
+                    return v => v.Resonance = res;
+                }
+                case "SWEEP":
+                {
+                    // Filtret glider till en ny brytfrekvens under ett antal millisekunder
+                    Need(2);
+                    double target = Math.Clamp(Num(1, 2000), 20, 18000);
+                    int samples = Math.Max(1, (int)(Num(2, 0) / 1000.0 * SampleRate));
+                    return v =>
+                    {
+                        v.CutoffSlide = Math.Pow(target / Math.Max(20, v.Cutoff), 1.0 / samples);
+                        v.CutoffSlideLeft = samples;
+                    };
+                }
+                case "FADE":
+                {
+                    // Volymen glider till ett nytt värde under ett antal millisekunder
+                    Need(2);
+                    double target = Math.Clamp(Num(1, 0), 0, 1);
+                    int samples = Math.Max(1, (int)(Num(2, 0) / 1000.0 * SampleRate));
+                    return v =>
+                    {
+                        v.VolumeSlide = (target - v.Volume) / samples;
+                        v.VolumeSlideLeft = samples;
+                    };
+                }
+                case "FILTERENV":
+                {
+                    Need(1);
+                    double depth = Math.Clamp(Num(1, 0), -18000, 18000);
+                    double a = Math.Max(0, Num(2, 5)) / 1000.0, d = Math.Max(1, Num(3, 200)) / 1000.0;
+                    return v => { v.FilterEnvDepth = depth; v.FilterEnvAttack = a; v.FilterEnvDecay = d; };
+                }
+                case "VIBRATO":
+                {
+                    Need(1);
+                    double depth = Math.Max(0, Num(1, 0)) / 100.0, rate = Math.Max(0, Num(2, 6));
+                    return v => { v.VibratoDepth = depth; v.VibratoRate = rate; };
+                }
+                case "ARP":
+                {
+                    // {ARP 0 4 7} spelar ackord, {ARP} eller {ARP 0} stänger av
+                    var steps = new List<int>();
+                    for (int i = 1; i < words.Length; i++) steps.Add((int)Num(i, 0));
+                    var arp = steps.Count > 1 ? steps.ToArray() : Array.Empty<int>();
+                    return v => v.Arp = arp;
+                }
+                case "ARPRATE":
+                {
+                    Need(1);
+                    double rate = Math.Max(1, Num(1, 50));
+                    return v => v.ArpRate = rate;
+                }
+                case "GLIDE":
+                {
+                    Need(1);
+                    double g = Math.Max(0, Num(1, 0)) / 1000.0;
+                    return v => v.Glide = g;
+                }
+                case "BEND":
+                {
+                    Need(1);
+                    double b = Num(1, 0);
+                    return v => v.Bend = b;
+                }
+                case "GATE":
+                {
+                    Need(1);
+                    double g = Math.Clamp(Num(1, 90) / 100.0, 0.05, 1.0);
+                    return v => v.Gate = g;
+                }
+                case "RING":
+                case "SYNC":
+                {
+                    Need(1);
+                    int src = (int)Num(1, 0);
+                    int idx = src <= 0 ? -1 : ChIdx(src);
+                    if (name == "RING") return v => v.RingSource = idx;
+                    return v => v.SyncSource = idx;
+                }
+                default:
+                    throw new FormatException($"PLAY MUSIC: okänd effekt {{{text.Trim()}}}");
+            }
         }
 
         private static readonly Dictionary<string, int> _noteMap = new(StringComparer.OrdinalIgnoreCase)
@@ -437,6 +659,17 @@ namespace AmosLikeBasic
         private static double RenderVoice(Voice v)
         {
             StepSequencer(v);
+
+            if (v.CutoffSlideLeft > 0)
+            {
+                v.Cutoff = Math.Clamp(v.Cutoff * v.CutoffSlide, 20, 18000);
+                v.CutoffSlideLeft--;
+            }
+            if (v.VolumeSlideLeft > 0)
+            {
+                v.Volume = Math.Clamp(v.Volume + v.VolumeSlide, 0, 1);
+                v.VolumeSlideLeft--;
+            }
 
             bool sounding = v.Stage != EnvStage.Idle || v.Drum != null;
             if (!sounding)
@@ -657,17 +890,30 @@ namespace AmosLikeBasic
             v.SamplesLeft--;
             if (v.SamplesLeft > 0) return;
 
-            if (v.SeqIndex >= seq.Events.Length)
+            // Effekter tar ingen tid, så kör dem alla fram till nästa not.
+            // Räknaren hindrar en evig loop om en loopad melodi bara har effekter.
+            NoteEvent e;
+            int guard = seq.Events.Length + 1;
+            while (true)
             {
-                if (seq.Loop && seq.Events.Length > 0) v.SeqIndex = 0;
-                else
+                if (v.SeqIndex >= seq.Events.Length)
+                {
+                    if (seq.Loop && seq.Events.Length > 0 && guard > 0) v.SeqIndex = 0;
+                    else
+                    {
+                        Volatile.Write(ref v.Seq, null);
+                        return;
+                    }
+                }
+                e = seq.Events[v.SeqIndex++];
+                if (e.Effect == null) break;
+                e.Effect(v);
+                if (--guard <= 0)
                 {
                     Volatile.Write(ref v.Seq, null);
                     return;
                 }
             }
-
-            var e = seq.Events[v.SeqIndex++];
             double noteSamples = SampleRate * 60.0 / _bpm * 4.0 * e.Length;
             v.SamplesLeft += noteSamples;   // behåller bråkdelen, så takten inte glider
 

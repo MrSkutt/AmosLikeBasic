@@ -61,6 +61,8 @@ Färgnamnen är de engelska webbfärgerna, till exempel `Black`, `White`, `Red`,
 | `E` | utan oktav: samma oktav som förra noten |
 | `R:4` | paus |
 | `E5` | utan längd: samma längd som förra noten |
+| `{CUT 800}` | effekt som ändrar ljudet just där, se kapitlet om ljud |
+| `{CUT 800; ARP 0 4 7}` | flera effekter på samma ställe |
 
 Trumljud på en kanal med `PLAY WAVE kanal, "Drums"`:
 
