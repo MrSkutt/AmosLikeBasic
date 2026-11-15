@@ -4003,25 +4003,7 @@ public static partial class AmosRunner
             var lV = EvalValueInterpreted(c[..i].Trim(), v, ln, gk, ikd, g); 
             var rV = EvalValueInterpreted(c[(i + op.Length)..].Trim(), v, ln, gk, ikd, g);
                 
-            if (lV is string || rV is string) { 
-                var ls = ValueToString(lV); 
-                var rs = ValueToString(rV); 
-                return op == "=" ? ls == rs : ls != rs; 
-            }
-
-            // Använd Double här för att stödja flyttalsjämförelser!
-            var li = Convert.ToDouble(lV); 
-            var ri = Convert.ToDouble(rV);
-
-            return op switch { 
-                "=" => Math.Abs(li - ri) < 0.000001, // Säker jämförelse för flyttal
-                "<>" => Math.Abs(li - ri) > 0.000001, 
-                "<" => li < ri, 
-                ">" => li > ri, 
-                "<=" => li <= ri, 
-                ">=" => li >= ri, 
-                _ => false 
-            };
+            return CompareValues(op, lV, rV);
         }
         return false;
     }
@@ -4068,7 +4050,37 @@ public static partial class AmosRunner
     }
     
 
+    // Samma grammatik som CompileExpr: OR, AND, NOT, jämförelse, + - &, * / MOD DIV, ^
     private static object ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        var res = ParseAnd(ref t, v, ln, gk, ikd, g);
+        while (t.TryConsumeWord("OR")) {
+            var right = ParseAnd(ref t, v, ln, gk, ikd, g);
+            res = IsTrue(res) || IsTrue(right) ? 1.0 : 0.0;
+        }
+        return res;
+    }
+
+    private static object ParseAnd(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        var res = ParseNot(ref t, v, ln, gk, ikd, g);
+        while (t.TryConsumeWord("AND")) {
+            var right = ParseNot(ref t, v, ln, gk, ikd, g);
+            res = IsTrue(res) && IsTrue(right) ? 1.0 : 0.0;
+        }
+        return res;
+    }
+
+    private static object ParseNot(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        if (t.TryConsumeWord("NOT"))
+            return IsTrue(ParseNot(ref t, v, ln, gk, ikd, g)) ? 0.0 : 1.0;
+        var res = ParseSum(ref t, v, ln, gk, ikd, g);
+        while (t.TryConsumeCompareOp(out var op)) {
+            var right = ParseSum(ref t, v, ln, gk, ikd, g);
+            res = CompareValues(op, res, right) ? 1.0 : 0.0;
+        }
+        return res;
+    }
+
+    private static object ParseSum(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         var res = ParseTerm(ref t, v, ln, gk, ikd, g);
         while (true) { 
             if (t.TryConsume('+')) {
@@ -4090,14 +4102,14 @@ public static partial class AmosRunner
     }
 
     private static object ParseTerm(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
-        var res = ParseFactor(ref t, v, ln, gk, ikd, g);
+        var res = ParsePower(ref t, v, ln, gk, ikd, g);
         while (true) { 
             if (t.TryConsume('*')) {
-                var right = ParseFactor(ref t, v, ln, gk, ikd, g);
+                var right = ParsePower(ref t, v, ln, gk, ikd, g);
                 res = Convert.ToDouble(res, CultureInfo.InvariantCulture) * Convert.ToDouble(right, CultureInfo.InvariantCulture);
             }
             else if (t.TryConsume('/')) {
-                var d = ParseFactor(ref t, v, ln, gk, ikd, g);
+                var d = ParsePower(ref t, v, ln, gk, ikd, g);
                 double div = Convert.ToDouble(d, CultureInfo.InvariantCulture);
                         
                 // ÄNDRAT: Kasta fel om nämnaren är noll (eller extremt nära noll)
@@ -4108,7 +4120,7 @@ public static partial class AmosRunner
             } 
             // ✅ LÄGG TILL DESSA RADER HÄR (innan "else break"):
             else if (t.TryConsumeWord("MOD")) {
-                var right = ParseFactor(ref t, v, ln, gk, ikd, g);
+                var right = ParsePower(ref t, v, ln, gk, ikd, g);
                 var a = Convert.ToDouble(res, CultureInfo.InvariantCulture);
                 var b = Convert.ToDouble(right, CultureInfo.InvariantCulture);
             
@@ -4118,7 +4130,7 @@ public static partial class AmosRunner
                 res = a % b;
             }
             else if (t.TryConsumeWord("DIV")) {
-                var right = ParseFactor(ref t, v, ln, gk, ikd, g);
+                var right = ParsePower(ref t, v, ln, gk, ikd, g);
                 var a = Convert.ToDouble(res, CultureInfo.InvariantCulture);
                 var b = Convert.ToDouble(right, CultureInfo.InvariantCulture);
             
@@ -4133,14 +4145,21 @@ public static partial class AmosRunner
     }
 
     
-    private static object ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+    private static object ParsePower(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
+        var res = ParseFactor(ref t, v, ln, gk, ikd, g);
+        if (!t.TryConsume('^')) return res;
+        var exponent = ParsePower(ref t, v, ln, gk, ikd, g);
+        return Math.Pow(Convert.ToDouble(res, CultureInfo.InvariantCulture), Convert.ToDouble(exponent, CultureInfo.InvariantCulture));
+    }
+
+        private static object ParseFactor(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         t.SkipWs();
         if (t.TryReadString(out var s)) return s;
         if (t.TryConsume('(')) { var res = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return res; }
-        if (t.TryReadDouble(out var n)) return n; 
-        // Unärt minus/plus framför variabel, funktion eller parentes: -MAXV, -SIN(A), -(A+B)
-        if (t.TryConsume('-')) return -Convert.ToDouble(ParseFactor(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
-        if (t.TryConsume('+')) return ParseFactor(ref t, v, ln, gk, ikd, g);
+        // Unärt minus/plus framför tal, variabel, funktion eller parentes: -2^2, -MAXV, -SIN(A), -(A+B)
+        if (t.TryConsume('-')) return -Convert.ToDouble(ParsePower(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
+        if (t.TryConsume('+')) return ParsePower(ref t, v, ln, gk, ikd, g);
+        if (t.TryReadDouble(out var n)) return n;
         if (t.TryReadIdentifier(out var id)) {
             t.SkipWs();
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
@@ -5160,6 +5179,20 @@ public static partial class AmosRunner
         public string Source => _s;
         public void SkipWs() { while (_i < _s.Length && char.IsWhiteSpace(_s[_i])) _i++; }
         public bool TryConsume(char c) { SkipWs(); if (_i < _s.Length && _s[_i] == c) { _i++; return true; } return false; }
+        // Läser =, <>, <, >, <= eller >=
+        public bool TryConsumeCompareOp(out string op) {
+            SkipWs();
+            op = "";
+            if (_i >= _s.Length) return false;
+            char c = _s[_i];
+            char next = _i + 1 < _s.Length ? _s[_i + 1] : '\0';
+            if (c == '<' && (next == '>' || next == '=')) op = _s.Substring(_i, 2);
+            else if (c == '>' && next == '=') op = ">=";
+            else if (c is '=' or '<' or '>') op = c.ToString();
+            else return false;
+            _i += op.Length;
+            return true;
+        }
         public bool TryReadInt(out int v) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsDigit(_s[_i]) || (_i == s && _s[_i] == '-'))) _i++; return int.TryParse(_s[s.._i], out v); }
         public bool TryReadDouble(out double v) { 
             SkipWs(); 

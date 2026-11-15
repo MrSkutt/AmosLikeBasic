@@ -97,6 +97,20 @@ A = 1 : B = 0 : C = 1
 IF (A = 1 OR B = 1) AND C = 1 THEN PRINT "Sant!"
 ```
 
+## Jämförelser ger 1 eller 0
+
+En jämförelse är i själva verket ett litet räknestycke: sant blir `1` och falskt blir `0`. Därför kan du skriva ut den eller spara den i en variabel:
+
+```basic
+PRINT 10 > 3
+PRINT 10 < 3
+ALDER = 15
+VUXEN = ALDER >= 18
+PRINT VUXEN
+```
+
+Programmet skriver `1`, `0` och `0`.
+
 ## Ett tal som villkor
 
 Står det bara ett tal eller en variabel som villkor räknas allt utom `0` som sant. Det är praktiskt för variabler som bara är 0 eller 1, så kallade **flaggor**:

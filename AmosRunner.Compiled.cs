@@ -107,8 +107,36 @@ public static partial class AmosRunner
         }
     }
 
-    // Expr := Term { ('+' | '-' | '&') Term }
+    // Expr := And { OR And }
     private static ExprNode CompileExpr(ref Tokenizer t)
+    {
+        var res = CompileAnd(ref t);
+        while (t.TryConsumeWord("OR")) res = new OrNode(res, CompileAnd(ref t));
+        return res;
+    }
+
+    // And := Not { AND Not }
+    private static ExprNode CompileAnd(ref Tokenizer t)
+    {
+        var res = CompileNot(ref t);
+        while (t.TryConsumeWord("AND")) res = new AndNode(res, CompileNot(ref t));
+        return res;
+    }
+
+    // Not := NOT Not | Compare
+    private static ExprNode CompileNot(ref Tokenizer t) =>
+        t.TryConsumeWord("NOT") ? new NotNode(CompileNot(ref t)) : CompileCompare(ref t);
+
+    // Compare := Sum { ('=' | '<>' | '<' | '>' | '<=' | '>=') Sum }, ger 1 eller 0
+    private static ExprNode CompileCompare(ref Tokenizer t)
+    {
+        var res = CompileSum(ref t);
+        while (t.TryConsumeCompareOp(out var op)) res = new CompareNode(op, res, CompileSum(ref t));
+        return res;
+    }
+
+    // Sum := Term { ('+' | '-' | '&') Term }
+    private static ExprNode CompileSum(ref Tokenizer t)
     {
         var res = CompileTerm(ref t);
         while (true)
@@ -121,19 +149,26 @@ public static partial class AmosRunner
         return res;
     }
 
-    // Term := Factor { ('*' | '/' | MOD | DIV) Factor }
+    // Term := Power { ('*' | '/' | MOD | DIV) Power }
     private static ExprNode CompileTerm(ref Tokenizer t)
     {
-        var res = CompileFactor(ref t);
+        var res = CompilePower(ref t);
         while (true)
         {
-            if (t.TryConsume('*')) res = new MulNode(res, CompileFactor(ref t));
-            else if (t.TryConsume('/')) res = new DivNode(res, CompileFactor(ref t));
-            else if (t.TryConsumeWord("MOD")) res = new ModNode(res, CompileFactor(ref t));
-            else if (t.TryConsumeWord("DIV")) res = new IntDivNode(res, CompileFactor(ref t));
+            if (t.TryConsume('*')) res = new MulNode(res, CompilePower(ref t));
+            else if (t.TryConsume('/')) res = new DivNode(res, CompilePower(ref t));
+            else if (t.TryConsumeWord("MOD")) res = new ModNode(res, CompilePower(ref t));
+            else if (t.TryConsumeWord("DIV")) res = new IntDivNode(res, CompilePower(ref t));
             else break;
         }
         return res;
+    }
+
+    // Power := Factor [ '^' Power ], högerassociativ: 2^3^2 = 2^9
+    private static ExprNode CompilePower(ref Tokenizer t)
+    {
+        var res = CompileFactor(ref t);
+        return t.TryConsume('^') ? new PowNode(res, CompilePower(ref t)) : res;
     }
 
     private static ExprNode CompileFactor(ref Tokenizer t)
@@ -146,9 +181,10 @@ public static partial class AmosRunner
             t.TryConsume(')');
             return inner;
         }
+        // Minus före talet, så att -2^2 blir -(2^2) som i matematiken
+        if (t.TryConsume('-')) return new NegNode(CompilePower(ref t));
         if (t.TryReadDouble(out var n)) return new ConstNode(n);
-        if (t.TryConsume('-')) return new NegNode(CompileFactor(ref t));
-        if (t.TryConsume('+')) return CompileFactor(ref t);
+        if (t.TryConsume('+')) return CompilePower(ref t);
 
         int start = t.Pos;
         if (t.TryReadIdentifier(out var id))
@@ -247,6 +283,86 @@ public static partial class AmosRunner
         private readonly ExprNode _inner;
         public NegNode(ExprNode inner) => _inner = inner;
         public override object Eval(in EvalContext c) => -Num(_inner.Eval(c));
+    }
+
+    private static readonly object One = 1.0;
+
+    private sealed class PowNode : ExprNode
+    {
+        private readonly ExprNode _l, _r;
+        public PowNode(ExprNode l, ExprNode r) { _l = l; _r = r; }
+        public override object Eval(in EvalContext c)
+        {
+            var a = Num(_l.Eval(c));
+            return Math.Pow(a, Num(_r.Eval(c)));
+        }
+    }
+
+    private sealed class CompareNode : ExprNode
+    {
+        private readonly string _op;
+        private readonly ExprNode _l, _r;
+        public CompareNode(string op, ExprNode l, ExprNode r) { _op = op; _l = l; _r = r; }
+        public override object Eval(in EvalContext c) =>
+            CompareValues(_op, _l.Eval(c), _r.Eval(c)) ? One : Zero;
+    }
+
+    private sealed class AndNode : ExprNode
+    {
+        private readonly ExprNode _l, _r;
+        public AndNode(ExprNode l, ExprNode r) { _l = l; _r = r; }
+        public override object Eval(in EvalContext c) => IsTrue(_l.Eval(c)) && IsTrue(_r.Eval(c)) ? One : Zero;
+    }
+
+    private sealed class OrNode : ExprNode
+    {
+        private readonly ExprNode _l, _r;
+        public OrNode(ExprNode l, ExprNode r) { _l = l; _r = r; }
+        public override object Eval(in EvalContext c) => IsTrue(_l.Eval(c)) || IsTrue(_r.Eval(c)) ? One : Zero;
+    }
+
+    private sealed class NotNode : ExprNode
+    {
+        private readonly ExprNode _inner;
+        public NotNode(ExprNode inner) => _inner = inner;
+        public override object Eval(in EvalContext c) => IsTrue(_inner.Eval(c)) ? Zero : One;
+    }
+
+    // Allt utom 0 (och tom text) är sant, som i villkor
+    private static bool IsTrue(object o) => o is string str
+        ? str.Length > 0
+        : Math.Abs(Num(o)) > 0.000001;
+
+    // Gemensam jämförelse för villkor och uttryck. Text jämförs tecken för tecken.
+    private static bool CompareValues(string op, object lV, object rV)
+    {
+        if (lV is string || rV is string)
+        {
+            int cmp = string.CompareOrdinal(ValueToString(lV), ValueToString(rV));
+            return op switch
+            {
+                "=" => cmp == 0,
+                "<>" => cmp != 0,
+                "<" => cmp < 0,
+                ">" => cmp > 0,
+                "<=" => cmp <= 0,
+                ">=" => cmp >= 0,
+                _ => false
+            };
+        }
+
+        var li = Num(lV);
+        var ri = Num(rV);
+        return op switch
+        {
+            "=" => Math.Abs(li - ri) < 0.000001,
+            "<>" => Math.Abs(li - ri) > 0.000001,
+            "<" => li < ri,
+            ">" => li > ri,
+            "<=" => li <= ri,
+            ">=" => li >= ri,
+            _ => false
+        };
     }
 
     private sealed class AddNode : ExprNode
@@ -581,26 +697,7 @@ public static partial class AmosRunner
         {
             var lV = EvalValue(_left, c.Vars, c.Line, c.GetInkey, c.IsKeyDown, c.Graphics);
             var rV = EvalValue(_right, c.Vars, c.Line, c.GetInkey, c.IsKeyDown, c.Graphics);
-
-            if (lV is string || rV is string)
-            {
-                var ls = ValueToString(lV);
-                var rs = ValueToString(rV);
-                return _op == "=" ? ls == rs : ls != rs;
-            }
-
-            var li = Convert.ToDouble(lV);
-            var ri = Convert.ToDouble(rV);
-            return _op switch
-            {
-                "=" => Math.Abs(li - ri) < 0.000001,
-                "<>" => Math.Abs(li - ri) > 0.000001,
-                "<" => li < ri,
-                ">" => li > ri,
-                "<=" => li <= ri,
-                ">=" => li >= ri,
-                _ => false
-            };
+            return CompareValues(_op, lV, rV);
         }
     }
 

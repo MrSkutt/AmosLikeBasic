@@ -52,12 +52,13 @@ PRINT NAMN$ & " är " & ALDER & " år"
 
 ## Fler sätt att räkna
 
-Förutom de fyra räknesätten finns två till som är bra i spel:
+Förutom de fyra räknesätten finns tre till:
 
 | Tecken | Betyder | Exempel | Svar |
 |---|---|---|---|
 | `MOD` | resten vid division | `17 MOD 5` | `2` |
 | `DIV` | heltalsdivision | `17 DIV 5` | `3` |
+| `^` | upphöjt till | `2 ^ 10` | `1024` |
 
 `MOD` är användbar för att få något att upprepas. `T MOD 4` går 0, 1, 2, 3, 0, 1, 2, 3 ... när `T` räknas upp, vilket är perfekt för att växla mellan bilderna i en animation.
 

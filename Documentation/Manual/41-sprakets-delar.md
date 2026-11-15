@@ -61,21 +61,20 @@ Från högst till lägst prioritet. Det som står högre räknas ut först, och 
 | Operator | Betyder | Exempel | Ger |
 |---|---|---|---|
 | `( )` | parentes | `(2 + 3) * 4` | `20` |
+| `^` | upphöjt till | `2 ^ 10` | `1024` |
 | `-` (framför) | minus | `-X` | |
 | `*` `/` `MOD` `DIV` | gånger, delat med, rest, heltalsdivision | `17 MOD 5` | `2` |
 | `+` `-` `&` | plus, minus, sätt ihop text | `"A" & 1` | `A1` |
-| `=` `<>` `<` `>` `<=` `>=` | jämförelse | `X >= 10` | |
-| `NOT` | inte | `NOT X = 1` | |
-| `AND` | och | `X > 0 AND X < 10` | |
-| `OR` | eller | `X < 0 OR X > 10` | |
+| `=` `<>` `<` `>` `<=` `>=` | jämförelse | `10 > 3` | `1` |
+| `NOT` | inte | `NOT 5 = 5` | `0` |
+| `AND` | och | `1 > 0 AND 2 > 0` | `1` |
+| `OR` | eller | `1 < 0 OR 2 < 0` | `0` |
 
-Operatorer på samma nivå räknas från vänster till höger. Eftersom `&` och `+` är på samma nivå blir `"A" & 2 + 3` texten `A23`; skriv `"A" & (2 + 3)` för att få `A5`.
+Operatorer på samma nivå räknas från vänster till höger, utom `^` som räknas från höger: `2 ^ 3 ^ 2` är `2 ^ 9`. Minus framför räknas efter `^`, så `-2 ^ 2` är `-4`. Eftersom `&` och `+` är på samma nivå blir `"A" & 2 + 3` texten `A23`; skriv `"A" & (2 + 3)` för att få `A5`.
 
 `+` sätter också ihop två texter, men `&` fungerar även mellan text och tal och är därför säkrare.
 
-> **Obs:** Det finns ingen operator för upphöjt till. Skriv `X * X` för kvadraten, eller `EXP(LOG(X) * N)` för X upphöjt till N.
-
-> **Obs:** Jämförelser och `AND`, `OR` och `NOT` hör hemma i villkor: efter `IF`, `WHILE` och `UNTIL`. `PRINT 10 > 3` skriver inte ut 1.
+En jämförelse ger `1` om den är sann och `0` om den är falsk, så den kan användas i uttryck och sparas i variabler: `KLAR = X > 100`. `AND`, `OR` och `NOT` ger också `1` eller `0`, och räknar allt utom `0` som sant. Texter jämförs tecken för tecken, så `"abc" < "abd"` är `1`.
 
 ## Färger
 

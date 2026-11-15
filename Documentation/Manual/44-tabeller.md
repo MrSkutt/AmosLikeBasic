@@ -82,10 +82,6 @@ Trumljud på en kanal med `PLAY WAVE kanal, "Drums"`:
 
 ## Vanliga fallgropar
 
-**Ingen upphöjt till-operator.** `2 ^ 3` blir inte 8. Skriv `2 * 2 * 2`, eller `EXP(LOG(X) * N)`.
-
-**Jämförelser bara i villkor.** `PRINT 10 > 3` skriver inte 1. Använd jämförelser efter `IF`, `WHILE` och `UNTIL`.
-
 **`&` och `+` är lika starka.** `"Summa: " & 2 + 3` blir `Summa: 23`. Sätt parentes: `"Summa: " & (2 + 3)`.
 
 **Arrayer börjar på 0.** `DIM A(10)` ger `A(0)` till `A(9)`. `A(10)` ger ett fel.
