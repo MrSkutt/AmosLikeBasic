@@ -35,7 +35,7 @@ Klicka i spelfönstret först, så att det tar emot tangenterna.
 | siffror ovanför bokstäverna | `D0` till `D9` |
 | siffror på det numeriska tangentbordet | `NumPad0` till `NumPad9` |
 | skift, ctrl, alt | `LeftShift`, `RightShift`, `LeftCtrl`, `RightCtrl`, `LeftAlt`, `RightAlt` |
-| funktionstangenter | `F1` till `F11` (`F12` växlar helskärm) |
+| funktionstangenter | `F1` till `F11` (`F8` slår på och av bildrörseffekten och `F12` växlar helskärm) |
 
 ### Ett tryck, inte ett håll
 
