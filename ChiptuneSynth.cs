@@ -13,7 +13,7 @@ namespace AmosLikeBasic
     // körs i samma ljudtråd, så kanalerna går exakt i takt. Inställningarna (vågform,
     // pulsbredd, filter, envelope, vibrato ...) läses för varje sampel, så de kan ändras
     // från BASIC medan ljudet spelar och hörs direkt.
-    public class ChiptuneSynth
+    public partial class ChiptuneSynth
     {
         public const int SampleRate = 44100;
         public const int Channels = 8;
@@ -230,6 +230,8 @@ namespace AmosLikeBasic
             StopMusic();
             foreach (var v in _voices) v.ResetSettings();
             _bpm = 120;
+            _trackVolume = 1.0;
+            Array.Clear(_trackMute);
         }
 
         public static void SetWave(int channel, string wave)
@@ -350,8 +352,10 @@ namespace AmosLikeBasic
             EnsureStarted();
         }
 
+        // Stoppar all syntmusik, även trackerlåten
         public static void StopMusic()
         {
+            TrackStop();
             foreach (var v in _voices)
                 if (Volatile.Read(ref v.Seq) != null || Volatile.Read(ref v.Pending) != null)
                     Volatile.Write(ref v.Pending, StopSequence);
@@ -632,6 +636,7 @@ namespace AmosLikeBasic
         {
             for (int i = 0; i < output.Length; i++)
             {
+                TrackSample();
                 double mix = 0;
                 for (int c = 0; c < Channels; c++)
                     mix += RenderVoice(_voices[c]);

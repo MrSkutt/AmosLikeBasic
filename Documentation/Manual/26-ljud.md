@@ -256,6 +256,122 @@ Inställningar som ändras av en effekt ligger kvar när melodin är slut, preci
 
 Alla inställningar nollställs när programmet startar om.
 
+## Låtar från trackern
+
+En **tracker** är ett musikprogram där låten skrivs uppifrån och ned i rader, som ett kalkylark. Varje kolumn är en kanal, och varje rad kan ha en not, ett instrument och en effekt. ProTracker på Amiga fungerade så, och nästan all spelmusik på C64 och NES gjordes på samma sätt.
+
+AMOS Like Basic spelar trackerlåtar med synten. Låten ligger i en egen fil som slutar på `.amostrk`:
+
+```basic
+TRACK LOAD "Sound/Tracker/skogsvisa.amostrk"
+TRACK PLAY
+Loop:
+  WAIT VBL
+GOTO Loop
+```
+
+| Kommando | Gör |
+|---|---|
+| `TRACK LOAD "fil"` | laddar en låt |
+| `TRACK PLAY [mönster]` | spelar låten, från början eller från en plats i ordningslistan |
+| `TRACK STOP` | stoppar låten (`PLAY STOP` gör det också) |
+| `TRACK VOLUME volym` | låtens volym, 0 – 1 |
+| `TRACK LOOP 0` | låten spelas en gång i stället för att börja om (`TRACK LOOP 1` slår på igen) |
+
+| Funktion | Ger |
+|---|---|
+| `TRACKPLAYING()` | 1 medan låten spelar |
+| `TRACKPOS()` | platsen i ordningslistan som spelas, från 0 |
+| `TRACKROW()` | raden i mönstret som spelas, från 0 |
+
+En trackerlåt använder syntens kanal 1 – 4. Kanal 5 – 8 är lediga för `PLAY MUSIC` medan låten spelar, och ljudeffekterna som `PLAY COIN` påverkar den inte.
+
+Projektet `Projects/trackerdemo.amosproj` spelar Skogsvisa, samma låt som i Skogshopp men skriven för trackern.
+
+### Hur en låt är uppbyggd
+
+En låt består av tre delar:
+
+- **Instrument** är ljud: vågform, envelope, filter och så vidare, med samma värden som `PLAY`-kommandona. Instrumenten är numrerade från 01.
+- **Mönster** (patterns) är block av rader, oftast 64. En rad har en cell för varje kanal.
+- **Ordningslistan** säger i vilken ordning mönstren spelas. Ett mönster kan spelas många gånger, så en refräng behöver bara skrivas en gång.
+
+Tempot styrs av två tal. **Speed** är hur många *tick* varje rad varar, och **tempo** hur snabbt tick kommer: 125 ger 50 tick i sekunden. Med speed 6 och fyra rader per taktslag blir tempot samma tal som slag per minut, så speed 6 och tempo 136 är 136 BPM.
+
+En cell skrivs som not, instrument och effekt:
+
+```text
+C-4 01 A04
+```
+
+Det betyder C i fjärde oktaven, instrument 01, och effekt `A04` (volymen sjunker). `---` är ingen ny not, `===` släpper tonen, och `..` och `...` är tomt. En ton fortsätter att låta tills en ny not eller `===` kommer.
+
+### Effekter
+
+Effekten är en bokstav eller siffra och två hexsiffror. De flesta gäller bara på sin rad, så en glidning eller ett vibrato som ska fortsätta skrivs på varje rad. Nummer som i ProTracker:
+
+| Effekt | Gör |
+|---|---|
+| `0xy` | arpeggio: tonen växlar mellan noten, x halvtoner upp och y halvtoner upp, ett steg per tick |
+| `1xx` | glider uppåt, xx sextondels halvton per tick (`110` är en halvton per tick) |
+| `2xx` | glider nedåt |
+| `3xx` | glider till noten på raden i stället för att spela den; `300` fortsätter med samma fart |
+| `4xy` | vibrato: x är fart, y djup; `400` fortsätter |
+| `5xy` | fortsätter `3` och ändrar volymen som `A` |
+| `6xy` | fortsätter `4` och ändrar volymen som `A` |
+| `Axy` | volymen ökar med x eller minskar med y per tick |
+| `Bxx` | hoppar till plats xx i ordningslistan |
+| `Cxx` | volym 00 – 40 (hex, 40 är full volym) |
+| `Dxy` | går vidare till rad xy (decimalt) i nästa mönster |
+| `ECx` | tystnar på tick x |
+| `EDx` | noten börjar på tick x i stället för direkt |
+| `Fxx` | 01 – 1F sätter speed, 20 – FF tempo |
+| `Gxx` | filterfrekvens: 00 är 20 Hz, 80 ungefär 640 Hz och FF 18 000 Hz; slår på lågpass om filtret är av |
+| `Hxx` | filterresonans, 00 – FF |
+| `Ixx` | pulsbredd, 80 är 50 % |
+
+`G`, `H` och `I` ligger kvar på kanalen tills den byter instrument, så ett filter kan öppnas sakta över många toner.
+
+### Instrument
+
+Ett instrument har samma inställningar som `PLAY`-kommandona: `Wave`, `Volume`, `PulseWidth`, `PwmDepth`, `PwmRate`, `Attack`, `Decay`, `Sustain`, `Release`, `Filter`, `Cutoff`, `Resonance`, `FilterEnvDepth`, `FilterEnvAttack`, `FilterEnvDecay`, `Vibrato`, `VibratoRate`, `Ring` och `Sync`. De som inte anges får standardvärden.
+
+Dessutom kan ett instrument ha en **tabell** som går ett steg per tick från att noten börjar. Varje steg kan byta vågform, flytta tonen ett antal halvtoner och ändra pulsbredden (`P30` är 30 %). Det är så C64-musiker gjorde trummor och ackord:
+
+```text
+"Table": ["SQUARE +24", "TRIANGLE +12", "+6", "+2", "-2", "-5", "-8", "-10", "-12"]
+```
+
+Den tabellen är en bastrumma: ett kort klick av fyrkantsvåg och sedan en triangelvåg som snabbt sjunker i tonhöjd. `TableLoop` är steget tabellen börjar om från när den är slut. Utan den stannar tabellen på sista steget. Ett durackord som arpeggio är `["0", "+4", "+7"]` med `"TableLoop": 0`.
+
+### Filen
+
+Filen är JSON, så den går att öppna i en vanlig texteditor. Varje rad i ett mönster är en textrad, med kanalerna åtskilda av `|`:
+
+```text
+{
+  "Format": "AmosTracker",
+  "Version": 1,
+  "Title": "Skogsvisa",
+  "Speed": 6,
+  "Tempo": 136,
+  "Instruments": [
+    { "Name": "Bas", "Wave": "Sawtooth", "Volume": 0.25, "Filter": "Low", "Cutoff": 250, ... },
+    ...
+  ],
+  "Order": [0, 1, 2, 3],
+  "Patterns": [
+    [
+      "G-5 01 ...|G-2 03 G5D|G-3 04 047|C-7 0B ...",
+      "--- .. ...|=== .. ...|--- .. 047|--- .. ...",
+      ...
+    ]
+  ]
+}
+```
+
+Ett fel i filen ger ett felmeddelande som talar om mönster, rad och kanal.
+
 ## Ljudfiler och musikmoduler
 
 Du kan också spela inspelade ljud och färdig musik:

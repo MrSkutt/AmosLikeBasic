@@ -756,6 +756,26 @@ Det finns en karta åt gången. Funktionen `TILE()` läser den.
 
 `TIMER` som kommando sätter variabeln `TIMER` till klockan i millisekunder. För att mäta tid är `MILLIS()` enklare.
 
+### TRACK
+
+Spelar låtar från trackern på syntens kanal 1 – 4. Se kapitlet om ljud.
+
+```text
+TRACK LOAD "fil"
+TRACK PLAY [mönster]
+TRACK STOP
+TRACK VOLUME volym
+TRACK LOOP 0 | 1
+```
+
+| Kommando | Gör |
+|---|---|
+| `TRACK LOAD` | laddar en låt (`.amostrk`) |
+| `TRACK PLAY` | spelar låten från början, eller från en plats i ordningslistan (från 0) |
+| `TRACK STOP` | stoppar låten |
+| `TRACK VOLUME` | låtens volym, 0 – 1 |
+| `TRACK LOOP` | 1 (standard) börjar om när låten är slut, 0 spelar den en gång |
+
 ## W
 
 ### WAIT

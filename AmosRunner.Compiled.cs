@@ -85,7 +85,7 @@ public static partial class AmosRunner
         "INC", "INKEY$", "INSTR", "INT", "JOIN$", "JOYAXIS", "JOYSTATE", "KEYSTATE", "LAYERFADING",
         "LEFT$", "LEN", "LOG", "LOG10", "LOG2", "LOWER$", "MAX", "MICROS", "MID$", "MILLIS", "MIN",
         "PLAYING", "REPEAT$", "REPLACE$", "RIGHT$", "RND", "SGN", "SIN", "SPLIT$", "SQR", "STR$", "TAN",
-        "TICKS", "TILE", "TRIM$", "UPPER$", "VAL", "WORD$"
+        "TICKS", "TILE", "TRACKPLAYING", "TRACKPOS", "TRACKROW", "TRIM$", "UPPER$", "VAL", "WORD$"
     };
 
     private abstract class ExprNode

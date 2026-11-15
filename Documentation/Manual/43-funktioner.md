@@ -112,6 +112,9 @@ Kollisionerna ger 1 eller 0. Gruppvarianterna ger numret på den första spriten
 |---|---|
 | `PLAYING(kanal)` | 1 om syntens kanal spelar (kanal 1 – 8) |
 | `ANYPLAYING()` | 1 om någon kanal spelar |
+| `TRACKPLAYING()` | 1 medan en trackerlåt spelar |
+| `TRACKPOS()` | platsen i trackerlåtens ordningslista, från 0 |
+| `TRACKROW()` | raden i trackerlåtens mönster, från 0 |
 
 ## Filer
 

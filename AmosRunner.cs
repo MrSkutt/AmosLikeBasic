@@ -187,6 +187,8 @@ public static partial class AmosRunner
     
     private static readonly Random _rng = new();
     private static IntPtr _currentXmpContext = IntPtr.Zero;
+    private static TrackerSong? _trackSong;   // senast laddad med TRACK LOAD
+    private static bool _trackLoop = true;
 
     private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
     
@@ -372,6 +374,8 @@ public static partial class AmosRunner
         
         GamepadManager.Start();
         ChiptuneSynth.Reset();
+        _trackSong = null;
+        _trackLoop = true;
         token.Register(() =>
         {
             GamepadManager.Stop();
@@ -3149,6 +3153,45 @@ public static partial class AmosRunner
 
                             break;
                         
+                        case "TRACK":
+                        {
+                            // Trackerlåtar (.amostrk) på kanal 1 – 4
+                            var (trackSub, trackRest) = SplitFirstWord(arg);
+                            var tA = SplitTopLevelCsv(trackRest);
+                            switch (trackSub.ToUpperInvariant())
+                            {
+                                case "LOAD":
+                                {
+                                    string file = ValueToString(EvalValue(tA[0], vars, ln, getInkey, isKeyDown, graphics));
+                                    string path = ResourceLoader.GetPath(file);   // ger fel om filen saknas
+                                    try { _trackSong = TrackerSong.Load(path); }
+                                    catch (FormatException fe) { throw new Exception($"TRACK LOAD: {fe.Message} at line {ln}"); }
+                                    break;
+                                }
+                                case "PLAY":
+                                {
+                                    if (_trackSong == null)
+                                        throw new Exception($"TRACK PLAY: ingen låt är laddad, använd TRACK LOAD först at line {ln}");
+                                    int pos = tA.Count > 0 && tA[0].Trim().Length > 0
+                                        ? EvalInt(tA[0], vars, ln, getInkey, isKeyDown, graphics) : 0;
+                                    ChiptuneSynth.TrackPlay(_trackSong, pos, 0, _trackLoop);
+                                    break;
+                                }
+                                case "STOP":
+                                    ChiptuneSynth.TrackStop();
+                                    break;
+                                case "VOLUME":
+                                    ChiptuneSynth.SetTrackVolume(EvalDouble(tA[0], vars, ln, getInkey, isKeyDown, graphics));
+                                    break;
+                                case "LOOP":
+                                    _trackLoop = EvalInt(tA[0], vars, ln, getInkey, isKeyDown, graphics) != 0;
+                                    break;
+                                default:
+                                    throw new Exception($"TRACK: okänt kommando '{trackSub}' at line {ln}");
+                            }
+                            break;
+                        }
+
                         case "PLAY":
                         {
                             var parts = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
@@ -4425,6 +4468,24 @@ public static partial class AmosRunner
                     t.TryConsume(')');
                     int ch = (int)Math.Round(Convert.ToDouble(chObj, CultureInfo.InvariantCulture));
                     return ChiptuneSynth.IsPlaying(ch) ? 1.0 : 0.0;
+                }
+                if (id.Equals("TRACKPLAYING", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    t.TryConsume(')');
+                    return ChiptuneSynth.IsTrackPlaying() ? 1.0 : 0.0;
+                }
+                if (id.Equals("TRACKPOS", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    t.TryConsume(')');
+                    return (double)ChiptuneSynth.TrackPosition;
+                }
+                if (id.Equals("TRACKROW", StringComparison.OrdinalIgnoreCase))
+                {
+                    t.TryConsume('(');
+                    t.TryConsume(')');
+                    return (double)ChiptuneSynth.TrackRow;
                 }
                 if (id.Equals("ANYPLAYING", StringComparison.OrdinalIgnoreCase))
                 {
