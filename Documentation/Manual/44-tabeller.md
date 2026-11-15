@@ -116,6 +116,8 @@ På Windows är `Cmd` i stället `Ctrl`.
 
 **Arrayer börjar på 0.** `DIM A(10)` ger `A(0)` till `A(9)`. `A(10)` ger ett fel.
 
+**FOR körs minst en gång.** `FOR K=0 TO N-1` körs ett varv även när `N` är 0. Kontrollera först: `IF N>0 THEN` före loopen.
+
 **DATA behöver en etikett.** `DATA`-rader måste stå under en etikett, och `RESTORE etikett` måste köras före första `READ`.
 
 **Svart är genomskinligt.** Pixlar med färgen `0,0,0` syns inte, varken när du ritar eller i bilder. Använd `"#101010"` för svart.
@@ -127,5 +129,7 @@ På Windows är `Cmd` i stället `Ctrl`.
 **Procedurer anropas utan parentes.** `Halsa "Kotte", 3`, inte `Halsa("Kotte", 3)`. Egna funktioner anropas däremot med parentes.
 
 **Funktioner kan inte rita.** I en `FUNCTION` fungerar bara tilldelning, `IF`, `FOR`, `WHILE`, `INC`, `DEC` och `RETURN`. Använd en `PROC` för allt annat.
+
+**C64-fonten saknar Å, Ä och Ö.** Med `FONT SET 16,16,"C64 PRO MONO"` blir de streck. Välj ord utan dem, eller en annan font.
 
 **Fonttext ligger kvar.** Text från `FONT PRINT` ritas om varje bild tills den tas bort med `FONT CLEAR`. Text som ändras måste därför börja med `FONT CLEAR` varje varv.

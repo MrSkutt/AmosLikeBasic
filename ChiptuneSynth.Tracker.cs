@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Threading;
 
@@ -83,12 +84,23 @@ namespace AmosLikeBasic
             public int DelayNote = TrackerCell.NoNote;
             // Satta med G, H och I. Gäller tills kanalen byter instrument.
             public double? Cutoff, Resonance, PulseWidth;
+            // Ljudeffekt: sampel kvar tills tonen släpps, och kanalens PLAY-inställningar från innan
+            public bool Sfx;
+            public long SfxReleaseLeft;
+            public Voice? SavedSettings;
         }
 
         private static readonly TrackInstrument DefaultInstrument = new();
         private static readonly TrackRequest TrackStopRequest = new(null, 0, 0, false);
-        private static readonly TrackChannel[] _trackChannels =
-            { new(), new(), new(), new() };
+        // Kanal 1 – 4 spelar låten, 5 – 8 används av ljudeffekterna (TRACK SFX)
+        private static readonly TrackChannel[] _trackChannels = CreateTrackChannels();
+
+        private static TrackChannel[] CreateTrackChannels()
+        {
+            var a = new TrackChannel[Channels];
+            for (int i = 0; i < a.Length; i++) a[i] = new TrackChannel();
+            return a;
+        }
 
         private static TrackRequest? _trackPending;
         private static TrackData? _track;
@@ -176,6 +188,108 @@ namespace AmosLikeBasic
                 for (int c = 0; c < TrackerSong.ChannelCount; c++) _trackChannels[c].Active = false;
                 ReleaseTrackVoices();
             });
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        //  Ljudeffekter: ett trackerinstrument som spelas en kort stund
+        // ════════════════════════════════════════════════════════════════
+
+        public const int FirstSfxChannel = 5;
+        private const double SfxTickRate = 50;   // som en C64, oberoende av låtens tempo
+        private static double _sfxVolume = 1.0;
+        private static double _sfxTickLeft;
+        private static int _sfxCount;            // kanaler som spelar en effekt (ljudtråden)
+        private static readonly long[] _sfxEnds = new long[Channels];   // när effekten väntas vara klar (BASIC-tråden)
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TrackerInstrument, TrackInstrument> _sfxInstruments = new();
+
+        // Spelar instrumentet som ljudeffekt. Utan kanal väljs den av kanal 5 – 8 som blir ledig först.
+        // Utan längd (ms < 0) klingar ljudet så länge instrumentet är gjort för. Returnerar kanalen.
+        public static int PlayTrackSfx(TrackerInstrument instrument, int number, int note, double ms = -1, int channel = 0)
+        {
+            var inst = _sfxInstruments.GetValue(instrument, i => CompileInstrument(i, number));
+            if (ms < 0) ms = AutoSfxLength(inst) * 1000;
+            long now = Stopwatch.GetTimestamp();
+            if (channel < 1 || channel > Channels)
+            {
+                channel = FirstSfxChannel;
+                for (int c = FirstSfxChannel; c <= Channels; c++)
+                    if (_sfxEnds[c - 1] < _sfxEnds[channel - 1]) channel = c;
+            }
+            long releaseSamples = (long)(Math.Max(1, ms) / 1000.0 * SampleRate);
+            _sfxEnds[channel - 1] = now + (long)((ms / 1000.0 + inst.Release) * Stopwatch.Frequency);
+
+            int c0 = channel - 1;
+            _trackCommands.Enqueue(() =>
+            {
+                var ch = _trackChannels[c0];
+                var v = _voices[c0];
+                if (!ch.Sfx)
+                {
+                    ch.SavedSettings = v.CopySettings();
+                    ch.Sfx = true;
+                    // Första effekten startar klockan, så att ett ljud alltid låter likadant
+                    if (_sfxCount++ == 0) _sfxTickLeft = SampleRate / SfxTickRate;
+                    Volatile.Write(ref v.Seq, null);   // effekten tar över kanalen från PLAY MUSIC
+                }
+                ch.Inst = inst;
+                ch.InstNumber = number;
+                ch.Vol = 64;
+                ch.Effect = '\0';
+                ch.Cutoff = ch.Resonance = ch.PulseWidth = null;
+                ch.SfxReleaseLeft = releaseSamples;
+                TriggerTrackNote(c0, note);
+                UpdateTrackVoice(c0);
+            });
+            EnsureStarted();
+            return channel;
+        }
+
+        // Hur länge tonen hålls om man inte anger det: ett ljud som klingar ut av sig självt (sustain 0)
+        // får klinga klart, ett med en tabell utan loop hålls tills tabellen är slut, annars en kvarts sekund
+        private static double AutoSfxLength(TrackInstrument inst)
+        {
+            if (inst.Sustain <= 0) return inst.Attack + inst.Decay;
+            if (inst.Table.Length > 1 && inst.TableLoop < 0) return inst.Table.Length / SfxTickRate;
+            return 0.25;
+        }
+
+        public static void SetSfxVolume(double volume) => _sfxVolume = Math.Clamp(volume, 0, 1);
+
+        // Med restore = false lämnas kanalernas inställningar som de är (när ett program startar om)
+        public static void StopSfx(bool restore = true) => _trackCommands.Enqueue(() =>
+        {
+            for (int c = 0; c < Channels; c++)
+                if (_trackChannels[c].Sfx) EndSfx(c, restore);
+        });
+
+        // Anropas varje sampel så länge någon effekt spelar
+        private static void SfxSample()
+        {
+            for (int c = 0; c < Channels; c++)
+            {
+                var ch = _trackChannels[c];
+                if (!ch.Sfx) continue;
+                if (ch.SfxReleaseLeft > 0 && --ch.SfxReleaseLeft == 0) ReleaseTrackVoice(c);
+                else if (ch.SfxReleaseLeft == 0 && _voices[c].Stage == EnvStage.Idle) EndSfx(c);
+            }
+
+            if (--_sfxTickLeft > 0) return;
+            _sfxTickLeft += SampleRate / SfxTickRate;
+            for (int c = 0; c < Channels; c++)
+                if (_trackChannels[c].Sfx) UpdateTrackVoice(c);
+        }
+
+        // Effekten är slut: lämna tillbaka kanalen till PLAY-kommandona
+        private static void EndSfx(int c, bool restore = true)
+        {
+            var ch = _trackChannels[c];
+            var v = _voices[c];
+            ch.Sfx = false;
+            ch.Active = false;
+            _sfxCount--;
+            if (v.Stage != EnvStage.Idle) v.Stage = EnvStage.Release;
+            if (restore && ch.SavedSettings != null) v.RestoreSettings(ch.SavedSettings);
+            ch.SavedSettings = null;
         }
 
         public static void TrackStop()
@@ -312,6 +426,7 @@ namespace AmosLikeBasic
                 StartTrack(req);
             }
             while (_trackCommands.TryDequeue(out var cmd)) cmd();
+            if (_sfxCount > 0) SfxSample();
             if (_track == null && !_trackPreview) return;
 
             _trackTickLeft--;
@@ -623,7 +738,8 @@ namespace AmosLikeBasic
 
             double freq = 440.0 * Math.Pow(2, (semis - 69) / 12.0);
             v.Freq = v.TargetFreq = Math.Clamp(freq, 1, SampleRate * 0.45);
-            v.Volume = _trackMute[c] ? 0 : inst.Volume * ch.Vol / 64.0 * _trackVolume;
+            v.Volume = ch.Sfx ? inst.Volume * _sfxVolume
+                : _trackMute[c] ? 0 : inst.Volume * ch.Vol / 64.0 * _trackVolume;
         }
 
         private static void AdvanceRow(TrackData d)

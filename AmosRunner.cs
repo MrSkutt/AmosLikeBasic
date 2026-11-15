@@ -188,6 +188,7 @@ public static partial class AmosRunner
     private static readonly Random _rng = new();
     private static IntPtr _currentXmpContext = IntPtr.Zero;
     private static TrackerSong? _trackSong;   // senast laddad med TRACK LOAD
+    private static TrackerSong? _sfxBank;     // instrumenten som TRACK SFX spelar, från TRACK SFX LOAD
     private static bool _trackLoop = true;
 
     private static System.Diagnostics.Process? _currentMusicProcess; // Musik-kanalen
@@ -375,6 +376,7 @@ public static partial class AmosRunner
         GamepadManager.Start();
         ChiptuneSynth.Reset();
         _trackSong = null;
+        _sfxBank = null;
         _trackLoop = true;
         token.Register(() =>
         {
@@ -3186,6 +3188,31 @@ public static partial class AmosRunner
                                 case "LOOP":
                                     _trackLoop = EvalInt(tA[0], vars, ln, getInkey, isKeyDown, graphics) != 0;
                                     break;
+                                case "SFX":
+                                {
+                                    // TRACK SFX LOAD "fil" | VOLUME v | STOP | instrument, not [, ms [, kanal]]
+                                    var (sfxSub, sfxRest) = SplitFirstWord(trackRest);
+                                    switch (sfxSub.ToUpperInvariant())
+                                    {
+                                        case "LOAD":
+                                        {
+                                            string file = ValueToString(EvalValue(sfxRest, vars, ln, getInkey, isKeyDown, graphics));
+                                            try { _sfxBank = TrackerSong.Load(ResourceLoader.GetPath(file)); }
+                                            catch (FormatException fe) { throw new Exception($"TRACK SFX LOAD: {fe.Message} at line {ln}"); }
+                                            break;
+                                        }
+                                        case "VOLUME":
+                                            ChiptuneSynth.SetSfxVolume(EvalDouble(sfxRest, vars, ln, getInkey, isKeyDown, graphics));
+                                            break;
+                                        case "STOP":
+                                            ChiptuneSynth.StopSfx();
+                                            break;
+                                        default:
+                                            PlayTrackSfx(SplitTopLevelCsv(trackRest), vars, ln, getInkey, isKeyDown, graphics);
+                                            break;
+                                    }
+                                    break;
+                                }
                                 default:
                                     throw new Exception($"TRACK: okänt kommando '{trackSub}' at line {ln}");
                             }
@@ -5035,6 +5062,49 @@ public static partial class AmosRunner
         {
             engine.StopSample(file);
         }
+    }
+
+    // TRACK SFX instrument, not [, ms [, kanal]]. Instrumentet är ett nummer eller ett namn,
+    // noten ett MIDI-nummer eller text som "C-5", "C5" eller "C#5".
+    private static void PlayTrackSfx(List<string> args, Dictionary<string, object> vars, int ln,
+        Func<string> getInkey, Func<string, bool> isKeyDown, AmosGraphics graphics)
+    {
+        var bank = _sfxBank ?? _trackSong;
+        if (bank == null)
+            throw new Exception($"TRACK SFX: inga ljud är laddade, använd TRACK SFX LOAD först at line {ln}");
+        if (args.Count < 2)
+            throw new Exception($"TRACK SFX: skriv TRACK SFX instrument, not at line {ln}");
+
+        object instValue = EvalValue(args[0], vars, ln, getInkey, isKeyDown, graphics);
+        int number;
+        if (instValue is string name)
+        {
+            number = bank.Instruments.FindIndex(i => i.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) + 1;
+            if (number == 0) throw new Exception($"TRACK SFX: det finns inget instrument som heter '{name}' at line {ln}");
+        }
+        else
+        {
+            number = (int)Math.Round(Convert.ToDouble(instValue, CultureInfo.InvariantCulture));
+            if (number < 1 || number > bank.Instruments.Count)
+                throw new Exception($"TRACK SFX: instrument {number} finns inte (1 – {bank.Instruments.Count}) at line {ln}");
+        }
+
+        object noteValue = EvalValue(args[1], vars, ln, getInkey, isKeyDown, graphics);
+        int note;
+        if (noteValue is string text)
+        {
+            text = text.Trim().ToUpperInvariant();
+            if (text.Length == 2) text = text[0] + "-" + text[1];   // "C5" → "C-5"
+            try { note = TrackerCell.ParseNote(text); }
+            catch (FormatException fe) { throw new Exception($"TRACK SFX: {fe.Message} at line {ln}"); }
+            if (note < 0) throw new Exception($"TRACK SFX: '{noteValue}' är ingen not at line {ln}");
+        }
+        else
+            note = Math.Clamp((int)Math.Round(Convert.ToDouble(noteValue, CultureInfo.InvariantCulture)), 0, 119);
+
+        double ms = args.Count > 2 ? EvalDouble(args[2], vars, ln, getInkey, isKeyDown, graphics) : -1;
+        int channel = args.Count > 3 ? EvalInt(args[3], vars, ln, getInkey, isKeyDown, graphics) : 0;
+        ChiptuneSynth.PlayTrackSfx(bank.Instruments[number - 1], number, note, ms, channel);
     }
 
     private static void PlayMusic(string file, AudioEngine? engine) {

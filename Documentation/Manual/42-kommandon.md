@@ -730,7 +730,7 @@ PRINT JOIN$(T, ",")
 TEXT [#lager,] x, y, värde
 ```
 
-Skriver text i grafiken med övre vänstra hörnet i x, y, med fonten från `FONT SET` och `INKG`-färgen.
+Skriver text i grafiken med övre vänstra hörnet i x, y, med fonten från `FONT SET` och `INKG`-färgen. Utan `FONT SET` blir det Arial i storlek 20.
 
 ### TILE
 
@@ -766,6 +766,10 @@ TRACK PLAY [mönster]
 TRACK STOP
 TRACK VOLUME volym
 TRACK LOOP 0 | 1
+TRACK SFX LOAD "fil"
+TRACK SFX instrument, not [, ms [, kanal]]
+TRACK SFX VOLUME volym
+TRACK SFX STOP
 ```
 
 | Kommando | Gör |
@@ -775,6 +779,10 @@ TRACK LOOP 0 | 1
 | `TRACK STOP` | stoppar låten |
 | `TRACK VOLUME` | låtens volym, 0 – 1 |
 | `TRACK LOOP` | 1 (standard) börjar om när låten är slut, 0 spelar den en gång |
+| `TRACK SFX LOAD` | laddar en ljudbank: en trackerfil vars instrument är ljudeffekter |
+| `TRACK SFX` | spelar ett instrument ur ljudbanken (namn eller nummer) med en not (`"C-4"`, `"C4"` eller ett tal) på kanal 5 – 8 |
+| `TRACK SFX VOLUME` | ljudeffekternas volym, 0 – 1 |
+| `TRACK SFX STOP` | tystar ljudeffekterna |
 
 ## W
 

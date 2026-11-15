@@ -30,6 +30,8 @@ PLAY EXPLOSION
 | `PLAY POWERUP` | bonus, ny nivå |
 | `PLAY EXPLOSION` | explosion, förlorat liv |
 
+Vill du ha egna ljud gör du dem i trackern och spelar dem med `TRACK SFX`, se *Egna ljudeffekter* längre fram.
+
 ## Musik med synten
 
 Synten har åtta kanaler som spelar samtidigt och går exakt i takt med varandra. En C64 hade tre och en NES fyra, så det räcker långt. Varje kanal får en ljudtyp, en volym och en melodi:
@@ -288,6 +290,18 @@ En trackerlåt använder syntens kanal 1 – 4. Kanal 5 – 8 är lediga för `P
 
 Projektet `Projects/trackerdemo.amosproj` spelar Skogsvisa, låten från Skogshopp.
 
+Fler låtar i C64-stil finns i `Sound/Tracker` och används i exempelprojekten:
+
+| Låt | Projekt | Stil |
+|---|---|---|
+| `rasterdrom.amostrk` | `raster_new` | snabb demolåt med arpeggioackord och ett filter som öppnas i introt |
+| `solsystem.amostrk` | `bob` | rymdig, med C64-eko: melodin upprepas svagare på en annan kanal |
+| `skuggspel.amostrk` | `shadow` | funkig, med en sågtandsmelodi genom ett resonant filter |
+| `vinterkvall.amostrk` | `rain` | långsam och vemodig, med klockor |
+| `masken.amostrk` | `snake` | studsig spelmusik med korta, hackade toner |
+
+Öppna dem i trackern för att se hur ljuden och effekterna är gjorda.
+
 Ett spel byter ofta musik efter vad som händer. Skogshopp har fyra låtar i `Sound/Tracker`: lugn musik på titelskärmen, Skogsvisa när man spelar och två korta jinglar när man vinner eller förlorar. Jinglarna spelas en gång med `TRACK LOOP 0`:
 
 ```basic nocheck
@@ -401,6 +415,64 @@ Filen är JSON, så den går att öppna i en vanlig texteditor. Varje rad i ett 
 ```
 
 Ett fel i filen ger ett felmeddelande som talar om mönster, rad och kanal.
+
+## Egna ljudeffekter
+
+På C64 gjordes ljudeffekterna på samma sätt som instrumenten: en tabell som ändrar tonhöjd och vågform för varje bild. Ett hopp är en ton som stiger, en explosion brus som sjunker. I AMOS Like Basic gör du dem i trackern och spelar dem med `TRACK SFX`.
+
+En **ljudbank** är en vanlig trackerfil, och dess instrument är ljuden. `Sound/Tracker/ljud.amostrk` följer med och har elva ljud att börja med:
+
+```basic
+TRACK SFX LOAD "Sound/Tracker/ljud.amostrk"
+TRACK SFX "Hopp", "C-4"
+WAIT 400
+TRACK SFX "Mynt", "B-5"
+WAIT 400
+TRACK SFX "Explosion", "C-4"
+WAIT 800
+```
+
+| Kommando | Gör |
+|---|---|
+| `TRACK SFX LOAD "fil"` | laddar en ljudbank |
+| `TRACK SFX instrument, not` | spelar ett ljud; instrumentet är ett namn eller nummer, noten text som `"C-4"` eller `"C4"`, eller ett tal (60 är C-4) |
+| `TRACK SFX instrument, not, ms` | håller tonen så många millisekunder |
+| `TRACK SFX instrument, not, ms, kanal` | spelar på en bestämd kanal |
+| `TRACK SFX VOLUME volym` | ljudeffekternas volym, 0 – 1 |
+| `TRACK SFX STOP` | tystar alla ljudeffekter |
+
+| Ljud i `ljud.amostrk` | Passar till |
+|---|---|
+| `Hopp` | hopp, en ton som stiger |
+| `Bonk` | slå i taket eller en vägg |
+| `Fall` | falla, en vissling som sjunker |
+| `Mynt` | plocka upp något |
+| `Explosion` | explosion |
+| `Laser` | skott |
+| `Powerup` | bonus, ett arpeggio som stiger |
+| `Aj` | bli skadad |
+| `Blipp` | menyval |
+| `Steg` | fotsteg |
+| `Klar` | banan klar |
+
+Ljuden spelas på syntens kanal 5 – 8, och varje nytt ljud tar den kanal som blir ledig först. En trackerlåt på kanal 1 – 4 fortsätter alltså ostört. Använder du `PLAY MUSIC` på kanal 5 – 8 lånar ljudeffekten kanalen och lämnar tillbaka den med samma inställningar efteråt.
+
+Utan längd klingar ljudet så länge instrumentet är gjort för: ett ljud med sustain 0 tills det har klingat ut, ett med en tabell tills tabellen är slut, och annars en kvarts sekund. Noten bestämmer tonhöjden, så samma ljud kan spelas högre eller lägre, till exempel ett mynt som låter ljusare för varje mynt i rad.
+
+### Göra egna ljud
+
+Öppna ljudbanken i trackern, eller gör en ny låt och ta bort de färdiga instrumenten. Varje instrument är ett ljud. Ge det ett namn som du använder i `TRACK SFX`, och prova det med pianotangenterna medan du ändrar.
+
+Tabellen är det viktigaste. Den går ett steg per tick, 50 gånger i sekunden. Några exempel:
+
+| Tabell | Låter som |
+|---|---|
+| `0`, `+2`, `+4`, `+6`, `+8`, `+10`, `+12` | ett hopp: tonen stiger en oktav |
+| `NOISE +24`, `TRIANGLE 0`, `-3`, `-6`, `-9` | en duns: ett brusklick följt av en sjunkande ton |
+| `0`, `0`, `0`, `+5` | ett mynt: två toner efter varandra |
+| `+24`, `+20`, `+16`, `+12`, `+8`, `+4`, `0` | ett laserskott: tonen faller snabbt |
+
+Låt tempot i ljudbanken vara 125. Då går tabellerna lika fort i trackern som i spelet.
 
 ## Ljudfiler och musikmoduler
 

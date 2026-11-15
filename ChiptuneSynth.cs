@@ -115,6 +115,23 @@ namespace AmosLikeBasic
             public double FilterEnv;
             public bool FilterEnvRising;
 
+            // Kopia av inställningarna, så att en ljudeffekt kan låna kanalen och lämna tillbaka den
+            public Voice CopySettings() => (Voice)MemberwiseClone();
+
+            public void RestoreSettings(Voice s)
+            {
+                Wave = s.Wave; Volume = s.Volume;
+                PulseWidth = s.PulseWidth; PwmDepth = s.PwmDepth; PwmRate = s.PwmRate;
+                Attack = s.Attack; Decay = s.Decay; Sustain = s.Sustain; Release = s.Release;
+                Filter = s.Filter; Cutoff = s.Cutoff; Resonance = s.Resonance;
+                FilterEnvDepth = s.FilterEnvDepth; FilterEnvAttack = s.FilterEnvAttack; FilterEnvDecay = s.FilterEnvDecay;
+                VibratoDepth = s.VibratoDepth; VibratoRate = s.VibratoRate;
+                Arp = s.Arp; ArpRate = s.ArpRate;
+                Glide = s.Glide; Bend = s.Bend;
+                RingSource = s.RingSource; SyncSource = s.SyncSource;
+                Gate = s.Gate;
+            }
+
             public void ResetSettings()
             {
                 Wave = WaveformType.Square;
@@ -231,8 +248,11 @@ namespace AmosLikeBasic
             foreach (var v in _voices) v.ResetSettings();
             _bpm = 120;
             _trackVolume = 1.0;
+            _sfxVolume = 1.0;
             Array.Clear(_trackMute);
+            Array.Clear(_sfxEnds);
             TrackPreviewStop();
+            StopSfx(restore: false);
         }
 
         public static void SetWave(int channel, string wave)

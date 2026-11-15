@@ -547,6 +547,7 @@ public sealed class AmosGraphics
     public int CharHeight { get; private set; } = 16;
     public string Style { get; private set; } = "Normal";
     private string font = "Courier New";
+    private bool _fontConfigured;   // FONT SET har körts: då använder även TEXT den fonten
     public Color PaperColor { get; set; } = Colors.Transparent; // Bakgrundsfärg för text
     public float Alpha = 255f;
 
@@ -577,6 +578,7 @@ public sealed class AmosGraphics
         TextCols = Width / w;
         TextRows = Height / h;
         font = text;
+        _fontConfigured = true;
     }
 
     public void FontTextStyle(string style)
@@ -629,107 +631,12 @@ public sealed class AmosGraphics
         int px = CursorX * CharWidth;
         int py = CursorY * CharHeight;
 
-        Color currentInk = Ink;
-        Color currentPaper = PaperColor;
-        int currentH = CharHeight;
-        int currentW = CharWidth;
+        // 1. Rita PAPER (bakgrundsbox) för hela strängen
+        if (PaperColor != Colors.Transparent)
+            Bar(px, py, px + s.Length * CharWidth - 1, py + CharHeight - 1, PaperColor);
 
-        // 1. Rita PAPER (Bakgrundsbox) för hela strängen direkt (snabbare)
-        if (currentPaper != Colors.Transparent)
-        {
-            Bar(px, py, px + s.Length * currentW - 1, py + currentH - 1, currentPaper);
-        }
-
-        // 2. Rita TEXT (Ink) tecken för tecken för att garantera rutnätet
-        Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
-        {
-            EnsureScreen();
-
-            bool isItalic = Style?.Contains("Italic", StringComparison.OrdinalIgnoreCase) == true;
-            bool isBold = Style?.Contains("Bold", StringComparison.OrdinalIgnoreCase) == true;
-
-            var fontStyle = isItalic ? FontStyle.Italic : FontStyle.Normal;
-            var fontWeight = isBold ? FontWeight.Bold : FontWeight.Normal;
-
-            var typeface = new Typeface(font, fontStyle, fontWeight);
-
-
-            // Skapa en bitmap som rymmer hela texten
-            var ps = new PixelSize(s.Length * currentW, currentH);
-            if (ps.Width == 0 || ps.Height == 0) return;
-
-            using var rtb = new RenderTargetBitmap(ps);
-            using (var ctx = rtb.CreateDrawingContext())
-            {
-                // Se till att RTB är tömd
-                ctx.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ps.Width, ps.Height));
-
-                // Rita varje tecken i sin exakta "box"
-                for (int i = 0; i < s.Length; i++)
-                {
-                    string charStr = s[i].ToString();
-                    var ft = new FormattedText(
-                        charStr,
-                        CultureInfo.CurrentCulture,
-                        FlowDirection.LeftToRight,
-                        typeface,
-                        currentH,
-                        new SolidColorBrush(currentInk)
-                    );
-
-                    // Tvinga positionen: i * CharWidth
-                    // Vi använder PushClip för att hindra breda tecken från att blöda in i nästa ruta
-                    using (ctx.PushClip(new Rect(i * currentW, 0, currentW, currentH)))
-                    {
-                        ctx.DrawText(ft, new Point(i * currentW, 0));
-                    }
-                }
-            }
-
-            // Kopiera pixlar till ActiveScreen (konverterade till BGRA)
-            var b = new byte[ps.Width * ps.Height * 4];
-            unsafe
-            {
-                fixed (byte* p = b)
-                {
-                    rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
-                    ToBgra(rtb, p, ps.Width, ps.Height, ps.Width * 4);
-                }
-            }
-
-            lock (LockObject)
-            {
-                using (var dst = GetActiveScreen().Lock())
-                    unsafe
-                    {
-                        var dp = (byte*)dst.Address;
-                        for (int r = 0; r < Math.Min(ps.Height, currentH); r++)
-                        {
-                            int ty = py + r;
-                            if (ty < 0 || ty >= Height) continue;
-                            var dr = dp + ty * dst.RowBytes;
-
-                            for (int c = 0; c < ps.Width; c++)
-                            {
-                                int tx = px + c;
-                                if (tx < 0 || tx >= Width) continue;
-
-                                int si = (r * ps.Width + c) * 4;
-                                int di = tx * 4;
-
-                                byte alpha = b[si + 3];
-                                if (alpha > 0)
-                                {
-                                    dr[di + 0] = b[si + 0]; // B -> B (ingen konvertering!)
-                                    dr[di + 1] = b[si + 1]; // G -> G
-                                    dr[di + 2] = b[si + 2]; // R -> R
-                                    dr[di + 3] = 255; // A
-                                }
-                            }
-                        }
-                    }
-            }
-        }, Avalonia.Threading.DispatcherPriority.Render).Wait(); // Vänta på att ritningen är klar
+        // 2. Texten, tecken för tecken i rutnätet
+        DrawTextNow(GetActiveScreen(), px, py, s, font, CharHeight, Ink, CharWidth, CharHeight);
 
         // Flytta cursorn framåt
         CursorX += s.Length;
@@ -2552,55 +2459,52 @@ public sealed class AmosGraphics
     public void DrawText(int x, int y, string t)
     {
         if (string.IsNullOrEmpty(t)) return;
-        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        // Utan FONT SET: Arial 20, som TEXT alltid har haft
+        if (_fontConfigured) DrawTextNow(GetActiveScreen(), x, y, t, font, CharHeight, Ink, 0, 0);
+        else DrawTextNow(GetActiveScreen(), x, y, t, "Arial", 20, Ink, 0, 0);
+    }
+
+    // Ritar text direkt i lagrets bitmapp med SkiaSharp, i tråden som anropar. Då hamnar texten
+    // i rätt lager och i rätt ordning med allt annat som ritas, även när programmet byter lager
+    // varje bild. Med cellWidth > 0 ritas varje tecken i en egen ruta och utan mjuka kanter,
+    // som i PRINTG, så att pixelfonter som C64-fonten blir skarpa.
+    private void DrawTextNow(WriteableBitmap target, int x, int y, string text, string family, float size,
+        Color ink, int cellWidth, int cellHeight)
+    {
+        if (string.IsNullOrEmpty(text) || size <= 0) return;
+        bool italic = Style?.Contains("Italic", StringComparison.OrdinalIgnoreCase) == true;
+        bool bold = Style?.Contains("Bold", StringComparison.OrdinalIgnoreCase) == true;
+        var typeface = SKTypeface.FromFamilyName(family,
+                           bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal,
+                           SKFontStyleWidth.Normal,
+                           italic ? SKFontStyleSlant.Italic : SKFontStyleSlant.Upright)
+                       ?? SKTypeface.Default;
+        bool grid = cellWidth > 0;
+        using var skFont = new SKFont(typeface, size) { Edging = grid ? SKFontEdging.Alias : SKFontEdging.Antialias };
+        using var paint = new SKPaint { Color = new SKColor(ink.R, ink.G, ink.B, ink.A), IsAntialias = !grid };
+        float baseline = y - skFont.Metrics.Ascent;
+
+        lock (LockObject)
         {
-            EnsureScreen();
-            var ft = new FormattedText(t, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-                new Typeface("Arial"),
-                20, new SolidColorBrush(Ink));
-            var ps = new PixelSize((int)Math.Max(1, ft.Width), (int)Math.Max(1, ft.Height));
-            using var rtb = new RenderTargetBitmap(ps);
-            using (var ctx = rtb.CreateDrawingContext())
+            using var fb = target.Lock();
+            var info = new SKImageInfo(fb.Size.Width, fb.Size.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(info, fb.Address, fb.RowBytes);
+            if (surface == null) return;
+            var canvas = surface.Canvas;
+            if (cellWidth <= 0)
             {
-                ctx.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, ps.Width, ps.Height));
-                ctx.DrawText(ft, new Point(0, 0));
+                canvas.DrawText(text, x, baseline, skFont, paint);
+                return;
             }
-
-            var b = new byte[ps.Width * ps.Height * 4];
-            unsafe
+            for (int i = 0; i < text.Length; i++)
             {
-                fixed (byte* p = b)
-                {
-                    rtb.CopyPixels(new PixelRect(ps), (nint)p, b.Length, ps.Width * 4);
-                    ToBgra(rtb, p, ps.Width, ps.Height, ps.Width * 4);
-                }
+                float cx = x + i * cellWidth;
+                canvas.Save();
+                canvas.ClipRect(new SKRect(cx, y, cx + cellWidth, y + cellHeight));
+                canvas.DrawText(text[i].ToString(), cx, baseline, skFont, paint);
+                canvas.Restore();
             }
-
-            using (var dst = GetActiveScreen().Lock())
-                unsafe
-                {
-                    var dp = (byte*)dst.Address;
-                    for (int r = 0; r < ps.Height; r++)
-                    {
-                        int ty = y + r;
-                        if (ty < 0 || ty >= Height) continue;
-                        var dr = dp + ty * dst.RowBytes;
-                        for (int c = 0; c < ps.Width; c++)
-                        {
-                            int tx = x + c;
-                            if (tx < 0 || tx >= Width) continue;
-                            int si = (r * ps.Width + c) * 4, di = tx * 4;
-                            if (b[si + 3] > 0)
-                            {
-                                dr[di + 0] = b[si + 0];
-                                dr[di + 1] = b[si + 1];
-                                dr[di + 2] = b[si + 2];
-                                dr[di + 3] = b[si + 3];
-                            }
-                        }
-                    }
-                }
-        });
+        }
     }
 
     public void FontLoad(int id, string file, int tw, int th)
