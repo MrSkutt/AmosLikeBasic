@@ -110,7 +110,7 @@ Kollisionerna ger 1 eller 0. Gruppvarianterna ger numret på den första spriten
 
 | Funktion | Ger |
 |---|---|
-| `PLAYING(kanal)` | 1 om syntens kanal spelar |
+| `PLAYING(kanal)` | 1 om syntens kanal spelar (kanal 1 – 8) |
 | `ANYPLAYING()` | 1 om någon kanal spelar |
 
 ## Filer

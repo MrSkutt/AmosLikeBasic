@@ -371,6 +371,7 @@ public static partial class AmosRunner
         _lastFrameTime = DateTime.MinValue;
         
         GamepadManager.Start();
+        ChiptuneSynth.Reset();
         token.Register(() =>
         {
             GamepadManager.Stop();
@@ -3190,17 +3191,82 @@ public static partial class AmosRunner
                                 }
 
                                 case "MUSIC":
+                                case "LOOP":
                                 {
+                                    // Noterna kan vara en textvariabel: PLAY MUSIC 1, MELODI$
                                     var (_, rest2) = SplitFirstWord(arg);
                                     var ms2       = SplitTopLevelCsv(rest2);
                                     int    ch     = EvalInt(ms2[0], vars, ln, getInkey, isKeyDown, graphics);
-                                    string seq    = Unquote(ms2[1]);
-                                    ChiptuneSynth.PlayMusic(ch, seq);
+                                    string seq    = ValueToString(EvalValue(ms2[1], vars, ln, getInkey, isKeyDown, graphics));
+                                    ChiptuneSynth.PlayMusic(ch, seq, loop: sub == "LOOP");
                                     break;
                                 }
 
                                 case "STOP":
-                                    ChiptuneSynth.StopMusic();
+                                    if (pS.Count >= 2)
+                                        ChiptuneSynth.StopMusic(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics));
+                                    else
+                                        ChiptuneSynth.StopMusic();
+                                    break;
+
+                                // Ljudinställningar som kan ändras medan musiken spelar
+                                case "PULSE":
+                                    ChiptuneSynth.SetPulse(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics),
+                                        pS.Count >= 4 ? EvalDouble(pS[3], vars, ln, getInkey, isKeyDown, graphics) : 0,
+                                        pS.Count >= 5 ? EvalDouble(pS[4], vars, ln, getInkey, isKeyDown, graphics) : 0);
+                                    break;
+
+                                case "ADSR":
+                                    ChiptuneSynth.SetAdsr(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[3], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[4], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[5], vars, ln, getInkey, isKeyDown, graphics));
+                                    break;
+
+                                case "FILTER":
+                                    ChiptuneSynth.SetFilter(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        ValueToString(EvalValue(pS[2], vars, ln, getInkey, isKeyDown, graphics)),
+                                        pS.Count >= 4 ? EvalDouble(pS[3], vars, ln, getInkey, isKeyDown, graphics) : 2000,
+                                        pS.Count >= 5 ? EvalDouble(pS[4], vars, ln, getInkey, isKeyDown, graphics) : 0);
+                                    break;
+
+                                case "VIBRATO":
+                                    ChiptuneSynth.SetVibrato(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics),
+                                        pS.Count >= 4 ? EvalDouble(pS[3], vars, ln, getInkey, isKeyDown, graphics) : 6);
+                                    break;
+
+                                case "ARP":
+                                    ChiptuneSynth.SetArpeggio(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        ValueToString(EvalValue(pS[2], vars, ln, getInkey, isKeyDown, graphics)),
+                                        pS.Count >= 4 ? EvalDouble(pS[3], vars, ln, getInkey, isKeyDown, graphics) : 50);
+                                    break;
+
+                                case "GLIDE":
+                                    ChiptuneSynth.SetGlide(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics));
+                                    break;
+
+                                case "BEND":
+                                    ChiptuneSynth.SetBend(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics));
+                                    break;
+
+                                case "GATE":
+                                    ChiptuneSynth.SetGate(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics));
+                                    break;
+
+                                case "RING":
+                                    ChiptuneSynth.SetRing(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalInt(pS[2], vars, ln, getInkey, isKeyDown, graphics));
+                                    break;
+
+                                case "SYNC":
+                                    ChiptuneSynth.SetSync(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalInt(pS[2], vars, ln, getInkey, isKeyDown, graphics));
                                     break;
                             }
                             break;

@@ -434,18 +434,44 @@ PLAY COIN | JUMP | LASER | HIT | BLIP | POWERUP | EXPLOSION
 PLAY BPM takt
 PLAY WAVE kanal, "typ"
 PLAY VOLUME kanal, volym
-PLAY MUSIC kanal, "noter"
-PLAY STOP
+PLAY MUSIC kanal, noter
+PLAY LOOP kanal, noter
+PLAY STOP [kanal]
+PLAY ADSR kanal, attack, decay, sustain, release
+PLAY GATE kanal, procent
+PLAY PULSE kanal, bredd [, djup, fart]
+PLAY FILTER kanal, "typ", frekvens, resonans
+PLAY VIBRATO kanal, djup, fart
+PLAY GLIDE kanal, millisekunder
+PLAY BEND kanal, halvtoner
+PLAY ARP kanal, "steg" [, fart]
+PLAY RING kanal, källa
+PLAY SYNC kanal, källa
 ```
+
+Synten har åtta kanaler, 1 – 8. Allt utom `MUSIC`, `LOOP` och `STOP` är inställningar som gäller kanalen tills de ändras och hörs direkt, även mitt i en ton.
 
 | Kommando | Gör |
 |---|---|
 | `PLAY COIN` med flera | spelar en färdig ljudeffekt |
 | `PLAY BPM` | tempo i slag per minut |
-| `PLAY WAVE` | ljudtyp: `Square`, `Triangle`, `Sawtooth`, `Pulse`, `Noise` eller `Drums` |
+| `PLAY WAVE` | ljudtyp: `Square`, `Pulse`, `Triangle`, `Sawtooth`, `Sine`, `Noise` eller `Drums` |
 | `PLAY VOLUME` | volym 0 – 1 |
-| `PLAY MUSIC` | spelar noter på en kanal, se *Tabeller* |
-| `PLAY STOP` | stoppar all syntmusik |
+| `PLAY MUSIC` | spelar noter på en kanal en gång, se *Tabeller*; noterna kan vara en textvariabel |
+| `PLAY LOOP` | som `MUSIC`, men börjar om när noterna är slut |
+| `PLAY STOP` | stoppar en kanal, eller all syntmusik |
+| `PLAY ADSR` | envelope: attack, decay och release i millisekunder, sustain 0 – 100 (standard 20, 50, 70, 100) |
+| `PLAY GATE` | hur stor del av notlängden tonen hålls, 5 – 100 (standard 90) |
+| `PLAY PULSE` | pulsbredd i procent för `Pulse` (standard 25), och pulsbreddsmodulering: djup i procent, fart i Hz |
+| `PLAY FILTER` | `"LOW"`, `"HIGH"`, `"BAND"` eller `"OFF"`; frekvens 20 – 18 000 Hz, resonans 0 – 100 |
+| `PLAY VIBRATO` | djup i hundradels halvton, fart i Hz; djup 0 stänger av |
+| `PLAY GLIDE` | glidning mellan noter; 0 stänger av |
+| `PLAY BEND` | flyttar tonhöjden ett antal halvtoner; 0 är normalt |
+| `PLAY ARP` | arpeggio: halvtonssteg som `"0 4 7"`, fart i steg per sekund (standard 50); `""` stänger av |
+| `PLAY RING` | ringmodulering med en annan kanal; 0 stänger av |
+| `PLAY SYNC` | hård synk mot en annan kanal; 0 stänger av |
+
+Inställningarna nollställs när programmet startar.
 
 ```basic nocheck
 PLAY BPM 140

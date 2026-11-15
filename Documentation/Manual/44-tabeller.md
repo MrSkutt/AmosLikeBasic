@@ -56,7 +56,9 @@ Färgnamnen är de engelska webbfärgerna, till exempel `Black`, `White`, `Red`,
 | `C D E F G A B` | tonnamn |
 | `C#`, `Db` | höjd eller sänkt ton |
 | `C5` | oktav; `A4` är 440 Hz |
-| `C5:8` | längd: 1, 2, 4, 8 eller 16 (hel- till sextondelsnot) |
+| `C5:8` | längd: 1, 2, 4, 8, 16 eller 32 (hel- till trettiotvåondelsnot) |
+| `C5:4.` | punkterad: en halv gång längre |
+| `E` | utan oktav: samma oktav som förra noten |
 | `R:4` | paus |
 | `E5` | utan längd: samma längd som förra noten |
 
