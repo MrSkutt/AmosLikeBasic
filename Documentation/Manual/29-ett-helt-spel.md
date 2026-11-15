@@ -100,7 +100,7 @@ IF VY>MAXFALL THEN VY=MAXFALL
 PY=PY+VY
 ```
 
-Ett hopp är bara att sätta en stor fart uppåt: `VY=JUMPV`, där `JUMPV` är –12,5. Gravitationen bromsar sedan upp och drar ned Kotte igen, så att hoppet blir en båge. Släpper man hoppknappen tidigt minskas farten uppåt, vilket ger korta hopp:
+Ett hopp är bara att sätta en stor fart uppåt: `VY=JUMPV`, där `JUMPV` är –13,5. Gravitationen bromsar sedan upp och drar ned Kotte igen, så att hoppet blir en båge. Släpper man hoppknappen tidigt minskas farten uppåt, vilket ger korta hopp:
 
 ```basic nocheck
 IF JK=1 AND JHELD=0 AND ONG=1 THEN VY=JUMPV : ONG=0 : PLAY JUMP

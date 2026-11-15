@@ -154,7 +154,7 @@ SCREEN 640,480
 
 ; ── Konstanter ──────────────────────────────────────────────────
 LW=120 : LH=15 : WORLDW=LW*32
-GRAV=0.6 : JUMPV=-12.5 : MAXFALL=11
+GRAV=0.6 : JUMPV=-13.5 : MAXFALL=11
 ACC=0.45 : MAXV=4.2
 TILES$="GDBQULC^bpvm"
 GEMSPR=10 : BUGSPR=70 : FLAGSPR=2 : HUDGEM=3 : SPARKSPR=90 : PLAYER=99
