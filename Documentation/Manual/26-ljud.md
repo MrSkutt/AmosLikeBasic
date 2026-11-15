@@ -79,7 +79,7 @@ Noterna kan också ligga i en textvariabel: `PLAY MUSIC 1, MELODI$`.
 IF PLAYING(4) = 0 THEN StartaMusiken
 ```
 
-Ska låten bara upprepas är `PLAY LOOP` enklare. Skogshopp startar alla fyra kanalerna med `PLAY LOOP`, och eftersom kanalerna är exakt lika långa håller de takten varv efter varv.
+Ska låten bara upprepas är `PLAY LOOP` enklare. Projektet `Projects/skogsvisa.amosproj` startar alla fyra kanalerna med `PLAY LOOP`, och eftersom kanalerna är exakt lika långa håller de takten varv efter varv.
 
 ## Forma ljudet
 
@@ -252,7 +252,7 @@ PLAY MUSIC 3, "{ARP 0 4 7} C4:2 {ARP 0 3 7} A3:2 {ARP 0 4 7} F3:2 G3:2"
 WAIT MUSIC
 ```
 
-Inställningar som ändras av en effekt ligger kvar när melodin är slut, precis som om du hade skrivit `PLAY`-kommandot. I en loopad melodi är det därför bra att sätta ljudet i början av strängen, så att varje varv börjar likadant. Skogshopps låt gör så: melodin byter till en tunnare pulsvåg med glidning i andra halvan och tillbaka när den börjar om, och basens filter öppnas sakta med `SWEEP`.
+Inställningar som ändras av en effekt ligger kvar när melodin är slut, precis som om du hade skrivit `PLAY`-kommandot. I en loopad melodi är det därför bra att sätta ljudet i början av strängen, så att varje varv börjar likadant. Låten i `Projects/skogsvisa.amosproj` gör så: melodin byter till en tunnare pulsvåg med glidning i andra halvan och tillbaka när den börjar om, och basens filter öppnas sakta med `SWEEP`.
 
 Alla inställningar nollställs när programmet startar om.
 
@@ -286,7 +286,17 @@ GOTO Loop
 
 En trackerlåt använder syntens kanal 1 – 4. Kanal 5 – 8 är lediga för `PLAY MUSIC` medan låten spelar, och ljudeffekterna som `PLAY COIN` påverkar den inte.
 
-Projektet `Projects/trackerdemo.amosproj` spelar Skogsvisa, samma låt som i Skogshopp men skriven för trackern.
+Projektet `Projects/trackerdemo.amosproj` spelar Skogsvisa, låten från Skogshopp.
+
+Ett spel byter ofta musik efter vad som händer. Skogshopp har fyra låtar i `Sound/Tracker`: lugn musik på titelskärmen, Skogsvisa när man spelar och två korta jinglar när man vinner eller förlorar. Jinglarna spelas en gång med `TRACK LOOP 0`:
+
+```basic nocheck
+PROC WinMusic
+  TRACK LOAD "Sound/Tracker/seger.amostrk"
+  TRACK LOOP 0
+  TRACK PLAY
+END PROC
+```
 
 ### Trackern i utvecklingsmiljön
 

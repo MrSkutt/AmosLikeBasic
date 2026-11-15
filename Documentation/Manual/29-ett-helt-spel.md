@@ -164,7 +164,7 @@ SCROLL 4,SX,0
 
 ## Text och musik
 
-Poängen skrivs om i varje bild med en egen font i lager 5, och titeln får en `WAVE`-effekt. Musiken är en egen låt på fyra kanaler från synten: melodi, bas, ackord och trummor. Proceduren `StartMusic` ställer in ljudet för varje kanal och startar dem med `PLAY LOOP`, så att låten går runt av sig själv. Inne i notsträngarna finns effekter inom `{ }` som byter ackord, ändrar melodins klang och öppnar basens filter medan låten spelar; de beskrivs i kapitlet om ljud.
+Poängen skrivs om i varje bild med en egen font i lager 5, och titeln får en `WAVE`-effekt. Musiken är gjord i trackern och ligger i `Sound/Tracker`. Titelskärmen spelar den lugna `skogsmorgon.amostrk`, och när spelet börjar byter `NewGame` till `skogsvisa.amostrk`. Når Kotte flaggan spelas fanfaren `seger.amostrk`, och tar livet slut spelas `gameover.amostrk`. De två sista spelas en gång, med `TRACK LOOP 0`. Varje låt har en egen liten procedur, som `TitleMusic` och `GameMusic`. Öppna filerna med knappen **TRACKER** för att se hur de är gjorda. Samma Skogsvisa skriven med `PLAY`-kommandon finns i `Projects/skogsvisa.amosproj`.
 
 ## Grafiken
 

@@ -18,7 +18,7 @@ Det som exporteras är programmet som står i editorn just då, även om du inte
 
 ## Filer som följer med
 
-Exporten letar efter alla filnamn inom citattecken i ditt program, som `"Graphics/hero.png"`, och tar med de filer som finns. Bygger programmet ihop filnamn medan det kör, till exempel `"level" & NIVA & ".amosmap"`, hittas de inte. Då kan du exportera från terminalen och ange dem själv:
+Exporten letar efter alla filnamn inom citattecken i ditt program, som `"Graphics/hero.png"` eller `"Sound/Tracker/skogsvisa.amostrk"`, och tar med de filer som finns. Låtar från trackern följer alltså med precis som bilder och ljud. Bygger programmet ihop filnamn medan det kör, till exempel `"level" & NIVA & ".amosmap"`, hittas de inte. Då kan du exportera från terminalen och ange dem själv:
 
 ```text
 python3 Tools/export_app.py Projects/spelet.amosproj --name Spelet --include Graphics/Levels

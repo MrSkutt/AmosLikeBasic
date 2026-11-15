@@ -173,7 +173,7 @@ LoadLevel
 
 MODE=0 : T=0 : SX=0 : HISCORE=0
 SC=0 : GEMS=0 : LIVES=3
-StartMusic
+TitleMusic
 
 ; ════════════════════════════════════════════════════════════════
 ;  Huvudloop
@@ -236,7 +236,7 @@ END PROC
 
 PROC GameOverFrame
   WT=WT+1
-  IF WT>240 THEN EndRound
+  IF WT>360 THEN EndRound
 END PROC
 
 
@@ -330,6 +330,7 @@ PROC AfterDeath
   IF LIVES<=0 THEN
     MODE=4 : WT=0
     SPRITE OFF PLAYER
+    GameOverMusic
   ELSE
     Spawn
   ENDIF
@@ -340,12 +341,14 @@ PROC Win
   SC=SC+1000+GEMS*10
   SPRITE FRAME PLAYER,4
   PLAY COIN
+  WinMusic
 END PROC
 
 PROC EndRound
   IF SC>HISCORE THEN HISCORE=SC
   MODE=0
   SPRITE OFF PLAYER
+  TitleMusic
 END PROC
 
 PROC NewGame
@@ -353,6 +356,7 @@ PROC NewGame
   LoadLevel
   CPX=STARTX : CPY=STARTY
   Spawn
+  GameMusic
 END PROC
 
 PROC Spawn
@@ -500,53 +504,31 @@ END PROC
 ; ════════════════════════════════════════════════════════════════
 ;  Musik: en egen liten trudelutt på tre kanaler
 ; ════════════════════════════════════════════════════════════════
-PROC StartMusic
-  ; "Skogsvisa": 16 takter i G-dur som loopar.
-  ; Det inom {} i noterna är effekter som ändrar ljudet medan låten spelar.
-  PLAY BPM 136
-  ; Kanal 1: melodi med pulsvåg, vibrato och pulsbreddsmodulering
-  PLAY WAVE 1,"Pulse"
-  PLAY ADSR 1,5,150,60,120
-  PLAY VOLUME 1,0.2
-  ; Kanal 2: bas med sågtand genom ett filter som öppnas vid varje ton
-  PLAY WAVE 2,"Sawtooth"
-  PLAY FILTER 2,"LOW",250,60
-  PLAY FILTERENV 2,1800,2,150
-  PLAY ADSR 2,2,0,100,50
-  PLAY GATE 2,70
-  PLAY VOLUME 2,0.28
-  ; Kanal 3: snabba arpeggion som ackord, som på C64
-  PLAY WAVE 3,"Pulse"
-  PLAY PULSE 3,25
-  PLAY ADSR 3,10,400,35,200
-  PLAY VOLUME 3,0.09
-  ; Kanal 4: trummor
-  PLAY WAVE 4,"Drums"
-  PLAY VOLUME 4,0.35
+; Musiken är gjord i trackern och ligger i Sound/Tracker.
+; Öppna filerna med TRACKER-knappen för att se eller ändra dem.
+PROC TitleMusic
+  TRACK LOAD "Sound/Tracker/skogsmorgon.amostrk"
+  TRACK LOOP 1
+  TRACK PLAY
+END PROC
 
-  ; Del A
-  LA$="{PULSE 30 12 1.5; GLIDE 0; VIBRATO 12 5} G5:8 D5 G5 A5 B5:4 A5:8 G5 F#5:4 A5:8 F#5 D5:4 R:4 E5:8 G5 B5 G5 E5 G5 B5 C6 C6:4."
-  LA$=LA$+" B5:8 A5:4 G5:4 B5:8 A5 G5 D5 G5:4 B5:4 A5:8 B5 A5 F#5 D5:4 F#5:4 E5:8 G5 C6 E6 D6:4 C6:8 B5 {VIBRATO 35 6} A5:2. {VIBRATO 12 5} R:4"
-  BA$="{SWEEP 250 300} G2:8 G2 G3 G2 G2 G3 G2 G3 D2:8 D2 D3 D2 D2 D3 D2 D3 E2:8 E2 E3 E2 E2 E3 E2 E3 C2:8 C2 C3 C2 C2 C3"
-  BA$=BA$+" C2 C3 G2:8 G2 G3 G2 G2 G3 G2 G3 D2:8 D2 D3 D2 D2 D3 D2 D3 C2:8 C2 C3 C2 C2 C3 C2 C3 D2:8 D2 D3 D2 D2 D3 D2 D3"
-  AA$="{ARP 0 4 7} G3:1 {ARP 0 4 7} D4:1 {ARP 0 3 7} E4:1 {ARP 0 4 7} C4:1"
-  AA$=AA$+" {ARP 0 4 7} G3:1 {ARP 0 4 7} D4:1 {ARP 0 4 7} C4:1 {ARP 0 4 7} D4:1"
-  DA$="CY:8 HH SD HH BD BD SD HH BD:8 HH SD HH BD BD SD HH BD:8 HH SD HH BD BD SD HH BD:8 HH SD HH BD BD SD HH"
-  DA$=DA$+" BD:8 HH SD HH BD BD SD HH BD:8 HH SD HH BD BD SD HH BD:8 HH SD HH BD BD SD HH BD:8 HH SD HH BD BD SD HH"
-  ; Del B: tunnare melodi som glider, och basens filter öppnas sakta
-  LB$="{PULSE 50; GLIDE 40} E6:4 B5:8 G5 E6:4 F#6:8 G6 E6:4. D6:8 C6:4 B5:4 B5:8 C6 D6 B5 G5:4 D6:4 C6:8 B5 A5"
-  LB$=LB$+" F#5 A5:2 E6:4 B5:8 G5 E6:4 G6:4 F#6:8 E6 D6 C6 E6:4 C6:4 D6:8 C6 B5 A5 F#5:4 A5:4 {GLIDE 120} D5:8 D6:4. R:2"
-  BB$="{SWEEP 1400 6000} E2:8 E2 E3 E2 E2 E3 E2 E3 C2:8 C2 C3 C2 C2 C3 C2 C3 G2:8 G2 G3 G2 G2 G3 G2 G3 D2:8 D2 D3 D2 D2 D3"
-  BB$=BB$+" D2 D3 E2:8 E2 E3 E2 E2 E3 E2 E3 C2:8 C2 C3 C2 C2 C3 C2 C3 D2:8 D2 D3 D2 D2 D3 D2 D3 D2:8 D2 D3 D2 D2 D3 D2 D3"
-  AB$="{ARP 0 3 7 12} E4:1 {ARP 0 4 7 12} C4:1 {ARP 0 4 7 12} G3:1 {ARP 0 4 7 12} D4:1"
-  AB$=AB$+" {ARP 0 3 7 12} E4:1 {ARP 0 4 7 12} C4:1 {ARP 0 4 7 12} D4:1 {ARP 0 4 7 12} D4:1"
-  DB$="BD:8 HH SD HH BD HH SD OH BD:8 HH SD HH BD HH SD OH BD:8 HH SD HH BD HH SD OH BD:8 HH SD HH BD HH SD OH BD:8 HH SD"
-  DB$=DB$+" HH BD HH SD OH BD:8 HH SD HH BD HH SD OH BD:8 HH SD HH BD HH SD OH BD:16 BD SD SD TM TM SD SD BD:8 HH SD:16 SD SD SD"
+PROC GameMusic
+  TRACK LOAD "Sound/Tracker/skogsvisa.amostrk"
+  TRACK LOOP 1
+  TRACK PLAY
+END PROC
 
-  PLAY LOOP 1,LA$+" "+LB$
-  PLAY LOOP 2,BA$+" "+BB$
-  PLAY LOOP 3,AA$+" "+AB$
-  PLAY LOOP 4,DA$+" "+DB$
+; Fanfaren och game over spelas en gång
+PROC WinMusic
+  TRACK LOAD "Sound/Tracker/seger.amostrk"
+  TRACK LOOP 0
+  TRACK PLAY
+END PROC
+
+PROC GameOverMusic
+  TRACK LOAD "Sound/Tracker/gameover.amostrk"
+  TRACK LOOP 0
+  TRACK PLAY
 END PROC
 
 
