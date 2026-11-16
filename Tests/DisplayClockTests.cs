@@ -108,4 +108,26 @@ public class ShownFrameTests
         Assert.Equal(20, layer.ShownShaderValues![0].X);
         Assert.False(g.LatchShownFrame());          // nothing new at the one after
     }
+
+    // A game that swaps layers every frame (Frog Hop): which layers are on must belong to the same
+    // frame as everything else on the screen, not to the one the program is drawing now
+    [AvaloniaFact]
+    public void A_refresh_locks_in_which_layers_are_on()
+    {
+        var g = new AmosGraphics();
+        g.Screen(640, 480);
+        g.SetDrawingScreen(2);
+        var one = g.ActiveFrame[1];
+
+        one.Visible = true;
+        g.PresentFrame();
+        g.LatchShownFrame();                         // frame 1 shows layer 1
+
+        one.Visible = false;                         // the program swaps for frame 2 ...
+        Assert.True(one.ShownVisible);               // ... but the screen still shows frame 1
+
+        g.PresentFrame();
+        g.LatchShownFrame();
+        Assert.False(one.ShownVisible);
+    }
 }

@@ -2267,13 +2267,14 @@ public static partial class AmosRunner
                                 // 2. Animations
                                 animationManager.Tick(graphics); 
                                 
-                                // 3. Wait until the next frame is ready (timing)
-                                await DisplayClock.WaitFrameAsync(token);
-
-                                // 4. Lock in the frame's texts and signal that the UI should update
+                                // 3. Hand over the finished frame (texts, sprites, scroll, which layers are on),
+                                //    then wait for the screen refresh that shows it. Handing it over first means
+                                //    the refresh always shows the frame the program has just finished, with
+                                //    everything from the same frame (a game that swaps layers every frame relies on it).
                                 graphics.PresentFrame();
-                                FrameLog.Write("vbl", graphics.PresentedFrame, GC.GetTotalPauseDuration().TotalMilliseconds);
                                 onGraphicsChanged();
+                                await DisplayClock.WaitFrameAsync(token);
+                                FrameLog.Write("vbl", graphics.PresentedFrame, GC.GetTotalPauseDuration().TotalMilliseconds);
 
                                 // 5. Start drawing on the new inactive frame
                                 graphics.BeginFrame();

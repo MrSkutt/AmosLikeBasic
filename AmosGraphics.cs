@@ -41,6 +41,24 @@ public sealed class GpuLayer
 
     // PresentedShaderValues as they were at the latest screen refresh (see LatchShownFrame)
     public Vector4[]? ShownShaderValues { get; set; }
+
+    // Visible (SCREEN ON/OFF) at the latest WAIT VBL, and at the latest screen refresh
+    public bool? PresentedVisible { get; set; }
+    public bool? ShownVisible { get; set; }
+
+    // A copy of the pixels taken at the latest screen refresh (see LatchShownFrame). Avalonia draws
+    // a frame on its render thread a little after the refresh, and by then the program may already
+    // be drawing the next frame into this layer (a game that swaps two layers, like Frog Hop).
+    public SKImage? ShownImage { get; set; }
+    public Queue<SKImage> RetiredImages { get; } = new();
+
+    // An old copy may still be in a frame the render thread has not drawn yet, so it is kept for a few frames
+    public void RetireShownImage()
+    {
+        if (ShownImage != null) RetiredImages.Enqueue(ShownImage);
+        ShownImage = null;
+        while (RetiredImages.Count > 4) RetiredImages.Dequeue().Dispose();
+    }
     
     // Shader-support
     public string? SkSlCode { get; set; }
@@ -240,14 +258,17 @@ public sealed class LayerDrawOperation
     private readonly List<AmosGraphics.SpriteRenderState> _sprites;
     private GRContext? _gr; // Set during Render: the GPU context the effects run in
 
+    private readonly SKImage? _pixels;   // the layer's pixels as they were at the screen refresh, if copied
+
     public LayerDrawOperation(Rect bounds, AmosGraphics graphics, GpuLayer layer,
-        List<AmosGraphics.QueuedFontText> texts, List<AmosGraphics.SpriteRenderState> sprites)
+        List<AmosGraphics.QueuedFontText> texts, List<AmosGraphics.SpriteRenderState> sprites, SKImage? pixels = null)
     {
         Bounds = bounds;
         _graphics = graphics;
         _layer = layer;
         _texts = texts;
         _sprites = sprites;
+        _pixels = pixels;
     }
 
     public Rect Bounds { get; }
@@ -316,9 +337,12 @@ public sealed class LayerDrawOperation
     {
         c.Clear(SKColors.Transparent);
 
-        // Draw layer.Bitmap (background, tiles, PLOT/LINE)
-        using (var bg = ToSkImage(_layer.Bitmap))
-            c.DrawImage(bg, 0, 0);
+        // Draw layer.Bitmap (background, tiles, PLOT/LINE): the copy from the screen refresh if there is one
+        if (_pixels != null)
+            c.DrawImage(_pixels, 0, 0);
+        else
+            using (var bg = ToSkImage(_layer.Bitmap))
+                c.DrawImage(bg, 0, 0);
 
         foreach (var qt in _texts)
             DrawText(c, qt);
@@ -560,16 +584,23 @@ public sealed class AmosGpuView : Control
         for (int layerIndex = 0; layerIndex < layersCopy.Count; layerIndex++)
         {
             var layer = layersCopy[layerIndex];
-            if (layer.Bitmap == null || !layer.Visible) continue;
+            if (layer.Bitmap == null || !(layer.ShownVisible ?? layer.PresentedVisible ?? layer.Visible)) continue;
 
             layer.SkSlCode ??= RasterShaderCode;
 
             var texts = fontTextsCopy.Where(qt => qt.Layer == -1 || qt.Layer == layerIndex).ToList();
             var sprites = spritesCopy.Where(s => s.Layer == -1 || s.Layer == layerIndex).ToList();
-            layers.Add(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites));
+            layers.Add(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites, layer.ShownImage));
         }
         long frame = Graphics.ShownFrame;
-        FrameLog.Write("paint", frame);
+        if (FrameLog.On)
+        {
+            // extra = the layers drawn, as bits (layer 0 = 1, layer 1 = 2, layer 2 = 4 ...)
+            int mask = 0;
+            for (int i = 0; i < layersCopy.Count && i < 30; i++)
+                if (layersCopy[i].ShownVisible ?? layersCopy[i].PresentedVisible ?? layersCopy[i].Visible) mask |= 1 << i;
+            FrameLog.Write("paint", frame, mask);
+        }
         ctx.Custom(new ScreenDrawOperation(screenRect, Graphics, layers) { Frame = frame });
     }
 }
@@ -1678,7 +1709,18 @@ public sealed class AmosGraphics
             bool changed = ShownFrame != PresentedFrame;
             _shownFontTexts = _presentedFontTexts;
             _shownSprites = _presentedSprites;
-            foreach (var layer in _layers) layer.ShownShaderValues = layer.PresentedShaderValues;
+            foreach (var layer in _layers)
+            {
+                layer.ShownShaderValues = layer.PresentedShaderValues;
+                layer.ShownVisible = layer.PresentedVisible;
+                // The program is waiting at WAIT VBL now, so the pixels are a whole frame: copy them
+                if (changed)
+                {
+                    layer.RetireShownImage();
+                    if (layer.ShownVisible == true && layer.Bitmap != null)
+                        layer.ShownImage = LayerDrawOperation.ToSkImage(layer.Bitmap);
+                }
+            }
             ShownFrame = PresentedFrame;
             return changed;
         }
@@ -1688,7 +1730,7 @@ public sealed class AmosGraphics
     {
         _shownFontTexts = null;
         _shownSprites = null;
-        foreach (var layer in _layers) layer.ShownShaderValues = null;
+        foreach (var layer in _layers) { layer.ShownShaderValues = null; layer.ShownVisible = null; layer.RetireShownImage(); }
     }
 
     // Called at WAIT VBL: lock in what should be shown for this frame
@@ -1700,7 +1742,10 @@ public sealed class AmosGraphics
             _presentedFontTexts = _fontTexts.ToList();
             _presentedSprites = BuildSpriteStates();
             foreach (var layer in _layers)
+            {
                 layer.PresentedShaderValues = (Vector4[])layer.ShaderValues.Clone();
+                layer.PresentedVisible = layer.Visible;
+            }
         }
     }
 
@@ -1731,7 +1776,7 @@ public sealed class AmosGraphics
             _fonts.Clear();
             _fontTexts.Clear();
             _presentedFontTexts = null;
-            foreach (var layer in _layers) layer.PresentedShaderValues = null;
+            foreach (var layer in _layers) { layer.PresentedShaderValues = null; layer.PresentedVisible = null; }
             ClearAllRasterBars(0);
         }
     }
