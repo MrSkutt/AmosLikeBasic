@@ -136,9 +136,7 @@ On Windows `Cmd` is `Ctrl` instead.
 
 **`&` and `+` are equally strong.** `"Total: " & 2 + 3` gives `Total: 23`. Add brackets: `"Total: " & (2 + 3)`.
 
-**Arrays start at 0.** `DIM A(10)` gives `A(0)` to `A(9)`. `A(10)` gives an error.
-
-**FOR runs at least once.** `FOR K=0 TO N-1` runs one lap even when `N` is 0. Check first: `IF N>0 THEN` before the loop.
+**DIM gives the highest index.** `DIM A(10)` gives eleven places, `A(0)` to `A(10)`. An array with exactly three starting values is `DIM A(2) = [1, 2, 3]`.
 
 **DATA needs a label.** `DATA` lines must be under a label, and `RESTORE label` must run before the first `READ`.
 

@@ -109,6 +109,40 @@ public static partial class AmosRunner
         return sb.ToString();
     }
     
+    // STRING$: a character repeated; the character is the first of a text, or a character code
+    private static string StringOf(object count, object ch)
+    {
+        int n = (int)Math.Round(Convert.ToDouble(count, CultureInfo.InvariantCulture));
+        string c = ch is string s ? (s.Length > 0 ? s[..1] : "") : ((char)(int)Math.Round(Convert.ToDouble(ch, CultureInfo.InvariantCulture))).ToString();
+        return n <= 0 || c.Length == 0 ? "" : new string(c[0], n);
+    }
+
+    private const int PrintZone = 14;   // PRINT A, B: B starts at the next multiple of 14 characters
+
+    // Splits a PRINT list at ; and , outside quotes and brackets: "A; B, C" → (A ;) (B ,) (C)
+    private static List<(string expr, char sep)> SplitPrintItems(string text)
+    {
+        var items = new List<(string, char)>();
+        int depth = 0, start = 0;
+        bool inString = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c == '"') inString = !inString;
+            if (inString) continue;
+            if (c is '(' or '[') depth++;
+            else if (c is ')' or ']') depth--;
+            else if (depth == 0 && c is ';' or ',')
+            {
+                items.Add((text[start..i].Trim(), c));
+                start = i + 1;
+            }
+        }
+        var last = text[start..].Trim();
+        if (last.Length > 0 || items.Count == 0) items.Add((last, '\0'));
+        return items;
+    }
+
     private static async Task EmitPrintAsync(Func<string, Task> appendLineAsync, string text)
     {
         // Normalise newlines and write as several @@PRINT lines
@@ -122,11 +156,35 @@ public static partial class AmosRunner
     private sealed class ForFrame
     {
         public required string VarName; 
-        public required int EndValue; 
-        public required int StepValue; 
+        public required double EndValue; 
+        public required double StepValue; 
         public required int LineAfterForPc; 
         public required int ForLineNumber;
+        public int NextPc = -1;          // the line with the matching NEXT (for EXIT FOR)
     }
+
+    // FOR var = start TO end [STEP step], as in BASIC: decimals are allowed, and a loop whose start is
+    // already past the end does not run at all (FOR I = 1 TO 0). Gives the frame, or null to skip the loop.
+    private static (string var, double start, double end, double step) ParseFor(string arg, Func<string, double> eval, int ln)
+    {
+        var eq = arg.IndexOf('=');
+        if (eq < 0) throw new Exception($"Syntax Error in FOR: Missing '=' at line {ln}");
+        var name = arg[..eq].Trim();
+        var rhs = arg[(eq + 1)..].Trim();
+        var toIdx = IndexOfWord(rhs, "TO");
+        if (toIdx < 0) throw new Exception($"Syntax Error in FOR: Missing 'TO' at line {ln}");
+        var rest = rhs[(toIdx + 2)..].Trim();
+        var stIdx = IndexOfWord(rest, "STEP");
+        double start = eval(rhs[..toIdx].Trim());
+        double end = eval(stIdx < 0 ? rest : rest[..stIdx].Trim());
+        double step = stIdx < 0 ? 1 : eval(rest[(stIdx + 4)..].Trim());
+        if (step == 0) throw new Exception($"FOR with STEP 0 never ends, at line {ln}");
+        return (name, start, end, step);
+    }
+
+    // Has the loop variable gone past the end? A small margin, so that 0.1 steps do not miss the end
+    private static bool ForDone(double value, double end, double step) =>
+        step > 0 ? value > end + 0.000001 : value < end - 0.000001;
     private sealed class WhileFrame
     {
         public required int WhilePc;     // Program counter for the WHILE line
@@ -362,8 +420,13 @@ public static partial class AmosRunner
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         long lastVarUpdateTime = long.MinValue / 2;
         const long updateIntervalMs = 500;
+        var constants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // names made with CONST
         // A local helper function for updating variables and triggering the UI
         var setVar = (string name, object value) => {
+            if (constants.Contains(name))
+                throw new Exception($"{name} is a constant (CONST) and cannot be changed");
+            // A% holds whole numbers: the decimals are dropped, as in BASIC
+            if (name.EndsWith('%') && value is double whole) value = Math.Truncate(whole);
             vars[name] = value;
                 
             // TickCount64 is much cheaper than DateTime.Now, which otherwise cost on every assignment
@@ -375,6 +438,7 @@ public static partial class AmosRunner
             }
         };
         var forStack = new Stack<ForFrame>();
+        int printColumn = 0;   // where the text cursor is on its row, for PRINT A, B
         var whileStack = new Stack<WhileFrame>();
         var repeatStack = new Stack<RepeatFrame>();
         var selectRuntimeStack = new Stack<SelectRuntimeFrame>();
@@ -419,62 +483,105 @@ public static partial class AmosRunner
             for (int lineIndex = 0; lineIndex < input.Length; lineIndex++)
             {
                 var raw = input[lineIndex];
-                int before = result.Count;
                 var stripped = StripLeadingLineNumber(StripComments(raw)).Trim();
-                var upper = stripped.ToUpperInvariant();
-
-                // Is it an inline IF? (i.e. THEN followed by actual commands)
-                if (upper.StartsWith("IF "))
-                {
-                    int thenIdx = IndexOfWord(upper, "THEN");
-                    if (thenIdx >= 0)
-                    {
-                        var afterThen = stripped[(thenIdx + 4)..].Trim();
-                        // If there is something after THEN → inline IF
-                        if (!string.IsNullOrEmpty(afterThen))
-                        {
-                            // Extract the condition part
-                            var condition = stripped[..thenIdx].Trim(); // "IF X > 5"
-                    
-                            // Check whether there is an ELSE
-                            var thenCmds = afterThen;
-                            string? elseCmds = null;
-                    
-                            int elseIdx = IndexOfWordOutsideQuotes(afterThen, "ELSE");
-                            if (elseIdx >= 0)
-                            {
-                                thenCmds = afterThen[..elseIdx].Trim();
-                                elseCmds = afterThen[(elseIdx + 4)..].Trim();
-                            }
-
-                            // Bygg expanded IF-block
-                            result.Add(condition + " THEN"); // "IF X > 5 THEN"
-                            foreach (var cmd in SplitMultipleCommands(thenCmds))
-                                if (!string.IsNullOrWhiteSpace(cmd))
-                                    result.Add(cmd.Trim());
-                    
-                            if (elseCmds != null)
-                            {
-                                result.Add("ELSE");
-                                foreach (var cmd in SplitMultipleCommands(elseCmds))
-                                    if (!string.IsNullOrWhiteSpace(cmd))
-                                        result.Add(cmd.Trim());
-                            }
-                    
-                            result.Add("ENDIF");
-                            while (origin.Count < result.Count) origin.Add(lineIndex + 1);
-                            continue;
-                        }
-                    }
-                }
-        
-                result.Add(raw); // All other lines unchanged
-                origin.Add(lineIndex + 1);
+                if (!ExpandStatement(stripped, result)) result.Add(raw); // All other lines unchanged
+                while (origin.Count < result.Count) origin.Add(lineIndex + 1);
             }
+            return RewriteElseIf(result, origin);
+        }
+
+        // An inline IF ("IF X THEN CMD1 : CMD2 ELSE CMD3") becomes a block. The commands after THEN and
+        // ELSE may themselves be inline IFs ("... ELSE IF Y THEN CMD4"), which are expanded the same way.
+        // Returns false if the statement is not an inline IF.
+        static bool ExpandStatement(string stmt, List<string> result)
+        {
+            var upper = stmt.ToUpperInvariant();
+            if (!upper.StartsWith("IF ")) return false;
+            int thenIdx = IndexOfWord(upper, "THEN");
+            if (thenIdx < 0) return false;
+            var afterThen = stmt[(thenIdx + 4)..].Trim();
+            if (string.IsNullOrEmpty(afterThen)) return false;   // a block IF
+
+            var condition = stmt[..thenIdx].Trim(); // "IF X > 5"
+            var thenCmds = afterThen;
+            string? elseCmds = null;
+            int elseIdx = IndexOfWordOutsideQuotes(afterThen, "ELSE");
+            if (elseIdx >= 0)
+            {
+                thenCmds = afterThen[..elseIdx].Trim();
+                elseCmds = afterThen[(elseIdx + 4)..].Trim();
+            }
+
+            result.Add(condition + " THEN"); // "IF X > 5 THEN"
+            AddCommands(thenCmds, result);
+            if (elseCmds != null)
+            {
+                result.Add("ELSE");
+                // The ELSE part is one inline IF if it starts with IF; otherwise commands split at ':'
+                if (!ExpandStatement(elseCmds, result)) AddCommands(elseCmds, result);
+            }
+            result.Add("ENDIF");
+            return true;
+        }
+
+        static void AddCommands(string cmds, List<string> result)
+        {
+            var parts = SplitMultipleCommands(cmds);
+            for (int k = 0; k < parts.Count; k++)
+            {
+                var cmd = parts[k].Trim();
+                if (string.IsNullOrWhiteSpace(cmd)) continue;
+                // An inline IF among the commands takes the rest of them with it, as in BASIC
+                if (cmd.StartsWith("IF ", StringComparison.OrdinalIgnoreCase) &&
+                    ExpandStatement(string.Join(" : ", parts.Skip(k).Select(x => x.Trim())), result))
+                    return;
+                result.Add(cmd);
+            }
+        }
+
+        // ELSEIF / ELSE IF in a block IF becomes an ELSE with a new IF inside it; the extra IFs are
+        // closed with ENDIFs where the whole block ends:
+        //   IF A THEN / ELSEIF B THEN / ELSE / END IF  →  IF A THEN / ELSE / IF B THEN / ELSE / ENDIF / END IF
+        static string[] RewriteElseIf(List<string> input, List<int> origin)
+        {
+            var result = new List<string>();
+            var newOrigin = new List<int>();
+            var open = new Stack<int>();   // per open block IF: how many extra ENDIFs it needs
+            for (int i = 0; i < input.Count; i++)
+            {
+                var stmt = StripLeadingLineNumber(StripComments(input[i])).Trim();
+                var upper = stmt.ToUpperInvariant();
+                void Add(string l) { result.Add(l); newOrigin.Add(origin[i]); }
+
+                bool elseIf = upper.StartsWith("ELSEIF ") || upper.StartsWith("ELSE IF ");
+                if (upper.StartsWith("IF ") && IndexOfWord(upper, "THEN") >= 0 &&
+                    stmt[(IndexOfWord(upper, "THEN") + 4)..].Trim().Length == 0)
+                {
+                    open.Push(0);
+                    Add(input[i]);
+                }
+                else if (elseIf && open.Count > 0)
+                {
+                    var rest = upper.StartsWith("ELSEIF ") ? stmt[7..] : stmt[8..];
+                    Add("ELSE");
+                    Add("IF " + rest.Trim());
+                    open.Push(open.Pop() + 1);
+                }
+                else if ((upper == "ENDIF" || upper == "END IF") && open.Count > 0)
+                {
+                    for (int k = open.Pop(); k > 0; k--) Add("ENDIF");
+                    Add(input[i]);
+                }
+                else Add(input[i]);
+            }
+            origin.Clear();
+            origin.AddRange(newOrigin);
             return result.ToArray();
         }
         
         var labels = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var forNext = new Dictionary<int, int>();  // FOR pc -> its NEXT pc
+        var forScanStack = new Stack<int>();
         var ifJumps = new Dictionary<int, int>(); // PC -> PC (where IF jumps if false)
         var elseJumps = new Dictionary<int, int>(); // PC -> PC (where ELSE jumps to skip to ENDIF)
             
@@ -504,6 +611,45 @@ public static partial class AmosRunner
             var da = Convert.ToDouble(a, CultureInfo.InvariantCulture);
             var db = Convert.ToDouble(b, CultureInfo.InvariantCulture);
             return Math.Abs(da - db) < 0.000001;
+        }
+
+        // "WHILE x" holds while x is true, "UNTIL x" until it becomes true (for DO and LOOP)
+        bool LoopConditionHolds(string text)
+        {
+            var t = text.Trim();
+            if (t.StartsWith("WHILE ", StringComparison.OrdinalIgnoreCase))
+                return EvalCondition(t[6..], vars, 0, getInkey, isKeyDown, graphics);
+            if (t.StartsWith("UNTIL ", StringComparison.OrdinalIgnoreCase))
+                return !EvalCondition(t[6..], vars, 0, getInkey, isKeyDown, graphics);
+            throw new Exception($"Expected WHILE or UNTIL, not '{t}'");
+        }
+
+        // CASE 3 / CASE 1, 3, 5 / CASE 1 TO 4 / CASE IS > 10 / CASE "A", "B"
+        bool CaseMatches(object selected, string caseExpr, int line)
+        {
+            foreach (var part in SplitTopLevelCsv(caseExpr))
+            {
+                var item = part.Trim();
+                if (item.StartsWith("IS ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var t = new Tokenizer(item[3..]);
+                    if (!t.TryConsumeCompareOp(out var op))
+                        throw new Exception($"CASE IS needs =, <>, <, >, <= or >= at line {line}");
+                    var bound = EvalValue(item[(3 + t.Pos)..].Trim(), vars, line, getInkey, isKeyDown, graphics);
+                    if (CompareValues(op, selected, bound)) return true;
+                    continue;
+                }
+                int toIdx = IndexOfWordOutsideQuotes(item, "TO");
+                if (toIdx > 0)
+                {
+                    var low = EvalValue(item[..toIdx].Trim(), vars, line, getInkey, isKeyDown, graphics);
+                    var high = EvalValue(item[(toIdx + 2)..].Trim(), vars, line, getInkey, isKeyDown, graphics);
+                    if (CompareValues(">=", selected, low) && CompareValues("<=", selected, high)) return true;
+                    continue;
+                }
+                if (SelectValueEquals(selected, EvalValue(item, vars, line, getInkey, isKeyDown, graphics))) return true;
+            }
+            return false;
         }
 
         void PopSelectUntilEndPc(int endPc)
@@ -767,10 +913,18 @@ public static partial class AmosRunner
                     procDef.EndPc = i;
             }
             
+            // FOR/NEXT pairs (a line can hold several statements)
+            foreach (var stmt in SplitMultipleCommands(scanLine))
+            {
+                var st = stmt.Trim().ToUpperInvariant();
+                if (st.StartsWith("FOR ")) forScanStack.Push(i);
+                else if ((st == "NEXT" || st.StartsWith("NEXT ")) && forScanStack.Count > 0) forNext[forScanStack.Pop()] = i;
+            }
+
             // WHILE/WEND scan
             if (upperScan.StartsWith("WHILE "))
                 whileScanStack.Push(i);
-            else if (upperScan.StartsWith("DO"))
+            else if (upperScan == "DO" || upperScan.StartsWith("DO "))   // not DONE = 1
                 whileScanStack.Push(i);
             else if (upperScan == "WEND")
             {
@@ -781,7 +935,7 @@ public static partial class AmosRunner
                 whileMap[whilePc] = i;
                 wendMap[i] = whilePc;
             }
-            else if (upperScan == "LOOP")  // ← NEW BLOCK
+            else if (upperScan == "LOOP" || upperScan.StartsWith("LOOP "))   // LOOP, LOOP WHILE x, LOOP UNTIL x
             {
                 if (whileScanStack.Count == 0)
                     throw new Exception($"LOOP without DO at line {i + 1}");
@@ -803,7 +957,10 @@ public static partial class AmosRunner
 
                 var selPc = selectScanStack.Peek();
                 var expr = scanLine[4..].Trim(); // after "CASE"
-                selectMap[selPc].Cases.Add((expr, i));
+                if (expr.Equals("ELSE", StringComparison.OrdinalIgnoreCase))
+                    selectMap[selPc].DefaultPc = i;   // CASE ELSE is the same as DEFAULT
+                else
+                    selectMap[selPc].Cases.Add((expr, i));
                 selectOwnerMarker[i] = selPc;
             }
             else if (upperScan == "DEFAULT")
@@ -1002,17 +1159,18 @@ public static partial class AmosRunner
                     // FOR / NEXT i funktionen
                     if (fcmd == "FOR")
                     {
-                        var eqI = farg.IndexOf('=');
-                        var fV = farg[..eqI].Trim();
-                        var rhs = farg[(eqI + 1)..].Trim();
-                        var toI = IndexOfWord(rhs, "TO");
-                        var startV = EvalInt(rhs[..toI].Trim(), vars, funcPc + 1, getInkey, isKeyDown, graphics);
-                        var restV = rhs[(toI + 2)..].Trim();
-                        var stI = IndexOfWord(restV, "STEP");
-                        var endV = EvalInt(stI < 0 ? restV : restV[..stI].Trim(), vars, funcPc + 1, getInkey, isKeyDown, graphics);
-                        var stepV = stI < 0 ? 1 : EvalInt(restV[(stI + 4)..].Trim(), vars, funcPc + 1, getInkey, isKeyDown, graphics);
+                        int fLine = funcPc + 1;
+                        var (fV, startV, endV, stepV) = ParseFor(farg, e => EvalDouble(e, vars, fLine, getInkey, isKeyDown, graphics), fLine);
                         setVar(fV, startV);
-                        forStack.Push(new ForFrame { VarName = fV, EndValue = endV, StepValue = stepV, LineAfterForPc = funcPc + 1, ForLineNumber = funcPc + 1 });
+                        int fNext = forNext.TryGetValue(funcPc, out var fnp) ? fnp : -1;
+                        if (ForDone(startV, endV, stepV))
+                        {
+                            if (fNext < 0) throw new Exception($"FOR without NEXT at line {fLine}");
+                            funcPc = fNext + 1;
+                            funcJump = true;
+                            break;
+                        }
+                        forStack.Push(new ForFrame { VarName = fV, EndValue = endV, StepValue = stepV, LineAfterForPc = funcPc + 1, ForLineNumber = fLine, NextPc = fNext });
                         continue;
                     }
 
@@ -1023,7 +1181,7 @@ public static partial class AmosRunner
                             var ff = forStack.Peek();
                             var cur = GetDoubleVar(ff.VarName, vars, funcPc + 1) + ff.StepValue;
                             setVar(ff.VarName, cur);
-                            bool done = ff.StepValue > 0 ? cur > ff.EndValue + 0.000001 : cur < ff.EndValue - 0.000001;
+                            bool done = ForDone(cur, ff.EndValue, ff.StepValue);
                             if (!done) { funcPc = ff.LineAfterForPc; funcJump = true; }
                             else forStack.Pop();
                         }
@@ -1104,6 +1262,11 @@ public static partial class AmosRunner
                 {
                     var cmd = preparedCmd.Cmd;
                     var arg = preparedCmd.Arg;
+                    if (!preparedCmd.SubCommandChecked)
+                    {
+                        CheckSubCommand(cmd, arg, ln);
+                        preparedCmd.SubCommandChecked = true;
+                    }
 
                     switch (cmd)
                     {
@@ -1223,10 +1386,35 @@ public static partial class AmosRunner
                             {
                                 errorMode = 0; // Break/Crash
                             }
+                            else if (onArg.StartsWith("ERROR"))
+                                throw new Exception($"Unknown ON ERROR form: ON {arg} at line {ln}");
+                            else
+                            {
+                                // ON n GOTO a, b, c / ON n GOSUB a, b, c: jumps to the n:th label;
+                                // with n outside the list the program just carries on
+                                int gotoIdx = IndexOfWordOutsideQuotes(arg, "GOTO");
+                                int gosubIdx = IndexOfWordOutsideQuotes(arg, "GOSUB");
+                                bool isGosub = gosubIdx >= 0 && (gotoIdx < 0 || gosubIdx < gotoIdx);
+                                int kwIdx = isGosub ? gosubIdx : gotoIdx;
+                                if (kwIdx < 0)
+                                    throw new Exception($"ON needs GOTO or GOSUB at line {ln}");
+                                int n = EvalInt(arg[..kwIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics);
+                                var targets = SplitTopLevelCsv(arg[(kwIdx + (isGosub ? 5 : 4))..].Trim());
+                                if (n >= 1 && n <= targets.Count)
+                                {
+                                    var label = targets[n - 1].Trim();
+                                    if (!labels.TryGetValue(label, out var onPc))
+                                        throw new Exception($"Label {label} not found at line {ln}");
+                                    if (isGosub) gosubStack.Push(pc + 1);
+                                    pc = onPc;
+                                    jumpHappened = true;
+                                }
+                            }
 
                             break;
 
                         case "CLS":
+                            printColumn = 0;
                             await appendLineAsync("@@CLS");
                             await clearAsync();
                             break;
@@ -1356,8 +1544,33 @@ public static partial class AmosRunner
                             }
                             else
                             {
-                                var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
-                                await EmitPrintAsync(appendLineAsync, ValueToString(valToPrint));
+                                // PRINT A; B joins the values, PRINT A, B puts B at the next tab stop (every
+                                // 14 characters), and a ; or , at the end leaves the cursor on the same row
+                                var printed = new StringBuilder();
+                                char lastSep = '\0';
+                                foreach (var (expr, sep) in SplitPrintItems(printArg))
+                                {
+                                    if (expr.Length > 0)
+                                        printed.Append(ValueToString(EvalValue(expr, vars, ln, getInkey, isKeyDown, graphics)));
+                                    if (sep == ',')
+                                    {
+                                        int column = printColumn + printed.Length;
+                                        printed.Append(' ', PrintZone - column % PrintZone);
+                                    }
+                                    lastSep = sep;
+                                }
+                                if (lastSep is ';' or ',')
+                                {
+                                    await appendLineAsync("@@PRINTRAW " + printed);
+                                    var text = printed.ToString();
+                                    int nl = text.LastIndexOf('\n');
+                                    printColumn = nl >= 0 ? text.Length - nl - 1 : printColumn + text.Length;
+                                }
+                                else
+                                {
+                                    await EmitPrintAsync(appendLineAsync, printed.ToString());
+                                    printColumn = 0;
+                                }
                             }
                         }
                             break;
@@ -1741,8 +1954,10 @@ public static partial class AmosRunner
                         }
                         case "LOCATE":
                             var lp2 = SplitCsvOrSpaces(arg);
-                            await appendLineAsync(
-                                $"@@LOCATE {EvalInt(lp2[0], vars, ln, getInkey, isKeyDown, graphics)} {EvalInt(lp2[1], vars, ln, getInkey, isKeyDown, graphics)}");
+                            int locRow = EvalInt(lp2[0], vars, ln, getInkey, isKeyDown, graphics);
+                            int locCol = EvalInt(lp2[1], vars, ln, getInkey, isKeyDown, graphics);
+                            printColumn = Math.Max(0, locCol - 1);
+                            await appendLineAsync($"@@LOCATE {locRow} {locCol}");
                             break;
 
                         case "LOCATEG":
@@ -1829,14 +2044,15 @@ public static partial class AmosRunner
                             if (!selectMap.TryGetValue(pc, out var sel))
                                 throw new Exception($"SELECT without ENDSELECT at line {ln}");
 
-                            var selectedValue = EvalValue(arg, vars, ln, getInkey, isKeyDown, graphics);
+                            // SELECT CASE X (as in most BASICs) or SELECT X
+                            var selectExpr = arg.StartsWith("CASE ", StringComparison.OrdinalIgnoreCase) ? arg[5..] : arg;
+                            var selectedValue = EvalValue(selectExpr, vars, ln, getInkey, isKeyDown, graphics);
 
                             int? targetMarkerPc = null;
 
                             foreach (var (caseExpr, casePc) in sel.Cases)
                             {
-                                var caseValue = EvalValue(caseExpr, vars, ln, getInkey, isKeyDown, graphics);
-                                if (SelectValueEquals(selectedValue, caseValue))
+                                if (CaseMatches(selectedValue, caseExpr, ln))
                                 {
                                     targetMarkerPc = casePc;
                                     break;
@@ -1953,6 +2169,25 @@ public static partial class AmosRunner
                             else throw new Exception($"RETURN without GOSUB at line {ln}");
 
                             break;
+                        case "CONST":
+                        {
+                            // CONST NAME = value: a variable that cannot be changed afterwards
+                            var (cn, cv) = SplitAssignment(arg);
+                            cn = cn.Trim();
+                            if (cn.Length == 0 || cn.Contains('('))
+                                throw new Exception($"CONST needs a name and a value, like CONST SPEED = 4, at line {ln}");
+                            var cval = EvalValue(cv, vars, ln, getInkey, isKeyDown, graphics);
+                            if (constants.Contains(cn))
+                            {
+                                // The same CONST line again (the program went back to it) is fine
+                                if (ValueToString(vars[cn]) != ValueToString(cval))
+                                    throw new Exception($"{cn} is a constant (CONST) and cannot be changed, at line {ln}");
+                                break;
+                            }
+                            setVar(cn, cval);
+                            constants.Add(cn);
+                            break;
+                        }
                         case "LET":
                         {
                             // "A(I) = value" also ends up here (via SplitCommand), so arrays must be handled
@@ -1988,12 +2223,15 @@ public static partial class AmosRunner
                                     throw new Exception($"DIM Error at line {ln}: Dimension {i} cannot be negative");
                             }
 
+                            // As in BASIC, the number is the highest index: DIM A(10) gives A(0) to A(10)
+                            var sizes = dimensions.Select(d => d + 1).ToArray();
+
                             // Create the array based on the type ($ = string)
                             IAmosArray array;
                             if (arrName.EndsWith("$", StringComparison.Ordinal))
-                                array = new AmosStringArray(dimensions);
+                                array = new AmosStringArray(sizes);
                             else
-                                array = new AmosNumericArray(dimensions);
+                                array = new AmosNumericArray(sizes);
 
                             vars[arrName] = array;
 
@@ -2208,39 +2446,35 @@ public static partial class AmosRunner
                         }
                         
                         case "FOR":
-                            var eq = arg.IndexOf('=');
-                            if (eq < 0) throw new Exception($"Syntax Error in FOR: Missing '=' at line {ln}");
-                            var fV = arg[..eq].Trim();
-                            var rhs = arg[(eq + 1)..].Trim();
-                            var toIdx = IndexOfWord(rhs, "TO");
-                            if (toIdx < 0) throw new Exception($"Syntax Error in FOR: Missing 'TO' at line {ln}");
-                            var start = EvalInt(rhs[..toIdx].Trim(), vars, ln, getInkey, isKeyDown, graphics);
-                            var rest = rhs[(toIdx + 2)..].Trim();
-                            var stIdx = IndexOfWord(rest, "STEP");
-                            var end = EvalInt(stIdx < 0 ? rest : rest[..stIdx].Trim(), vars, ln, getInkey, isKeyDown,
-                                graphics);
-                            var step = stIdx < 0
-                                ? 1
-                                : EvalInt(rest[(stIdx + 4)..].Trim(), vars, ln, getInkey, isKeyDown, graphics);
-                            setVar(fV, (double)start);
+                        {
+                            var (fV, start, end, step) = ParseFor(arg, e => EvalDouble(e, vars, ln, getInkey, isKeyDown, graphics), ln);
+                            setVar(fV, start);
+                            // The same FOR running again before its loop ended (a GOTO back to it) replaces the old loop
+                            if (forStack.Any(fr => fr.LineAfterForPc == pc + 1))
+                                while (forStack.Count > 0 && forStack.Pop().LineAfterForPc != pc + 1) { }
+                            int nextPc = forNext.TryGetValue(pc, out var np) ? np : -1;
+                            if (ForDone(start, end, step))
+                            {
+                                // FOR I = 1 TO 0: the loop does not run at all
+                                if (nextPc < 0) throw new Exception($"FOR without NEXT at line {ln}");
+                                pc = nextPc + 1;
+                                jumpHappened = true;
+                                break;
+                            }
                             forStack.Push(new ForFrame
                             {
                                 VarName = fV, EndValue = end, StepValue = step, LineAfterForPc = pc + 1,
-                                ForLineNumber = ln
+                                ForLineNumber = ln, NextPc = nextPc
                             });
                             break;
+                        }
                         case "NEXT":
-                            if (forStack.Count == 0) break;
+                        {
+                            if (forStack.Count == 0) throw new Exception($"NEXT without FOR at line {ln}");
                             var f = forStack.Peek();
                             var cur = GetDoubleVar(f.VarName, vars, ln) + f.StepValue;
                             setVar(f.VarName, cur);
-
-                            // Add a small margin (0.000001) so that floating point errors do not run the loop once too often
-                            bool loopDone = f.StepValue > 0
-                                ? cur > (f.EndValue + 0.000001)
-                                : cur < (f.EndValue - 0.000001);
-
-                            if (!loopDone)
+                            if (!ForDone(cur, f.EndValue, f.StepValue))
                             {
                                 pc = f.LineAfterForPc;
                                 jumpHappened = true;
@@ -2249,8 +2483,8 @@ public static partial class AmosRunner
                             {
                                 forStack.Pop();
                             }
-
                             break;
+                        }
                         
                         case "WHILE":
                         {
@@ -2261,16 +2495,18 @@ public static partial class AmosRunner
                                 // Jump straight to the line after WEND
                                 if (!whileMap.TryGetValue(pc, out var wendPc))
                                     throw new Exception($"WHILE without WEND at line {ln}");
+                                if (whileStack.Count > 0 && whileStack.Peek().WhilePc == pc) whileStack.Pop();
 
                                 pc = wendPc + 1;
                                 jumpHappened = true;
                             }
                             else
                             {
-                                // The condition is true → continue, but remember the loop
+                                // The condition is true → continue, but remember the loop (once)
                                 if (!whileMap.TryGetValue(pc, out var wpc))
                                     throw new Exception($"WHILE without WEND at line {ln}");
 
+                                if (whileStack.Count == 0 || whileStack.Peek().WhilePc != pc)
                                 whileStack.Push(new WhileFrame
                                 {
                                     WhilePc = pc,
@@ -2284,15 +2520,25 @@ public static partial class AmosRunner
                         }
                         case "DO":
                         {
+                            // DO, DO WHILE x, DO UNTIL x: the condition is checked before every lap
                             if (!whileMap.TryGetValue(pc, out var loopPc))
                                 throw new Exception($"DO without LOOP at line {ln}");
-                            whileStack.Push(new WhileFrame
+                            bool isTop = whileStack.Count > 0 && whileStack.Peek().WhilePc == pc;
+                            if (!string.IsNullOrWhiteSpace(arg) && !LoopConditionHolds(arg))
                             {
-                                WhilePc = pc,
-                                WendPc = whileMap[pc],
-                                Line = ln,
-                                Condition = "1"
-                            });
+                                if (isTop) whileStack.Pop();
+                                pc = loopPc + 1;
+                                jumpHappened = true;
+                                break;
+                            }
+                            if (!isTop)
+                                whileStack.Push(new WhileFrame
+                                {
+                                    WhilePc = pc,
+                                    WendPc = loopPc,
+                                    Line = ln,
+                                    Condition = "1"
+                                });
                             break;
                         }
                         case "WEND":
@@ -2307,7 +2553,7 @@ public static partial class AmosRunner
 
                             if (EvalCondition(conditionText, vars, ln, getInkey, isKeyDown, graphics))
                             {
-                                pc = frame.WhilePc;
+                                pc = frame.WhilePc + 1;   // the condition is checked: straight into the loop
                                 jumpHappened = true;
                             }
                             else
@@ -2324,8 +2570,14 @@ public static partial class AmosRunner
                                 throw new Exception($"LOOP without DO at line {ln}");
     
                             var frame = whileStack.Peek();
-    
-                            // ✅ LOOP always jumps back (no condition check)
+
+                            // LOOP WHILE x / LOOP UNTIL x: checked after the lap; plain LOOP goes back to the DO,
+                            // which checks its own condition if it has one
+                            if (!string.IsNullOrWhiteSpace(arg) && !LoopConditionHolds(arg))
+                            {
+                                whileStack.Pop();
+                                break;
+                            }
                             pc = frame.WhilePc;
                             jumpHappened = true;
                             break;
@@ -2402,6 +2654,16 @@ public static partial class AmosRunner
                                 pc = rf.UntilPc + 1;
                                 jumpHappened = true;
                             }
+                            else if (what == "FOR")
+                            {
+                                if (forStack.Count == 0)
+                                    throw new Exception($"EXIT FOR without FOR at line {ln}");
+                                var ef = forStack.Pop();
+                                if (ef.NextPc < 0)
+                                    throw new Exception($"EXIT FOR: the FOR has no NEXT, at line {ln}");
+                                pc = ef.NextPc + 1;
+                                jumpHappened = true;
+                            }
                             else if (what == "WHILE")
                             {
                                 // Existing WHILE logic
@@ -2433,6 +2695,8 @@ public static partial class AmosRunner
                                 pc = frame.ReturnPc;
                                 jumpHappened = true;
                             }
+                            else
+                                throw new Exception($"EXIT {arg}? Write EXIT FOR, EXIT WHILE, EXIT DO, EXIT REPEAT or EXIT PROC, at line {ln}");
 
                             break;
                         }
@@ -4166,11 +4430,19 @@ public static partial class AmosRunner
         res.Add(l[s..].Trim()); return res;
     }
     
+    // ; starts a comment. In a PRINT statement a ; written straight after a value (PRINT "A"; B) is
+    // PRINT's own separator instead; with a space in front (PRINT "A"   ; a comment) it is a comment.
     private static string StripComments(string l) {
         bool q = false;
+        int stmtStart = 0;
         for (int i = 0; i < l.Length; i++) {
             if (l[i] == '\"') q = !q;
-            if (!q && l[i] == ';') return l[..i].Trim();
+            if (q) continue;
+            if (l[i] == ':') { stmtStart = i + 1; continue; }
+            if (l[i] != ';') continue;
+            bool inPrint = IndexOfWordOutsideQuotes(l[stmtStart..i], "PRINT") >= 0;   // also IF X THEN PRINT A; B
+            if (inPrint && i > 0 && l[i - 1] != ' ' && l[i - 1] != '\t') continue;
+            return l[..i].Trim();
         }
         return l;
     }
@@ -4211,9 +4483,16 @@ public static partial class AmosRunner
     // The same grammar as CompileExpr: OR, AND, NOT, comparison, + - &, * / MOD DIV, ^
     private static object ParseExpr(ref Tokenizer t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g) {
         var res = ParseAnd(ref t, v, ln, gk, ikd, g);
-        while (t.TryConsumeWord("OR")) {
-            var right = ParseAnd(ref t, v, ln, gk, ikd, g);
-            res = IsTrue(res) || IsTrue(right) ? 1.0 : 0.0;
+        while (true) {
+            if (t.TryConsumeWord("OR")) {
+                var right = ParseAnd(ref t, v, ln, gk, ikd, g);
+                res = IsTrue(res) || IsTrue(right) ? 1.0 : 0.0;
+            }
+            else if (t.TryConsumeWord("XOR")) {
+                var right = ParseAnd(ref t, v, ln, gk, ikd, g);
+                res = IsTrue(res) != IsTrue(right) ? 1.0 : 0.0;
+            }
+            else break;
         }
         return res;
     }
@@ -4287,7 +4566,7 @@ public static partial class AmosRunner
             
                 res = a % b;
             }
-            else if (t.TryConsumeWord("DIV")) {
+            else if (t.TryConsumeWord("DIV") || t.TryConsume('\\')) {
                 var right = ParsePower(ref t, v, ln, gk, ikd, g);
                 var a = Convert.ToDouble(res, CultureInfo.InvariantCulture);
                 var b = Convert.ToDouble(right, CultureInfo.InvariantCulture);
@@ -4821,6 +5100,23 @@ public static partial class AmosRunner
                     return text.LastIndexOf(search);
                 }
                         
+                if (id.Equals("STRING$", StringComparison.OrdinalIgnoreCase))
+                {
+                    // STRING$(count, "*") or STRING$(count, 42): the first character, count times
+                    object countObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(',');
+                    object charObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+                    return StringOf(countObj, charObj);
+                }
+
+                if (id.Equals("SPACE$", StringComparison.OrdinalIgnoreCase))
+                {
+                    object countObj = ParseExpr(ref t, v, ln, gk, ikd, g);
+                    t.TryConsume(')');
+                    return new string(' ', Math.Max(0, (int)Math.Round(Convert.ToDouble(countObj, CultureInfo.InvariantCulture))));
+                }
+
                 if (id.Equals("REPEAT$", StringComparison.OrdinalIgnoreCase))
                 {
                     // First argument: the string to repeat
@@ -5435,6 +5731,9 @@ public static partial class AmosRunner
                 _i = bookmark;
             }
             
+            // $FF and &HFF are hex, %1010 is binary, as in AMOS and other BASICs
+            if (TryReadRadix(out v)) return true;
+
             var s = _i; 
             while (_i < _s.Length && (char.IsDigit(_s[_i]) || _s[_i] == '.' || (_i == s && _s[_i] == '-'))) _i++; 
             if (double.TryParse(_s[s.._i], CultureInfo.InvariantCulture, out v)) return true;
@@ -5442,7 +5741,30 @@ public static partial class AmosRunner
             _i = s;
             return false;
         }
-        public bool TryReadIdentifier(out string n) { SkipWs(); var s = _i; while (_i < _s.Length && (char.IsLetterOrDigit(_s[_i]) || _s[_i] == '$' || _s[_i] == '_' || _s[_i] == '#')) _i++; n = _s[s.._i]; return n.Length > 0; }
+        private bool TryReadRadix(out double v)
+        {
+            v = 0;
+            int start = _i, digitsAt, radix;
+            if (_i < _s.Length && _s[_i] == '$') { radix = 16; digitsAt = _i + 1; }
+            else if (_i + 1 < _s.Length && _s[_i] == '&' && (_s[_i + 1] == 'H' || _s[_i + 1] == 'h')) { radix = 16; digitsAt = _i + 2; }
+            else if (_i < _s.Length && _s[_i] == '%') { radix = 2; digitsAt = _i + 1; }
+            else return false;
+            int end = digitsAt;
+            while (end < _s.Length && Uri.IsHexDigit(_s[end]) && (radix == 16 || _s[end] is '0' or '1')) end++;
+            // Digits followed by more letters (&HELLO) is not a number
+            if (end == digitsAt || (end < _s.Length && (char.IsLetterOrDigit(_s[end]) || _s[end] == '$' || _s[end] == '_'))) { _i = start; return false; }
+            v = Convert.ToInt64(_s[digitsAt..end], radix);
+            _i = end;
+            return true;
+        }
+
+        public bool TryReadIdentifier(out string n) {
+            SkipWs(); var s = _i;
+            while (_i < _s.Length && (char.IsLetterOrDigit(_s[_i]) || _s[_i] == '$' || _s[_i] == '_' || _s[_i] == '#')) _i++;
+            // A whole-number variable: A%
+            if (_i > s && _i < _s.Length && _s[_i] == '%' && char.IsLetter(_s[s]) && _s[_i - 1] != '$') _i++;
+            n = _s[s.._i]; return n.Length > 0;
+        }
         public string ReadUntil(char c) { var s = _i; while (_i < _s.Length && _s[_i] != c) _i++; return _s[s.._i]; }
         public bool TryReadString(out string v)
         {

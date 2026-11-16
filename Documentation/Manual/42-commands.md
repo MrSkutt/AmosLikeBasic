@@ -85,6 +85,14 @@ Clears everything drawn in the layer (the selected one, or the one given). The l
 
 Clears all layers.
 
+### CONST
+
+```text
+CONST name = value
+```
+
+Gives a name a value that cannot change, for example `CONST GRAVITY = 0.6`. Trying to give it another value later gives an error, so a typo cannot change a setting by mistake.
+
 ## D
 
 ### DATA
@@ -120,17 +128,17 @@ DIM name(size, size, ...)
 DIM name(size) = [value, value, ...]
 ```
 
-Creates an array. `DIM A(10)` gives ten places, `A(0)` to `A(9)`. Text arrays get names ending in `$`. With `= [...]` the array gets starting values; for several dimensions they are written in nested square brackets.
+Creates an array. The number is the highest index: `DIM A(10)` gives eleven places, `A(0)` to `A(10)`. Text arrays get names ending in `$`. With `= [...]` the array gets starting values; for several dimensions they are written in nested square brackets.
 
 ### DO ... LOOP
 
 ```text
-DO
+DO [WHILE condition | UNTIL condition]
   commands
-LOOP
+LOOP [WHILE condition | UNTIL condition]
 ```
 
-Repeats forever. Leave it with `EXIT DO`.
+Repeats the commands. Without a condition forever; `WHILE` goes on while the condition is true, `UNTIL` until it becomes true. On `DO` the condition is checked before each lap, on `LOOP` after. Leave it with `EXIT DO`.
 
 ## E
 
@@ -149,13 +157,14 @@ Ends the program. `END` followed by another word ends a block: `END IF`, `END PR
 ### EXIT
 
 ```text
+EXIT FOR
 EXIT DO
 EXIT WHILE
 EXIT REPEAT
 EXIT PROC
 ```
 
-Leaves the loop or procedure straight away and carries on after it. You leave a `FOR` loop with `GOTO` to a label after `NEXT`.
+Leaves the loop or procedure straight away and carries on after it.
 
 ## F
 
@@ -209,7 +218,7 @@ FOR variable = start TO end [STEP step]
 NEXT [variable]
 ```
 
-Counts the variable from start to end and runs the commands for each value. `STEP` says how much the variable changes each lap, 1 if nothing is given. A negative step counts down. The loop always runs at least once.
+Counts the variable from start to end and runs the commands for each value. `STEP` says how much the variable changes each lap, 1 if nothing is given. A negative step counts down, and decimals are allowed. If the start is already past the end, the loop does not run at all. `EXIT FOR` leaves the loop.
 
 ```basic
 FOR I = 10 TO 0 STEP -5
@@ -259,12 +268,14 @@ IF condition THEN command [: command] [ELSE command]
 
 IF condition THEN
   commands
+ELSE IF condition THEN
+  commands
 ELSE
   commands
 END IF
 ```
 
-Runs the commands if the condition is true. If nothing comes after `THEN` it is a block that ends with `END IF` (or `ENDIF`). `ELSE` is optional. A number as a condition counts as true if it is not 0.
+Runs the commands if the condition is true. If nothing comes after `THEN` it is a block that ends with `END IF` (or `ENDIF`). `ELSE IF` (or `ELSEIF`) tests another condition when the ones before were false; there can be several. `ELSE` is optional. A number as a condition counts as true if it is not 0.
 
 ### IMAGE LOAD
 
@@ -387,6 +398,15 @@ Plays a music module (MOD, XM, S3M or IT) or stops it. For the synth's music, se
 
 ## O
 
+### ON ... GOTO / ON ... GOSUB
+
+```text
+ON number GOTO label, label, ...
+ON number GOSUB label, label, ...
+```
+
+Jumps to the first label when the number is 1, to the second when it is 2 and so on. With `GOSUB` the program comes back with `RETURN`. If the number is outside the list, the program just carries on.
+
 ### ON ERROR
 
 ```text
@@ -500,12 +520,12 @@ Draws a dot.
 ### PRINT
 
 ```text
-PRINT value
+PRINT value [; value | , value ...] [;]
 PRINT AT row, column, value
 PRINT #channel, value
 ```
 
-Writes a value in the text console and moves to the next line. `PRINT` with no value writes an empty line. `AT` writes at a given place, like `LOCATE`. With `#channel` a line is written to a file.
+Writes a value in the text console and moves to the next line. `PRINT` with no value writes an empty line. Values separated by `;` are written right after each other, and a `,` moves on to the next tab stop (every 14 characters). A `;` or `,` at the end leaves the cursor on the same line, so the next `PRINT` carries on there. Write the `;` straight after the value: with a space in front it starts a comment, as everywhere else. `AT` writes at a given place, like `LOCATE`. With `#channel` a line is written to a file.
 
 ### PRINTG
 
@@ -643,17 +663,19 @@ Moves the whole layer so that the point x, y in the layer ends up at the screen'
 ### SELECT ... CASE
 
 ```text
-SELECT value
-  CASE value
+SELECT [CASE] value
+  CASE value [, value ...]
     commands
-  CASE value
+  CASE low TO high
     commands
-  DEFAULT
+  CASE IS > value
+    commands
+  CASE ELSE
     commands
 END SELECT
 ```
 
-Runs the commands under the `CASE` with the same value, or under `DEFAULT` if none matches.
+Runs the commands under the first `CASE` that matches the value, or under `CASE ELSE` (or `DEFAULT`) if none does. A `CASE` can list several values, a range with `TO`, or a comparison with `IS`.
 
 ### SPRITE
 
@@ -727,7 +749,7 @@ Swaps the values of two variables or array places of the same kind.
 A = 1 : B = 2
 SWAP A, B
 PRINT A & " " & B
-DIM T(3) = [10, 20, 30]
+DIM T(2) = [10, 20, 30]
 SWAP T(0), T(2)
 PRINT JOIN$(T, ",")
 ```

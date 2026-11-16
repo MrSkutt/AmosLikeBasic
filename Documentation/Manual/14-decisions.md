@@ -65,6 +65,23 @@ ENDIF
 PRINT "Lives: " & LIVES
 ```
 
+With more than two choices, `ELSE IF` (or `ELSEIF`) tests a new condition when the earlier ones were false:
+
+```basic
+TEMP = 18
+IF TEMP < 0 THEN
+  PRINT "Freezing"
+ELSE IF TEMP < 15 THEN
+  PRINT "Cold"
+ELSE IF TEMP < 25 THEN
+  PRINT "Nice"
+ELSE
+  PRINT "Hot"
+END IF
+```
+
+The first condition that is true wins; the `ELSE` at the end runs if none of them is. It works on one line too: `IF A = 1 THEN PRINT "one" ELSE IF A = 2 THEN PRINT "two" ELSE PRINT "many"`.
+
 You can write `END IF` with a space if you find that easier to read. The lines inside the block are usually indented two steps, so that you can see what belongs to the `IF`. It is not required, but it makes the code much easier to read.
 
 ## AND, OR and NOT
@@ -136,7 +153,29 @@ DEFAULT
 END SELECT
 ```
 
-`SELECT` takes a value. The program finds the `CASE` with the same value and runs the lines under it, up to the next `CASE`. If none matches, the lines under `DEFAULT` run (if there is one). It works just as well with strings:
+`SELECT` takes a value; you can also write `SELECT CASE DIE`, as in most BASICs. The program finds the `CASE` with the same value and runs the lines under it, up to the next `CASE`. If none matches, the lines under `DEFAULT` (or `CASE ELSE`) run, if there is one. A `CASE` can match more than one value:
+
+| `CASE` | Matches |
+|---|---|
+| `CASE 3` | the value 3 |
+| `CASE 1, 3, 5` | any of 1, 3 and 5 |
+| `CASE 10 TO 19` | 10 up to and including 19 |
+| `CASE IS > 100` | everything above 100 (also `IS <`, `IS >=` and so on) |
+| `CASE ELSE` | the same as `DEFAULT` |
+
+```basic
+AGE = 15
+SELECT CASE AGE
+CASE IS < 13
+  PRINT "Child"
+CASE 13 TO 19
+  PRINT "Teenager"
+CASE ELSE
+  PRINT "Adult"
+END SELECT
+```
+
+It works just as well with strings:
 
 ```basic
 DIRECTION$ = "NORTH"

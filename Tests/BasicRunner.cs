@@ -48,12 +48,15 @@ public static class BasicRunner
 
         var cts = new CancellationTokenSource();
         var sw = Stopwatch.StartNew();
+        string rawPrint = "";
         var task = Task.Run(() => AmosRunner.ExecuteAsync(program,
             line =>
             {
                 lock (result)
                 {
-                    if (line.StartsWith("@@PRINT ")) result.Prints.Add(line[8..]);
+                    // PRINT "A"; leaves the row open: it is one printed line together with the next PRINT
+                    if (line.StartsWith("@@PRINTRAW ")) rawPrint += line[11..];
+                    else if (line.StartsWith("@@PRINT ")) { result.Prints.Add(rawPrint + line[8..]); rawPrint = ""; }
                     else if (!line.StartsWith("@@") && line.Contains("Error", StringComparison.OrdinalIgnoreCase))
                         result.Errors.Add(line);
                 }
@@ -75,6 +78,7 @@ public static class BasicRunner
                 Thread.Sleep(4);
             }
             result.Completed = task.IsCompleted;
+            lock (result) if (rawPrint.Length > 0) result.Prints.Add(rawPrint);   // PRINT "A"; at the very end
             if (capture)
             {
                 // Make sure the latest frame is drawn before it is captured

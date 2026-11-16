@@ -55,6 +55,22 @@ internal sealed class TextScreen
         }
     }
 
+    // Text without a newline after it (PRINT "A";): the next PRINT carries on on the same row
+    public void PrintRaw(string text)
+    {
+        var lines = (text ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (i > 0) NewLine();
+            foreach (var ch in lines[i])
+            {
+                if (_col >= _cols) break;
+                _buf[_row, _col] = ch;
+                _col++;
+            }
+        }
+    }
+
     private void PrintSingleLine(string s)
     {
         for (var i = 0; i < s.Length; i++)
@@ -146,6 +162,10 @@ internal static class ScreenConsole
         else if (line.StartsWith("@@PRINT ", StringComparison.Ordinal))
         {
             textScreen.Print(line.Substring(8));
+        }
+        else if (line.StartsWith("@@PRINTRAW ", StringComparison.Ordinal))
+        {
+            textScreen.PrintRaw(line.Substring(11));
         }
         else if (line.StartsWith("@@CLS", StringComparison.Ordinal))
         {

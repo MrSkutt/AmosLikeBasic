@@ -4,7 +4,7 @@ A variable holds one value. Often you need many values of the same kind: the pos
 
 ## DIM
 
-An array is created with `DIM`. The number in brackets is how many places it has:
+An array is created with `DIM`. The number in brackets is the highest place number:
 
 ```basic
 DIM SCORES(5)
@@ -14,14 +14,14 @@ SCORES(4) = 90
 PRINT SCORES(1)
 ```
 
-The places are numbered from 0, so `DIM SCORES(5)` gives `SCORES(0)` to `SCORES(4)`. The number is called the **index**. Places you have not given a value contain `0`.
+The places are numbered from 0, so `DIM SCORES(5)` gives `SCORES(0)` to `SCORES(5)`, six places. The number is called the **index**. Places you have not given a value contain `0`.
 
-> **Note:** `DIM A(10)` gives indexes 0 – 9, so ten places. If you try to use `A(10)` you get an error. (In the old AMOS `A(10)` existed too; here it is like in most modern languages.)
+> **Note:** `DIM A(10)` gives indexes 0 – 10, as in AMOS, C64 BASIC and QBasic. You can use place 0 or start from 1, whichever suits you best. `A(11)` gives an error.
 
 The nice thing is that the index can be a variable. Then a loop can go through the whole array:
 
 ```basic
-DIM SQUARE(10)
+DIM SQUARE(9)
 FOR I = 0 TO 9
   SQUARE(I) = I * I
 NEXT I
@@ -45,8 +45,8 @@ NEXT I
 You can fill an array straight away when you create it, with the values in square brackets:
 
 ```basic
-DIM DAYS(7) = [31, 28, 31, 30, 31, 30, 31]
-DIM NAMES$(3) = ["Pinecone", "Beetle", "Owl"]
+DIM DAYS(6) = [31, 28, 31, 30, 31, 30, 31]
+DIM NAMES$(2) = ["Pinecone", "Beetle", "Owl"]
 PRINT "February has " & DAYS(1) & " days"
 PRINT "The second character is called " & NAMES$(1)
 ```

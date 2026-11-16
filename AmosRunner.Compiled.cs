@@ -13,9 +13,10 @@ namespace AmosLikeBasic;
 // The compiler follows exactly the same grammar as the old interpreter (ParseExpr/ParseTerm/
 // ParseFactor) and uses the same Tokenizer, so the results are the same.
 //
-// Built-in functions (SIN, MID$, KEYSTATE ...) are still run by the old interpreter,
-// but only for the call itself. The old expression interpreter (EvalValueInterpreted) is kept
-// as a fallback for expressions the compiler does not understand.
+// The most used built-in functions (SIN, MID$, KEYSTATE ...) are evaluated directly by the
+// compiled nodes (NativeBuiltins); the rest are run by the old interpreter, but only for the call
+// itself. The old expression interpreter (EvalValueInterpreted) is kept as a fallback for
+// expressions the compiler does not understand, so the two must follow the same grammar.
 public static partial class AmosRunner
 {
     // What a node needs in order to be evaluated
@@ -84,7 +85,7 @@ public static partial class AmosRunner
         "FINDLAST", "HEX", "HIT", "HITBOX", "HITBOXGROUP", "HITCIRCLE", "HITCIRCLEGROUP", "HITGROUP",
         "INC", "INKEY$", "INSTR", "INT", "JOIN$", "JOYAXIS", "JOYSTATE", "KEYSTATE", "LAYERFADING",
         "LEFT$", "LEN", "LOG", "LOG10", "LOG2", "LOWER$", "MAX", "MICROS", "MID$", "MILLIS", "MIN",
-        "PLAYING", "REPEAT$", "REPLACE$", "RIGHT$", "RND", "SGN", "SIN", "SPLIT$", "SQR", "STR$", "TAN",
+        "PLAYING", "REPEAT$", "REPLACE$", "RIGHT$", "RND", "SGN", "SIN", "SPACE$", "SPLIT$", "SQR", "STR$", "STRING$", "TAN",
         "TICKS", "TILE", "TRACKPLAYING", "TRACKPOS", "TRACKROW", "TRIM$", "UPPER$", "VAL", "WORD$"
     };
 
@@ -107,11 +108,16 @@ public static partial class AmosRunner
         }
     }
 
-    // Expr := And { OR And }
+    // Expr := And { (OR | XOR) And }
     private static ExprNode CompileExpr(ref Tokenizer t)
     {
         var res = CompileAnd(ref t);
-        while (t.TryConsumeWord("OR")) res = new OrNode(res, CompileAnd(ref t));
+        while (true)
+        {
+            if (t.TryConsumeWord("OR")) res = new OrNode(res, CompileAnd(ref t));
+            else if (t.TryConsumeWord("XOR")) res = new XorNode(res, CompileAnd(ref t));
+            else break;
+        }
         return res;
     }
 
@@ -149,7 +155,7 @@ public static partial class AmosRunner
         return res;
     }
 
-    // Term := Power { ('*' | '/' | MOD | DIV) Power }
+    // Term := Power { ('*' | '/' | MOD | DIV | '\\') Power }
     private static ExprNode CompileTerm(ref Tokenizer t)
     {
         var res = CompilePower(ref t);
@@ -158,7 +164,7 @@ public static partial class AmosRunner
             if (t.TryConsume('*')) res = new MulNode(res, CompilePower(ref t));
             else if (t.TryConsume('/')) res = new DivNode(res, CompilePower(ref t));
             else if (t.TryConsumeWord("MOD")) res = new ModNode(res, CompilePower(ref t));
-            else if (t.TryConsumeWord("DIV")) res = new IntDivNode(res, CompilePower(ref t));
+            else if (t.TryConsumeWord("DIV") || t.TryConsume('\\')) res = new IntDivNode(res, CompilePower(ref t));
             else break;
         }
         return res;
@@ -319,6 +325,14 @@ public static partial class AmosRunner
         private readonly ExprNode _l, _r;
         public OrNode(ExprNode l, ExprNode r) { _l = l; _r = r; }
         public override object Eval(in EvalContext c) => IsTrue(_l.Eval(c)) || IsTrue(_r.Eval(c)) ? One : Zero;
+    }
+
+    // XOR: true when exactly one side is true
+    private sealed class XorNode : ExprNode
+    {
+        private readonly ExprNode _l, _r;
+        public XorNode(ExprNode l, ExprNode r) { _l = l; _r = r; }
+        public override object Eval(in EvalContext c) => IsTrue(_l.Eval(c)) != IsTrue(_r.Eval(c)) ? One : Zero;
     }
 
     private sealed class NotNode : ExprNode
@@ -517,6 +531,8 @@ public static partial class AmosRunner
     private static readonly Dictionary<string, NativeBuiltin> NativeBuiltins = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ABS"] = new(1, 1, (a, _) => Math.Abs(Num(a[0]))),
+        ["STRING$"] = new(2, 2, (a, _) => StringOf(a[0], a[1])),
+        ["SPACE$"] = new(1, 1, (a, _) => new string(' ', Math.Max(0, Round(a[0])))),
         ["SGN"] = new(1, 1, (a, _) => Math.Sign(Num(a[0]))),
         ["SQR"] = new(1, 1, (a, _) => Math.Sqrt(Num(a[0]))),
         ["LOG"] = new(1, 1, (a, _) => Math.Log(Num(a[0]))),
@@ -634,6 +650,10 @@ public static partial class AmosRunner
         if (orIdx >= 0)
             return new OrCond(CompileCondition(c[..orIdx]), CompileCondition(c[(orIdx + 2)..]));
 
+        var xorIdx = TopLevelIndexOf(c, "XOR", isWord: true);
+        if (xorIdx >= 0)
+            return new XorCond(CompileCondition(c[..xorIdx]), CompileCondition(c[(xorIdx + 3)..]));
+
         var andIdx = TopLevelIndexOf(c, "AND", isWord: true);
         if (andIdx >= 0)
             return new AndCond(CompileCondition(c[..andIdx]), CompileCondition(c[(andIdx + 3)..]));
@@ -657,6 +677,13 @@ public static partial class AmosRunner
         private readonly CondNode _l, _r;
         public OrCond(CondNode l, CondNode r) { _l = l; _r = r; }
         public override bool Eval(in EvalContext c) => _l.Eval(c) || _r.Eval(c);
+    }
+
+    private sealed class XorCond : CondNode
+    {
+        private readonly CondNode _l, _r;
+        public XorCond(CondNode l, CondNode r) { _l = l; _r = r; }
+        public override bool Eval(in EvalContext c) => _l.Eval(c) != _r.Eval(c);
     }
 
     private sealed class AndCond : CondNode
@@ -725,6 +752,49 @@ public static partial class AmosRunner
         // Filled in the first time the statement runs
         public string? IfCondition;
         public PreparedAssignment? Assignment;
+        public bool SubCommandChecked;
+    }
+
+    // ── Commands with sub-commands ─────────────────────────────────────
+    // The words each of these commands understands after its name. A misspelt one (SPRITE MOOVE 1, 2, 3)
+    // used to be ignored without a word; now it gives an error. A variable is still fine as the first
+    // value (SPRITE P, X, Y), since it is followed by a comma or an operator, not by more values.
+    private static HashSet<string> Words(string list) => new(list.Split(' '), StringComparer.OrdinalIgnoreCase);
+
+    private static readonly Dictionary<string, HashSet<string>> SubCommands = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["SPRITE"] = Words("ADD ADDFRAME ALPHA AMPLITUDEX AMPLITUDEY BLUR BRIGHTNESS CLEAR CLEARGROUP COLOR CONTRAST EFFECT FADE FRAME FREQUENCYX FREQUENCYY GROUP HANDLE IMAGE LAYER LOAD MOVE OFF ON PHASEX PHASEY POS RADIUS ROTATE SATURATION TIME UNGROUP UPDATE WAVE ZOOM"),
+        ["RASTER"] = Words("CLEAR COLOR COLOUR DEL GFXMODE INFO MOVE SPACE STR WRAP"),
+        ["PLAY"] = Words("ADSR ARP BEND BLIP BPM COIN EXPLOSION FILTER FILTERENV GATE GLIDE HIT JUMP LASER LOOP MUSIC POWERUP PULSE RING STOP SYNC VIBRATO VOLUME WAVE"),
+        ["SCREEN"] = Words("ALPHA CRT FADE OFF ON SELECT"),
+        ["FONT"] = Words("ADD AMPLITUDEX AMPLITUDEY BLUR BRIGHTNESS CHAR CLEAR COLOR CONTRAST EFFECT FREQUENCYX FREQUENCYY LOAD MAP PHASEX PHASEY PRINT RADIUS ROTATE SATURATION SET STYLE TIME UPDATE WAVE ZOOM"),
+        ["TILE"] = Words("DRAW LOAD MAP SET"),
+        ["MAP"] = Words("LOAD MAP"),
+        ["SAM"] = Words("LOOP PLAY STOP"),
+        ["MUSIC"] = Words("PLAY STOP"),
+        ["ANIM"] = Words("DEF GROUP LOOP SET STOP"),
+        ["IMAGE"] = Words("LOAD"),
+        ["WAIT"] = Words("MUSIC VBL"),
+        ["PROFILE"] = Words("END START TIME"),
+    };
+
+    private static void CheckSubCommand(string cmd, string arg, int line)
+    {
+        if (!SubCommands.TryGetValue(cmd, out var known)) return;
+        var a = arg.TrimStart();
+        if (a.Length == 0 || !char.IsLetter(a[0])) return;   // a number, a string, #layer ...
+        int i = 0;
+        while (i < a.Length && (char.IsLetterOrDigit(a[i]) || a[i] == '_' || a[i] == '$')) i++;
+        var word = a[..i];
+        if (known.Contains(word)) return;
+        int j = i;
+        while (j < a.Length && a[j] == ' ') j++;
+        // "WORD" alone, or "WORD, ..." / "WORD + 1": a variable, not a sub-command
+        if (j == i || j >= a.Length) return;
+        char next = a[j];
+        if (char.IsLetterOrDigit(next) || next is '"' or '(' or '#' or '[')
+            throw new Exception($"{cmd} does not know {word.ToUpperInvariant()}, at line {line}. " +
+                                $"After {cmd} can come: {string.Join(", ", known.OrderBy(w => w))}");
     }
 
     // "X = expression" or "A(i, j) = expression", split once

@@ -62,16 +62,16 @@ public class ProgramTests
     }
 
     [AvaloniaFact]
-    public void ForLoopRunsAtLeastOnce()
+    public void ForLoopWithNothingToDoDoesNotRun()
     {
-        var r = BasicRunner.Run("N = 0\nFOR K = 0 TO N - 1\n  PRINT \"LAP \" & K\nNEXT K", 2);
-        Assert.Equal(new[] { "LAP 0" }, r.Prints);
+        var r = BasicRunner.Run("N = 0\nFOR K = 0 TO N - 1\n  PRINT \"LAP \" & K\nNEXT K\nPRINT \"AFTER\"", 2);
+        Assert.Equal(new[] { "AFTER" }, r.Prints);
     }
 
     [AvaloniaFact]
     public void SwapWorksForVariablesAndArrays()
     {
-        var r = BasicRunner.Run("A = 1 : B = 2\nSWAP A, B\nPRINT A & \" \" & B\nDIM T(3) = [10, 20, 30]\nSWAP T(0), T(2)\nPRINT JOIN$(T, \",\")", 2);
+        var r = BasicRunner.Run("A = 1 : B = 2\nSWAP A, B\nPRINT A & \" \" & B\nDIM T(2) = [10, 20, 30]\nSWAP T(0), T(2)\nPRINT JOIN$(T, \",\")", 2);
         Assert.Equal(new[] { "2 1", "30,20,10" }, r.Prints);
     }
 

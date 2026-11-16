@@ -45,7 +45,9 @@ Angles are given in **degrees**, not radians.
 | `REPEAT$(s$, n)` | the text n times | `REPEAT$("=", 5)` | `=====` |
 | `REPLACE$(s$, old$, new$)` | replaces every old$ with new$ | `REPLACE$("cat", "c", "h")` | `hat` |
 | `RIGHT$(s$, n)` | the last n characters | `RIGHT$("PINECONE", 4)` | `CONE` |
+| `SPACE$(n)` | n spaces | `"[" & SPACE$(3) & "]"` | `[   ]` |
 | `STR$(x)` | the number as text | `STR$(42)` | `42` |
+| `STRING$(n, c$)` | the first character of c$ (or the character with code c) n times | `STRING$(5, "*")` | `*****` |
 | `TRIM$(s$)` | without spaces at the start and end | `TRIM$("  hello  ")` | `hello` |
 | `UPPER$(s$)` | capital letters | `UPPER$("hello")` | `HELLO` |
 | `VAL(s$)` | the text as a number, 0 if it is not a number | `VAL("3.5")` | `3.5` |

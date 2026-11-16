@@ -27,9 +27,11 @@ NEXT COUNTDOWN
 PRINT "LIFT OFF!"
 ```
 
-> **Note:** `FOR` only counts in whole numbers. The start, end and step are rounded to the nearest whole number, so both `STEP 0.5` and `STEP 0.1` become step 0, which gives a loop that never ends. If you need decimals, count in whole numbers and divide: `FOR I = 0 TO 10` and use `I / 10`.
+The start, end and step may have decimals: `FOR X = 0 TO 1 STEP 0.25` gives 0, 0.25, 0.5, 0.75 and 1.
 
-> **Note:** A `FOR` loop always runs at least once. `FOR K = 0 TO N - 1` runs one lap with `K = 0` even when `N` is 0. If the loop might have nothing to do, check first with `IF N > 0 THEN`.
+If the start is already past the end, the loop does not run at all. `FOR K = 0 TO N - 1` does nothing when `N` is 0, so a loop over an empty list needs no extra check. `STEP 0` gives an error, since such a loop would never end.
+
+A `FOR` loop is left early with `EXIT FOR`, and the program carries on after `NEXT`.
 
 Loops can be inside each other. Here a times table is printed:
 
@@ -82,7 +84,23 @@ LOOP
 PRINT "The first power of two above 1000 is " & X
 ```
 
-In the same way `EXIT WHILE` leaves a `WHILE` loop and `EXIT REPEAT` a `REPEAT` loop.
+In the same way `EXIT WHILE` leaves a `WHILE` loop, `EXIT REPEAT` a `REPEAT` loop and `EXIT FOR` a `FOR` loop.
+
+`DO` and `LOOP` can also have a condition, written with `WHILE` (go on while it is true) or `UNTIL` (go on until it becomes true). On the `DO` line it is checked before every lap, on the `LOOP` line after:
+
+```basic
+N = 1
+DO WHILE N < 100
+  N = N * 3
+LOOP
+PRINT N
+
+T = 0
+DO
+  T = T + 7
+LOOP UNTIL T > 30
+PRINT T
+```
 
 ## Jumping with GOTO
 
