@@ -27,19 +27,9 @@ public class ProgramTests
         Assert.True(result.Errors.Count == 0, $"{name}: {result.Describe()}");
     }
 
-    // Examples that are known to be broken, to be fixed when Projects/ is tidied up
-    private static readonly HashSet<string> KnownBroken = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "analogjoy",   // uses DOUBLE, which does not exist
-        "test2",       // uses an array without DIM
-        "test3",       // uses DOUBLE
-        "eof",         // reads files that do not exist
-    };
-
     public static IEnumerable<object[]> Projects() =>
         Directory.GetFiles(Repo.PathOf("Projects"), "*.amosproj")
             .Select(Path.GetFileNameWithoutExtension)
-            .Where(n => !KnownBroken.Contains(n!))
             .OrderBy(n => n)
             .Select(n => new object[] { n! });
 

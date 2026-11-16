@@ -59,3 +59,10 @@ Export/
 
 # Genererad HTML-version av manualen (Tools/build_manual.py)
 Documentation/Manual/build/
+
+# =========================
+# Your own experiments
+# =========================
+# Sandbox/ is for programs and files you do not want on GitHub. Paths in a program
+# (like "Graphics/hero.png") count from the project folder, so they work from here too.
+Sandbox/

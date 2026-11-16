@@ -1,1 +1,0 @@
-{"Version":2,"ProgramText":"A=\"HELLO\"\nSELECT A\nCASE \"NISSE\"\n\tPRINT \"One\"\nCASE \"HELLO\"\n\tPRINT \"Two\"\nCASE \"KALLE\"\n\tPRINT \"Tre\"\nDEFAULT\n\tPRINT \"Something else\"\nEND SELECT\n\nPRINT \"After select\"\nEND","ScreenWidth":null,"ScreenHeight":null,"Sprites":null,"MapWidth":null,"MapHeight":null,"MapData":null}

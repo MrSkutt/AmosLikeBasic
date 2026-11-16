@@ -294,10 +294,10 @@ More songs in C64 style are in `Sound/Tracker` and are used by the example proje
 
 | Song | Project | Style |
 |---|---|---|
-| `raster_dream.amostrk` | `raster_new` | a fast demo tune with arpeggio chords and a filter that opens in the intro |
-| `solar_system.amostrk` | `bob` | spacey, with the C64 echo: the melody repeats more quietly on another channel |
-| `shadow_play.amostrk` | `shadow` | funky, with a sawtooth melody through a resonant filter |
-| `winter_evening.amostrk` | `rain` | slow and wistful, with bells |
+| `raster_dream.amostrk` | `raster_bars` | a fast demo tune with arpeggio chords and a filter that opens in the intro |
+| `solar_system.amostrk` | `solar_system` | spacey, with the C64 echo: the melody repeats more quietly on another channel |
+| `shadow_play.amostrk` | `shadow_text` | funky, with a sawtooth melody through a resonant filter |
+| `winter_evening.amostrk` | `weather` | slow and wistful, with bells |
 | `snake.amostrk` | `snake` | bouncy game music with short, choppy notes |
 | `frog_hop.amostrk` | `froghop` | cheerful game music for Frog Hop |
 
