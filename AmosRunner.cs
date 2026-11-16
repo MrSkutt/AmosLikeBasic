@@ -180,11 +180,32 @@ public static partial class AmosRunner
     private sealed class ProcCallFrame
     {
         public required int ReturnPc;                          // where we jump back to
-        public required Dictionary<string, object> SavedVars; // parameters to restore
+        public required Dictionary<string, object> SavedVars; // parameters and LOCALs to restore
+        // Parameters and LOCALs that did not exist before the call; removed again at the end
+        public HashSet<string> Absent { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        // Remember a variable's value before the procedure takes it over (only the first time)
+        public void Save(Dictionary<string, object> vars, string name)
+        {
+            if (SavedVars.ContainsKey(name) || Absent.Contains(name)) return;
+            if (vars.TryGetValue(name, out var old)) SavedVars[name] = old;
+            else Absent.Add(name);
+        }
+
+        // END PROC, EXIT PROC: give the variables back the values they had before the call
+        public void Restore(Dictionary<string, object> vars)
+        {
+            foreach (var kvp in SavedVars) vars[kvp.Key] = kvp.Value;
+            foreach (var name in Absent) vars.Remove(name);
+        }
     }
 
     
     
+    // A plain variable name for LOCAL: a letter first, then letters, digits or _, maybe a $ at the end
+    private static bool IsLocalName(string name) =>
+        System.Text.RegularExpressions.Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_]*\$?$");
+
     private static readonly Random _rng = new();
     private static IntPtr _currentXmpContext = IntPtr.Zero;
     private static TrackerSong? _trackSong;   // last loaded with TRACK LOAD
@@ -1145,6 +1166,24 @@ public static partial class AmosRunner
                             break;
                         }
 
+                        case "LOCAL":
+                        {
+                            // LOCAL I, NAME$: variables of the procedure's own. Their values from
+                            // outside are saved and come back at END PROC; inside they start at 0 or "".
+                            if (procCallStack.Count == 0)
+                                throw new Exception($"LOCAL outside PROC at line {ln}");
+                            var frame = procCallStack.Peek();
+                            foreach (var part in SplitTopLevelCsv(arg))
+                            {
+                                var name = part.Trim();
+                                if (!IsLocalName(name))
+                                    throw new Exception($"LOCAL needs variable names, not '{name}', at line {ln}");
+                                frame.Save(vars, name);
+                                setVar(name, name.EndsWith('$') ? "" : Zero);
+                            }
+                            break;
+                        }
+
                         case "ENDPROC":
                         case "END PROC": // handled through the "END" case below, see step 4
                         {
@@ -1152,9 +1191,7 @@ public static partial class AmosRunner
                             if (procCallStack.Count > 0)
                             {
                                 var frame = procCallStack.Pop();
-                                // Restore the parameters
-                                foreach (var kvp in frame.SavedVars)
-                                    vars[kvp.Key] = kvp.Value;
+                                frame.Restore(vars);
                                 pc = frame.ReturnPc;
                                 jumpHappened = true;
                             }
@@ -1866,8 +1903,7 @@ public static partial class AmosRunner
                                 if (procCallStack.Count > 0)
                                 {
                                     var frame = procCallStack.Pop();
-                                    foreach (var kvp in frame.SavedVars)
-                                        vars[kvp.Key] = kvp.Value;
+                                    frame.Restore(vars);
                                     pc = frame.ReturnPc;
                                     jumpHappened = true;
                                 }
@@ -1998,7 +2034,7 @@ public static partial class AmosRunner
 
                                 // 4. Lock in the frame's texts and signal that the UI should update
                                 graphics.PresentFrame();
-                                FrameLog.Write("vbl", graphics.PresentedFrame);
+                                FrameLog.Write("vbl", graphics.PresentedFrame, GC.GetTotalPauseDuration().TotalMilliseconds);
                                 onGraphicsChanged();
 
                                 // 5. Start drawing on the new inactive frame
@@ -2393,8 +2429,7 @@ public static partial class AmosRunner
                                 if (procCallStack.Count == 0)
                                     throw new Exception($"EXIT PROC outside PROC at line {ln}");
                                 var frame = procCallStack.Pop();
-                                foreach (var kvp in frame.SavedVars)
-                                    vars[kvp.Key] = kvp.Value;
+                                frame.Restore(vars);
                                 pc = frame.ReturnPc;
                                 jumpHappened = true;
                             }
@@ -3991,23 +4026,21 @@ public static partial class AmosRunner
                                             $"PROC {procDef.Name} expects {procDef.Parameters.Count} " +
                                             $"parameters, got {argValues.Count} at line {ln}");
 
-                                    // Save the parameters that are overwritten
-                                    var savedVars = new Dictionary<string, object>(
-                                        StringComparer.OrdinalIgnoreCase);
+                                    // Save the variables the parameters overwrite
+                                    var callFrame = new ProcCallFrame
+                                    {
+                                        ReturnPc = pc + 1,
+                                        SavedVars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+                                    };
                                     foreach (var param in procDef.Parameters)
-                                        if (vars.TryGetValue(param, out var old))
-                                            savedVars[param] = old;
+                                        callFrame.Save(vars, param);
 
                                     // Set the parameters
                                     for (int i = 0; i < procDef.Parameters.Count; i++)
                                         setVar(procDef.Parameters[i], argValues[i]);
 
-                                    // Push a return frame and jump
-                                    procCallStack.Push(new ProcCallFrame
-                                    {
-                                        ReturnPc = pc + 1,
-                                        SavedVars = savedVars
-                                    });
+                                    // Push the return frame and jump
+                                    procCallStack.Push(callFrame);
 
                                     pc = procDef.StartPc;
                                     jumpHappened = true;

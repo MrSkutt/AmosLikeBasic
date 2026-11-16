@@ -342,6 +342,14 @@ LOAD [#layer,] "file"
 
 Loads an image (PNG or JPG) into the layer, with the image's top left corner at the layer's top left corner.
 
+### LOCAL
+
+```text
+LOCAL variable[, variable, ...]
+```
+
+Inside a `PROC`: makes the variables the procedure's own. They start at 0 (or `""` for names ending in `$`), and at `END PROC` or `EXIT PROC` variables with the same names get back the values they had before. Procedures called from inside see the local variables too. Arrays cannot be local.
+
 ### LOCATE
 
 ```text
@@ -516,7 +524,7 @@ PROC Name[(parameter, parameter, ...)]
 END PROC
 ```
 
-Defines a procedure. It is called by its name, with the arguments after a space: `Name value, value`. The parameters only apply inside the procedure; all other variables are shared. `EXIT PROC` leaves the procedure straight away.
+Defines a procedure. It is called by its name, with the arguments after a space: `Name value, value`. The parameters only apply inside the procedure, and so do variables named with `LOCAL`; all other variables are shared. `EXIT PROC` leaves the procedure straight away.
 
 ### PROFILE
 

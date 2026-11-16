@@ -1,50 +1,45 @@
-1. Overall design / architecture
-- The graphics are mainly handled by the GPU
-- The screen uses double buffering at frame level
-- Two complete render frames are used:
-    an active frame (presented)
-    an inactive frame (being built)
-- Each frame holds several RenderLayers in Z order (e.g. background, sprites, text, UI)
-- ActiveFrame points to the current render frame
-- InactiveFrame points to the frame being written to
-- All drawing operations always happen on the inactive frame
-- Frames are switched by swapping pointers, no pixel copying
-- Any CPU rendering is only used for debugging, measuring or statistics
+How the game screen works (notes for working on the engine)
 
-2. Important requirements and limits
-- Use real pointers (unsafe) where it is justified
-- Plot() and all drawing functions always write to the inactive frame
-- SwapBuffers() only switches frame references, never contents
-- No individual layer may swap itself
-- Premultiplied alpha is used consistently in GPU rendering
-- The architecture must work with both:
-    GPU rendering (the main case)
-    CPU rendering (fallback / debug)
+1. Layers
+- The screen is a list of GpuLayers in Z order (AmosGraphics._layers, also called ActiveFrame).
+  Layer 0 is at the back; SCREEN SELECT n draws on layer n and creates it if needed.
+- Each layer has one WriteableBitmap at the game's resolution (e.g. 640x480). There is no
+  second buffer: PLOT, BAR, CIRCLE, PRINTG, TILE DRAW ... write straight into that bitmap on
+  the BASIC thread, with unsafe pointers where it pays off.
+- Per layer there are also shader values (ShaderValues: scroll position in [0], raster bars,
+  weather and other effect parameters), opacity and fades.
+- Sprites, bobs and FONT PRINT texts are not drawn into the bitmaps; they are kept as lists and
+  drawn on top of their layer every time the screen is drawn.
+- Pixels with the colour 0,0,0 are transparent. Premultiplied alpha is used throughout.
 
-3. Decisions already made
-- The screen owns the double buffering (not the render layers)
-- Two lists are used for frames:
-    FrameA
-    FrameB
-- A bool (or equivalent) decides which frame is active
-- A RenderLayer represents a Z-ordered render plane, not a buffer
-- No bitmap or pixel copies when switching frames
-- Premultiplied alpha is used in all GPU layers
-- All background calculations happen on the inactive frame
+2. Drawing the screen (render thread)
+- AmosGpuView.Render collects the layers, sprites and texts and hands ScreenDrawOperation to
+  Avalonia. On the render thread each layer is drawn at the game's resolution through its
+  shader (Shaders.cs, SKRuntimeEffect), and the finished picture is scaled up to the window
+  once: by whole pixels first, then smoothly the rest of the way ("sharp bilinear"), or
+  through the CRT effect (F8).
 
-4. Latest changes / open problems
-- The new SwapBuffers() implementation is tested and works correctly with GPU layers
-- The CPU-based VBL load counter needs adapting to the GPU pipeline
-- New drawing functions must strictly follow:
-    build on inactive frame
-    present active frame
-- The terminology is being consolidated:
-    Frame = buffer level
-    RenderLayer = Z order level
-…
+3. Frames: WAIT VBL
+- WAIT VBL ends a frame. It steps fades, animations and sprite effects, waits for the
+  screen's next refresh (DisplayClock), then presents the frame: PresentFrame takes a snapshot
+  of the sprites, the FONT PRINT texts and every layer's shader values.
+- DisplayClock: the game window reports each screen refresh (RequestAnimationFrame) and WAIT
+  VBL waits for those, 60 frames a second: every refresh at 60 Hz, every second at 120 Hz, an
+  average of 60 at other rates, and a timer when no window is refreshing (tests, hidden window).
+- At each refresh, before WAIT VBL lets the program go on, the view locks in the latest
+  presented frame (LatchShownFrame), and that is what is drawn. Without it the screen was drawn
+  in a race with the BASIC thread and the picture now and then stood still or jumped a frame.
+- Programs without WAIT VBL are drawn from the live state.
+- The bitmaps themselves are not part of the snapshot. A program that redraws a whole layer
+  every frame and must never show it half-drawn uses two layers and shows one while drawing
+  the other (see Frog Hop).
 
+4. Measuring
+- The game window title shows FPS, BASIC (share of time the program works between WAIT VBLs),
+  CPU (the whole app's CPU time, 100 % = one core, like Activity Monitor) and SYNC (the refresh rate WAIT VBL follows, or "timer").
+- AMOS_FRAMELOG=frames.csv logs every refresh, WAIT VBL and draw with its time (FrameLog.cs):
+    AMOS_FRAMELOG=frames.csv dotnet run -- --play Projects/parallax_layers.amosproj
 
 Good things to keep track of
-- Build for PC:
-    dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-
+- Release builds for Mac and Windows: python3 Tools/build_release.py 0.9.1 (see README)
+- Tests: dotnet test Tests/AmosLikeBasic.Tests.csproj

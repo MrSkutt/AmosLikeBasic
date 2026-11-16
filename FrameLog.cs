@@ -13,8 +13,9 @@ namespace AmosLikeBasic;
 //   AMOS_FRAMELOG=frames.csv dotnet run -- --play Projects/parallax_layers.amosproj
 //
 // Columns: time, event, frame number, extra. Events: tick (screen refresh reported to
-// DisplayClock), vbl (WAIT VBL done, frame N presented), paint (the view built its draw call
-// for frame N, UI thread), draw (the frame was drawn on the render thread; extra = ms it took).
+// DisplayClock), vbl (WAIT VBL done, frame N presented; extra = the .NET garbage collector's
+// total pause time so far in ms), paint (the view built its draw call for frame N, UI thread),
+// draw (the frame was drawn on the render thread; extra = ms it took).
 public static class FrameLog
 {
     private static readonly string? Path = Environment.GetEnvironmentVariable("AMOS_FRAMELOG");

@@ -53,7 +53,7 @@ END PROC
 
 ### Variables in procedures
 
-All variables are shared by the whole program, except the parameters. So a procedure can read and change variables that the main program uses. That is how the different parts of a game share positions, scores and lives:
+All variables are shared by the whole program, except the parameters and the local variables described below. So a procedure can read and change variables that the main program uses. That is how the different parts of a game share positions, scores and lives:
 
 ```basic
 SCORE = 0
@@ -68,6 +68,46 @@ END PROC
 ```
 
 The parameters, here `P`, are local though. After the call, a variable with the same name gets its old value back.
+
+### Local variables: LOCAL
+
+Sharing everything has a catch. If a procedure uses a variable for something of its own, such as a loop counter, it changes the variable with the same name in the rest of the program. This program is meant to print one row of stars per lap, but `Stars` uses `I` too:
+
+```basic nocheck
+FOR I = 1 TO 3
+  Stars I
+NEXT I
+END
+
+PROC Stars(N)
+  ROW$ = ""
+  FOR I = 1 TO N
+    ROW$ = ROW$ & "*"
+  NEXT I
+  PRINT ROW$
+END PROC
+```
+
+After `Stars` the main program's `I` is no longer what it was, and the loop goes wrong. The answer is `LOCAL`, which gives the procedure variables of its own:
+
+```basic
+FOR I = 1 TO 3
+  Stars I
+NEXT I
+END
+
+PROC Stars(N)
+  LOCAL I, ROW$
+  FOR I = 1 TO N
+    ROW$ = ROW$ & "*"
+  NEXT I
+  PRINT ROW$
+END PROC
+```
+
+Now it prints `*`, `**` and `***`. Local variables start at 0, or as empty text if the name ends in `$`. When the procedure ends, variables with the same names get back the values they had before the call. Put `LOCAL` at the start of the procedure, and use it for everything the procedure only needs for itself.
+
+> **Note:** A procedure that is called from inside another one sees the other one's local variables, as if they were shared.
 
 ### Leaving a procedure early
 
