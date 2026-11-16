@@ -26,7 +26,7 @@ python3 Tools/export_app.py Projects/mygame.amosproj --name MyGame --include Gra
 
 With `--icon picture.png` the Mac app gets an icon of its own.
 
-> **Note:** Fonts chosen with `FONT SET`, such as `"C64 PRO MONO"`, are not included. They must be installed on the computer that runs the game, or the text falls back to another font. Bitmap fonts loaded with `FONT LOAD` are ordinary image files and are always included.
+> **Note:** The built-in retro fonts for `FONT SET` (see *Tables*) come along in the exported game. Other fonts chosen with `FONT SET` must be installed on the computer that runs the game, or the text falls back to another font. Bitmap fonts loaded with `FONT LOAD` are ordinary image files and are always included.
 
 ## The first time on another computer
 

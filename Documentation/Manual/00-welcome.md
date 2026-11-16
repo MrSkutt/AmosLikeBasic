@@ -42,4 +42,6 @@ If you click in the margin to the left of a line you set a **breakpoint**. The p
 
 In the game window **F12** switches between window and full screen, and **F8** turns on and off an effect that makes the picture look like an old TV. The title bar of the game window shows how fast the program runs: **FPS** (frames per second), **BASIC** (how much of the time your code is working) and **CPU**.
 
+If you downloaded AMOS Like Basic, the example projects are copied to the folder `Documents/AmosLikeBasic` the first time you start it. That is where file names in your programs count from: an image you load with `"Graphics/hero.png"` should be in `Documents/AmosLikeBasic/Graphics`. The images and sounds the examples use come with the program, so they always work.
+
 The **Project** menu has **Export app...**, which turns your game into a finished program that others can run without installing AMOS Like Basic. It is described in the chapter on exporting.

@@ -49,6 +49,25 @@ The names are used in `KEYSTATE` and given by `INKEY$`. Upper and lower case mak
 
 The colour names are the web colour names, for example `Black`, `White`, `Red`, `Green`, `Lime`, `Blue`, `Yellow`, `Cyan`, `Magenta`, `Orange`, `Pink`, `Purple`, `Brown`, `Gray`, `Silver`, `Gold`, `Navy`, `Teal`, `SkyBlue`, `ForestGreen`, `SaddleBrown` and `DarkRed`.
 
+## Fonts for FONT SET
+
+These fonts come with AMOS Like Basic, so they look the same on every computer. Any font installed on the computer works too, by its name.
+
+| Name in `FONT SET` | Font |
+|---|---|
+| `"C64 Pro Mono"` | the Commodore 64 font, every character equally wide |
+| `"C64 Pro"` | the Commodore 64 font, proportional |
+| `"Topaz"` | the Amiga font from Workbench 2 and 3 (A1200) |
+| `"Topaz A500"` | the Amiga font from Workbench 1 (A500) |
+| `"TopazPlus"` | a sharper version of the A500 font |
+| `"Atari ST"` | the Atari ST system font |
+
+```basic
+FONT SET 16, 16, "Topaz"
+INKG "White"
+PRINTG "READY."
+```
+
 ## Notes in PLAY MUSIC
 
 | Written as | Means |

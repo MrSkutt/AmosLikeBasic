@@ -50,17 +50,12 @@ public partial class MainWindow : Window
         Opened += MainWindow_OnOpened;
         this.Closing += MainWindow_Closing;
         
-        _ = EnsureExampleProjectsExistAsync();
         
         InitializeAudio();
         
         VariableListBox.DoubleTapped += VariableListBox_DoubleTapped;
         
-        string userDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "AmosLikeBasic",
-            "Projects"
-        );
+        string userDir = Workspace.Projects;
         
         configService = new ConfigService("AmosProject");
         configService.Load();
@@ -401,52 +396,6 @@ public partial class MainWindow : Window
         viewer.Show(this);
     }
     
-    private async Task EnsureExampleProjectsExistAsync()
-    {
-        try 
-        {
-            // 1. Destination: Documents/AmosLikeBasic/Projects
-            string docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            string targetDir = Path.Combine(docPath, "AmosLikeBasic", "Projects");
-
-            if (!Directory.Exists(targetDir))
-            {
-                Directory.CreateDirectory(targetDir);
-            }
-
-            // 2. Source: inside the app bundle
-            // AppContext.BaseDirectory usually points to .../AmosLikeBasic.app/Contents/MacOS/
-            // We want to go up one step and into Resources
-            string bundleBase = AppContext.BaseDirectory;
-            string sourceDir = Path.Combine(bundleBase, "..", "Resources", "Projects");
-                
-            // Normalise the path (removes ".." from the string)
-            sourceDir = Path.GetFullPath(sourceDir);
-
-            if (Directory.Exists(sourceDir))
-            {
-                var files = Directory.GetFiles(sourceDir);
-                foreach (var file in files)
-                {
-                    string fileName = Path.GetFileName(file);
-                    string destFile = Path.Combine(targetDir, fileName);
-
-                    // Only copy if the file does not already exist (so we do not overwrite the user's changes)
-                    if (!File.Exists(destFile))
-                    {
-                        // Async copy so that the UI is not locked at start
-                        await Task.Run(() => File.Copy(file, destFile));
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            // Log or quietly ignore it if something goes wrong with permissions
-            System.Diagnostics.Debug.WriteLine($"Could not copy example projects: {ex.Message}");
-        }
-    }
-           
     private void HandleGlobalKeyUp(object? sender, KeyEventArgs e)
     {
         _pressedKeys.Remove(e.Key.ToString());
@@ -1123,11 +1072,7 @@ public partial class MainWindow : Window
         if (sp is null) return;
 
         // PREPARE THE START FOLDER
-        string userProjectsPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-            "AmosLikeBasic",
-            "Projects"
-        );
+        string userProjectsPath = Workspace.Projects;
             
         // Try to get an IStorageFolder reference to the folder
         var startLocation = await sp.TryGetFolderFromPathAsync(userProjectsPath);

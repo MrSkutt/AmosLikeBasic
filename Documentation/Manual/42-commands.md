@@ -198,7 +198,7 @@ FONT STYLE "style"
 | `FONT ROTATE` | turns the text |
 | `FONT CLEAR` | removes all font text (but not the effects) |
 | `FONT EFFECT` | effects, see `SPRITE EFFECT` for the parameters |
-| `FONT SET` | chooses the size and system font for `TEXT` and `PRINTG` |
+| `FONT SET` | chooses the size and font for `TEXT` and `PRINTG`: one of the built-in retro fonts (see *Tables*) or a font installed on the computer |
 | `FONT STYLE` | `"Bold"`, `"Italic"`, `"Bold Italic"` or `"Normal"` for `TEXT` and `PRINTG` |
 
 ### FOR ... NEXT

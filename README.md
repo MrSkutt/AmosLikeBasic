@@ -71,6 +71,17 @@ Put your own experiments in a `Sandbox/` folder in the project folder. It is ign
 
 ## Getting started
 
+### Download
+
+Ready-to-run versions for macOS (Apple Silicon) and Windows (x64) are on the [Releases](https://github.com/MrSkutt/AmosLikeBasic/releases) page. Unzip and start; nothing else needs installing. The manual is in the zip file too.
+
+- **Mac:** the app is not signed by Apple, so the first time you right-click it and choose **Open**.
+- **Windows:** if SmartScreen warns, click **More info** and **Run anyway**.
+
+On the first start the example projects are copied to `Documents/AmosLikeBasic`. That folder is where your programs count their file paths from, so put your own images and sounds there (for example `Documents/AmosLikeBasic/Graphics/hero.png`). The images and sounds the examples use come with the app.
+
+To build and run from the source code instead:
+
 ### Prerequisites
 
 - [.NET 9 SDK](https://dotnet.microsoft.com/download) or later
@@ -102,6 +113,17 @@ The tests run headless, without opening any windows, and take about two minutes.
 - the tracker editor responds to its keys (notes, effects, transpose, copy and paste, undo).
 
 They run on GitHub for every push and pull request.
+
+### Making a release
+
+Push a version tag, and GitHub Actions runs the tests, builds the downloads for Mac and Windows and publishes them as a release:
+
+```bash
+git tag v0.9.0
+git push origin v0.9.0
+```
+
+To build the same zip files on your own Mac, run `python3 Tools/build_release.py 0.9.0`; they end up in `Export/Release/`.
 
 ### Dependencies
 

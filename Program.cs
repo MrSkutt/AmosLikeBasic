@@ -12,6 +12,7 @@ internal static class Program
     public static void Main(string[] args)
     {
         GamePath = GamePlayer.FindGame(args);
+        if (GamePath == null) Workspace.Setup();
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Globalization;
 using System.Numerics;
@@ -2464,6 +2465,44 @@ public sealed class AmosGraphics
         else DrawTextNow(GetActiveScreen(), x, y, t, "Arial", 20, Ink, 0, 0);
     }
 
+    // The fonts in the fonts folder that comes with the app, by family name. They are used before
+    // the computer's own fonts, so that FONT SET "C64 PRO MONO" works without installing anything.
+    private static Dictionary<string, SKTypeface>? _bundledFonts;
+    private static readonly object BundledFontsLock = new();
+
+    // Short names for the fonts whose real family names are long
+    private static readonly Dictionary<string, string> FontAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Topaz"] = "Topaz a600a1200a400",
+        ["Topaz A1200"] = "Topaz a600a1200a400",
+        ["Topaz A500"] = "Topaz a500a1000a2000",
+        ["TopazPlus"] = "TopazPlus a500a1000a2000",
+        ["Atari ST"] = "Atari ST 8x16 System Font",
+    };
+
+    internal static SKTypeface? BundledFont(string family)
+    {
+        lock (BundledFontsLock)
+        {
+            if (_bundledFonts == null)
+            {
+                _bundledFonts = new Dictionary<string, SKTypeface>(StringComparer.OrdinalIgnoreCase);
+                foreach (var dir in new[] { Path.Combine(AppContext.BaseDirectory, "fonts"), Path.Combine(Environment.CurrentDirectory, "fonts") })
+                {
+                    if (!Directory.Exists(dir)) continue;
+                    foreach (var file in Directory.GetFiles(dir, "*.ttf").Concat(Directory.GetFiles(dir, "*.otf")))
+                    {
+                        var tf = SKTypeface.FromFile(file);
+                        if (tf != null) _bundledFonts.TryAdd(tf.FamilyName, tf);
+                    }
+                }
+            }
+            string name = family.Trim();
+            if (FontAliases.TryGetValue(name, out var real)) name = real;
+            return _bundledFonts.TryGetValue(name, out var found) ? found : null;
+        }
+    }
+
     // Draws text straight into the layer's bitmap with SkiaSharp, in the calling thread. Then the text lands
     // in the right layer and in the right order with everything else that is drawn, even when the program swaps layers
     // every frame. With cellWidth > 0 every character is drawn in a cell of its own and without soft edges,
@@ -2474,7 +2513,8 @@ public sealed class AmosGraphics
         if (string.IsNullOrEmpty(text) || size <= 0) return;
         bool italic = Style?.Contains("Italic", StringComparison.OrdinalIgnoreCase) == true;
         bool bold = Style?.Contains("Bold", StringComparison.OrdinalIgnoreCase) == true;
-        var typeface = SKTypeface.FromFamilyName(family,
+        var typeface = BundledFont(family)
+                       ?? SKTypeface.FromFamilyName(family,
                            bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal,
                            SKFontStyleWidth.Normal,
                            italic ? SKFontStyleSlant.Italic : SKFontStyleSlant.Upright)

@@ -41,11 +41,17 @@
         <PackageReference Include="Un4seen.Bass" Version="2.4.18" />
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="AmosLikeBasic.Tests" />
+    </ItemGroup>
+
     <!-- Resources -->
     <ItemGroup>
         <None Include="Sound/**/*" CopyToOutputDirectory="PreserveNewest" />
         <None Include="Graphics/**/*" CopyToOutputDirectory="PreserveNewest" />
         <None Include="Projects/**/*" CopyToOutputDirectory="PreserveNewest" />
+        <!-- Retro fonts for FONT SET (C64 Pro Mono, Topaz ...), so the text looks the same on every computer -->
+        <None Include="fonts/**/*" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
     <!-- Native libraries for Windows -->
