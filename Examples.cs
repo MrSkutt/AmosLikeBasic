@@ -27,7 +27,7 @@ public static class Examples
         {
             new Example("raster_bars", "Raster Bars", "Moving colour bars behind a picture, demo style"),
             new Example("tunnel", "Sine Tunnel", "An animated tunnel with particles and a scrolling text"),
-            new Example("parallax_layers", "Parallax Layers", "Layers that scroll at different speeds"),
+            new Example("parallax_layers", "Parallax Layers", "Mountain ranges that scroll at different speeds; steer with left and right"),
             new Example("solar_system", "Solar System", "Planets on a raster sky, with C64-style music"),
             new Example("animated_sprites", "Animated Sprites", "Sprites with frames, zoom and rotation"),
             new Example("sprite_collisions", "Sprite Collisions", "Steer a hero and see when it touches the enemies"),

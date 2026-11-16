@@ -693,6 +693,8 @@ public sealed class AmosGraphics
         {
             EnsureScreen();
             Normalize(ref x1, ref y1, ref x2, ref y2);
+            // Entirely outside the screen: nothing to draw (clamping it would draw a line along the edge)
+            if (x2 < 0 || y2 < 0 || x1 >= Width || y1 >= Height) return;
             x1 = Math.Clamp(x1, 0, Width - 1);
             x2 = Math.Clamp(x2, 0, Width - 1);
             y1 = Math.Clamp(y1, 0, Height - 1);
@@ -2240,6 +2242,8 @@ public sealed class AmosGraphics
         {
             EnsureScreen();
             Normalize(ref x1, ref y1, ref x2, ref y2);
+            // Entirely outside the screen: nothing to draw (clamping it would draw a line along the edge)
+            if (x2 < 0 || y2 < 0 || x1 >= Width || y1 >= Height) return;
             x1 = Math.Clamp(x1, 0, Width - 1);
             x2 = Math.Clamp(x2, 0, Width - 1);
             y1 = Math.Clamp(y1, 0, Height - 1);
