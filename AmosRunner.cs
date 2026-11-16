@@ -3193,7 +3193,7 @@ public static partial class AmosRunner
                         
                         case "TRACK":
                         {
-                            // Tracker songs (.amostrk) on channels 1 – 4
+                            // Tracker songs (.amostrk) on channels 1 – 4, or up to 8 if the song has more
                             var (trackSub, trackRest) = SplitFirstWord(arg);
                             var tA = SplitTopLevelCsv(trackRest);
                             switch (trackSub.ToUpperInvariant())

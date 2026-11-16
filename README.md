@@ -190,8 +190,11 @@ Under active development. Commands, APIs and internal architecture may still cha
 | ![The Forest Hop title screen](images/foresthop-title.png) | ![Raster bars](images/raster_bars.png) |
 | *The Forest Hop title screen* | *Raster bars* |
 
-![The tracker with the Forest Hop song](images/tracker.png)
-*The tracker: four channels, instruments with their own synth settings, and ProTracker-style effects*
+![The tracker playing Neon Horizon, an eight-channel song](images/tracker.png)
+*The tracker: 4 – 8 channels with an oscilloscope and level meter each, and ProTracker-style effects*
+
+![The tracker's instrument page](images/tracker-instrument.png)
+*The instrument page: the waveform, envelope and filter drawn from the settings*
 
 | | |
 |---|---|

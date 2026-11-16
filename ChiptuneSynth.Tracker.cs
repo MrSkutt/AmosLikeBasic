@@ -7,9 +7,10 @@ using System.Threading;
 
 namespace AmosLikeBasic
 {
-    // The tracker plays a TrackerSong on channels 1 – 4, as in ProTracker: every row is split into a
-    // number of ticks (speed), and the effects work tick by tick. Everything runs in the audio thread, so
-    // the song stays exactly in step. Channels 5 – 8 are free for PLAY MUSIC and sounds while the song plays.
+    // The tracker plays a TrackerSong on channels 1 – 4 (up to 8 if the song has more), as in ProTracker:
+    // every row is split into a number of ticks (speed), and the effects work tick by tick. Everything runs
+    // in the audio thread, so the song stays exactly in step. The channels above the song's are free for
+    // PLAY MUSIC and sounds while the song plays.
     public partial class ChiptuneSynth
     {
         // ── The song, ready to play ──────────────────────────────────
@@ -50,6 +51,7 @@ namespace AmosLikeBasic
             public int[] Order = Array.Empty<int>();
             public TrackInstrument[] Instruments = Array.Empty<TrackInstrument>();
             public int Speed = 6, Tempo = 125;
+            public int Channels = TrackerSong.DefaultChannels;
         }
 
         private sealed class TrackRequest
@@ -88,12 +90,17 @@ namespace AmosLikeBasic
             public bool Sfx;
             public long SfxReleaseLeft;
             public Voice? SavedSettings;
+            // A song channel an effect borrows: the song's instrument, back when the effect is over
+            public TrackInstrument? SongInst;
+            public int SongInstNumber;
         }
 
         private static readonly TrackInstrument DefaultInstrument = new();
         private static readonly TrackRequest TrackStopRequest = new(null, 0, 0, false);
-        // Channels 1 – 4 play the song, 5 – 8 are used by the sound effects (TRACK SFX)
+        // Channels 1 – _trackUsed play the song (4 – 8), the ones above are used by the sound effects
+        // (TRACK SFX). A song with 8 channels lends channel 8 to an effect while it sounds.
         private static readonly TrackChannel[] _trackChannels = CreateTrackChannels();
+        private static int _trackUsed = TrackerSong.DefaultChannels;
 
         private static TrackChannel[] CreateTrackChannels()
         {
@@ -115,7 +122,7 @@ namespace AmosLikeBasic
 
         // Changes from the editor that the audio thread makes at the next sample
         private static readonly ConcurrentQueue<Action> _trackCommands = new();
-        private static readonly bool[] _trackMute = new bool[TrackerSong.ChannelCount];
+        private static readonly bool[] _trackMute = new bool[Channels];
 
         // ════════════════════════════════════════════════════════════════
         //  From BASIC and the editor
@@ -145,10 +152,11 @@ namespace AmosLikeBasic
             _trackCommands.Enqueue(() => ApplyTrackUpdate(data));
         }
 
-        // Previews a note with an instrument (from 1) on a channel (1 – 4), until TrackPreviewRelease
+        // Previews a note with an instrument (from 1) on a channel of the song, until TrackPreviewRelease
         public static void TrackPreview(TrackerSong song, int instrument, int note, int channel)
         {
-            if (channel < 1 || channel > TrackerSong.ChannelCount) return;
+            if (channel < 1 || channel > song.Channels) return;
+            int used = song.Channels;
             var inst = instrument >= 1 && instrument <= song.Instruments.Count
                 ? CompileInstrument(song.Instruments[instrument - 1], instrument) : DefaultInstrument;
             int tempo = Math.Clamp(song.Tempo, 32, 255);
@@ -161,6 +169,7 @@ namespace AmosLikeBasic
                     _trackPreview = true;
                     _trackTempo = tempo;
                     _trackTick = 0;
+                    _trackUsed = used;
                 }
                 ch.Inst = inst;
                 ch.InstNumber = instrument;
@@ -174,7 +183,7 @@ namespace AmosLikeBasic
 
         public static void TrackPreviewRelease(int channel)
         {
-            if (channel < 1 || channel > TrackerSong.ChannelCount) return;
+            if (channel < 1 || channel > TrackerSong.MaxChannels) return;
             _trackCommands.Enqueue(() => ReleaseTrackVoice(channel - 1));
         }
 
@@ -185,7 +194,8 @@ namespace AmosLikeBasic
             {
                 if (!_trackPreview) return;
                 _trackPreview = false;
-                for (int c = 0; c < TrackerSong.ChannelCount; c++) _trackChannels[c].Active = false;
+                for (int c = 0; c < _trackUsed; c++)
+                    if (!_trackChannels[c].Sfx) _trackChannels[c].Active = false;
                 ReleaseTrackVoices();
             });
         }
@@ -202,7 +212,8 @@ namespace AmosLikeBasic
         private static readonly long[] _sfxEnds = new long[Channels];   // when the effect is expected to be done (BASIC thread)
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TrackerInstrument, TrackInstrument> _sfxInstruments = new();
 
-        // Plays the instrument as a sound effect. Without a channel, the one of channels 5 – 8 that frees up first is chosen.
+        // Plays the instrument as a sound effect. Without a channel, the one of the channels above the song's
+        // (5 – 8 with a 4-channel song) that frees up first is chosen; with an 8-channel song, channel 8.
         // Without a length (ms < 0) the sound lasts as long as the instrument is made for. Returns the channel.
         public static int PlayTrackSfx(TrackerInstrument instrument, int number, int note, double ms = -1, int channel = 0)
         {
@@ -211,8 +222,10 @@ namespace AmosLikeBasic
             long now = Stopwatch.GetTimestamp();
             if (channel < 1 || channel > Channels)
             {
-                channel = FirstSfxChannel;
-                for (int c = FirstSfxChannel; c <= Channels; c++)
+                int first = Volatile.Read(ref _track) != null ? Math.Max(FirstSfxChannel, Volatile.Read(ref _trackUsed) + 1) : FirstSfxChannel;
+                first = Math.Min(first, Channels);
+                channel = first;
+                for (int c = first; c <= Channels; c++)
                     if (_sfxEnds[c - 1] < _sfxEnds[channel - 1]) channel = c;
             }
             long releaseSamples = (long)(Math.Max(1, ms) / 1000.0 * SampleRate);
@@ -226,6 +239,8 @@ namespace AmosLikeBasic
                 if (!ch.Sfx)
                 {
                     ch.SavedSettings = v.CopySettings();
+                    ch.SongInst = ch.Inst;
+                    ch.SongInstNumber = ch.InstNumber;
                     ch.Sfx = true;
                     // The first effect starts the clock, so that a sound always sounds the same
                     if (_sfxCount++ == 0) _sfxTickLeft = SampleRate / SfxTickRate;
@@ -290,6 +305,11 @@ namespace AmosLikeBasic
             if (v.Stage != EnvStage.Idle) v.Stage = EnvStage.Release;
             if (restore && ch.SavedSettings != null) v.RestoreSettings(ch.SavedSettings);
             ch.SavedSettings = null;
+            // A borrowed song channel goes on with the song's instrument at its next note
+            ch.Inst = ch.SongInst;
+            ch.InstNumber = ch.SongInstNumber;
+            ch.SongInst = null;
+            ch.SongInstNumber = 0;
         }
 
         public static void TrackStop()
@@ -313,7 +333,7 @@ namespace AmosLikeBasic
 
         public static void SetTrackMute(int channel, bool mute)
         {
-            if (channel >= 1 && channel <= TrackerSong.ChannelCount) _trackMute[channel - 1] = mute;
+            if (channel >= 1 && channel <= TrackerSong.MaxChannels) _trackMute[channel - 1] = mute;
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -330,7 +350,8 @@ namespace AmosLikeBasic
                 Order = onlyPattern != null ? new[] { onlyPattern.Value }
                     : song.Order.Count > 0 ? song.Order.ToArray() : new[] { 0 },
                 Patterns = new TrackerCell[song.Patterns.Count][][],
-                Instruments = new TrackInstrument[song.Instruments.Count]
+                Instruments = new TrackInstrument[song.Instruments.Count],
+                Channels = song.Channels
             };
 
             for (int p = 0; p < song.Patterns.Count; p++)
@@ -339,13 +360,13 @@ namespace AmosLikeBasic
                 var rows = new TrackerCell[pat.Rows][];
                 for (int r = 0; r < pat.Rows; r++)
                 {
-                    rows[r] = new TrackerCell[TrackerSong.ChannelCount];
-                    for (int c = 0; c < TrackerSong.ChannelCount; c++) rows[r][c] = pat[r, c];
+                    rows[r] = new TrackerCell[song.Channels];
+                    for (int c = 0; c < song.Channels; c++) rows[r][c] = pat[r, c];
                 }
                 data.Patterns[p] = rows;
             }
             if (data.Patterns.Length == 0)
-                data.Patterns = new[] { new[] { new TrackerCell[TrackerSong.ChannelCount] } };
+                data.Patterns = new[] { new[] { new TrackerCell[song.Channels] } };
             for (int i = 0; i < data.Order.Length; i++)
                 data.Order[i] = Math.Clamp(data.Order[i], 0, data.Patterns.Length - 1);
 
@@ -445,8 +466,12 @@ namespace AmosLikeBasic
                 return;
             }
 
-            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            // Channels a sound effect is using right now are left alone; the song takes them over afterwards
+            if (_track != null) ReleaseTrackVoices();
+            _trackUsed = req.Data.Channels;
+            for (int c = 0; c < _trackUsed; c++)
             {
+                if (_trackChannels[c].Sfx) { _trackChannels[c].SongInst = null; _trackChannels[c].SongInstNumber = 0; continue; }
                 var v = _voices[c];
                 Volatile.Write(ref v.Seq, null);
                 v.Drum = null;
@@ -480,11 +505,26 @@ namespace AmosLikeBasic
             if (old == null) return;
             if (data.Speed != old.Speed) _trackSpeed = data.Speed;
             if (data.Tempo != old.Tempo) _trackTempo = data.Tempo;
-            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            if (data.Channels < _trackUsed)
+            {
+                // Fewer channels: the ones taken away fall silent
+                for (int c = data.Channels; c < _trackUsed; c++)
+                {
+                    var gone = _trackChannels[c];
+                    if (gone.Sfx) continue;
+                    gone.Active = false;
+                    var v = _voices[c];
+                    if (v.Stage is EnvStage.Attack or EnvStage.Decay or EnvStage.Sustain) v.Stage = EnvStage.Release;
+                }
+            }
+            _trackUsed = data.Channels;
+            for (int c = 0; c < _trackUsed; c++)
             {
                 var ch = _trackChannels[c];
-                if (ch.InstNumber > 0)
-                    ch.Inst = ch.InstNumber <= data.Instruments.Length ? data.Instruments[ch.InstNumber - 1] : DefaultInstrument;
+                ref var number = ref ch.Sfx ? ref ch.SongInstNumber : ref ch.InstNumber;
+                if (number <= 0) continue;
+                var inst = number <= data.Instruments.Length ? data.Instruments[number - 1] : DefaultInstrument;
+                if (ch.Sfx) ch.SongInst = inst; else ch.Inst = inst;
             }
             if (_trackOrder >= data.Order.Length) _trackOrder = 0;
             if (_trackRow >= data.Patterns[data.Order[_trackOrder]].Length) _trackRow = 0;
@@ -494,8 +534,9 @@ namespace AmosLikeBasic
 
         private static void ReleaseTrackVoices()
         {
-            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            for (int c = 0; c < _trackUsed; c++)
             {
+                if (_trackChannels[c].Sfx) continue;
                 var v = _voices[c];
                 if (v.Stage is EnvStage.Attack or EnvStage.Decay or EnvStage.Sustain) v.Stage = EnvStage.Release;
             }
@@ -507,14 +548,17 @@ namespace AmosLikeBasic
             if (d == null)
             {
                 // Only previewing: the instruments' tables should still run
-                for (int c = 0; c < TrackerSong.ChannelCount; c++) UpdateTrackVoice(c);
+                for (int c = 0; c < _trackUsed; c++)
+                    if (!_trackChannels[c].Sfx) UpdateTrackVoice(c);
                 return;
             }
             if (_trackTick == 0) ReadRow(d);
             else
-                for (int c = 0; c < TrackerSong.ChannelCount; c++) TickEffects(c);
+                for (int c = 0; c < d.Channels; c++)
+                    if (!_trackChannels[c].Sfx) TickEffects(c);
 
-            for (int c = 0; c < TrackerSong.ChannelCount; c++) UpdateTrackVoice(c);
+            for (int c = 0; c < d.Channels; c++)
+                if (!_trackChannels[c].Sfx) UpdateTrackVoice(c);
 
             if (++_trackTick >= _trackSpeed)
             {
@@ -530,12 +574,19 @@ namespace AmosLikeBasic
             Volatile.Write(ref _trackPosRow, _trackRow);
 
             int? jumpOrder = null, breakRow = null;
-            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            for (int c = 0; c < d.Channels; c++)
             {
                 var cell = row[c];
                 var ch = _trackChannels[c];
                 char eff = cell.Effect;
                 int p = cell.Param, x = p >> 4, y = p & 15;
+                if (ch.Sfx)
+                {
+                    // A sound effect has the channel: skip its notes, but the song still jumps where it says
+                    if (eff == 'B') jumpOrder = p;
+                    else if (eff == 'D') breakRow = x * 10 + y;
+                    continue;
+                }
                 ch.Effect = eff;
                 ch.Param = p;
                 ch.DelayNote = TrackerCell.NoNote;

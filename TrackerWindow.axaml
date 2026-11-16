@@ -35,7 +35,10 @@
                 <TextBlock Text="Octave" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
                 <NumericUpDown Name="OctaveBox" Minimum="0" Maximum="8" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0" ToolTip.Tip="F1 / F2"/>
                 <TextBlock Text="Step" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <NumericUpDown Name="StepBox" Minimum="0" Maximum="16" Increment="1" FormatString="0" Width="110"/>
+                <NumericUpDown Name="StepBox" Minimum="0" Maximum="16" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0"/>
+                <TextBlock Text="Channels" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <NumericUpDown Name="ChannelsBox" Minimum="4" Maximum="8" Increment="1" FormatString="0" Width="110"
+                               ToolTip.Tip="How many channels the song uses, 4 – 8. Sound effects (TRACK SFX) use the synth channels above them."/>
             </WrapPanel>
         </Border>
 
@@ -70,25 +73,45 @@
             </DockPanel>
         </Border>
 
-        <!-- Right: instruments -->
-        <Border DockPanel.Dock="Right" Width="330" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2,0,0,0">
+        <!-- Right: the instruments; their settings are on the instrument page -->
+        <Border DockPanel.Dock="Right" Width="250" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2,0,0,0">
             <DockPanel Margin="10">
-                <StackPanel DockPanel.Dock="Top" Spacing="6">
+                <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,8">
                     <TextBlock Text="INSTRUMENTS" Classes="amos-title" HorizontalAlignment="Center"/>
                     <UniformGrid Columns="3">
-                        <Button Margin="2,0" Content="ADD" Classes="amos-button" Click="InstAdd_OnClick" Focusable="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-                        <Button Margin="2,0" Content="CLONE" Classes="amos-button" Click="InstClone_OnClick" Focusable="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
-                        <Button Margin="2,0" Content="DEL" Classes="amos-button" Click="InstDelete_OnClick" Focusable="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                        <Button Margin="2,0" Content="ADD" Classes="amos-button" Click="InstAdd_OnClick" Focusable="False" Padding="2,4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                        <Button Margin="2,0" Content="CLONE" Classes="amos-button" Click="InstClone_OnClick" Focusable="False" Padding="2,4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
+                        <Button Margin="2,0" Content="DEL" Classes="amos-button" Click="InstDelete_OnClick" Focusable="False" Padding="2,4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                     </UniformGrid>
-                    <ListBox Name="InstrumentList" Classes="tracker-list" Height="190" Background="{DynamicResource AmosInputBg}" FontFamily="Menlo, Consolas, Courier New, monospace"/>
                 </StackPanel>
-                <ScrollViewer Margin="0,8,0,0">
-                    <StackPanel Name="InstrumentPanel" Spacing="4"/>
-                </ScrollViewer>
+                <Button DockPanel.Dock="Bottom" Content="EDIT INSTRUMENT" Classes="amos-button" Click="InstrumentTab_OnClick" Focusable="False"
+                        Margin="0,8,0,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" ToolTip.Tip="F4, or double-click an instrument"/>
+                <ListBox Name="InstrumentList" Classes="tracker-list" Background="{DynamicResource AmosInputBg}" FontFamily="Menlo, Consolas, Courier New, monospace"/>
             </DockPanel>
         </Border>
 
-        <!-- Middle: the pattern -->
-        <local:PatternView Name="Pattern"/>
+        <!-- Middle: the pattern page and the instrument page -->
+        <DockPanel>
+            <Border DockPanel.Dock="Top" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="0,0,0,2" Padding="6,4">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <ToggleButton Name="PatternTab" Content="PATTERN" Classes="amos-button" IsChecked="True" Focusable="False" Click="PatternTab_OnClick" ToolTip.Tip="F3"/>
+                    <ToggleButton Name="InstrumentTab" Content="INSTRUMENT" Classes="amos-button" Focusable="False" Click="InstrumentTab_OnClick" ToolTip.Tip="F4"/>
+                </StackPanel>
+            </Border>
+            <Grid>
+                <!-- The pattern, with an oscilloscope and level meter per channel above it -->
+                <DockPanel Name="PatternPage">
+                    <local:ChannelScopes Name="Scopes" DockPanel.Dock="Top"/>
+                    <local:PatternView Name="Pattern"/>
+                </DockPanel>
+                <!-- The scroll bar is kept outside the settings, so that it never covers them -->
+                <ScrollViewer Name="InstrumentPage" IsVisible="False" AllowAutoHide="False"
+                              HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <Border Name="InstrumentKeys" Focusable="True" Background="Transparent" Padding="12,12,20,12">
+                        <StackPanel Name="InstrumentPanel" Spacing="10"/>
+                    </Border>
+                </ScrollViewer>
+            </Grid>
+        </DockPanel>
     </DockPanel>
 </Window>

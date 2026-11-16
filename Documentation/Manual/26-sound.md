@@ -286,7 +286,7 @@ GOTO Loop
 | `TRACKPOS()` | the place in the order list being played, from 0 |
 | `TRACKROW()` | the row in the pattern being played, from 0 |
 
-A tracker song uses synth channels 1 – 4. Channels 5 – 8 are free for `PLAY MUSIC` while the song plays, and sound effects such as `PLAY COIN` do not affect it.
+A tracker song has 4 to 8 channels and uses that many synth channels, from channel 1. A song with four channels uses channels 1 – 4, and channels 5 – 8 are free for `PLAY MUSIC` and sound effects while it plays. A song with more channels takes more of them: with six, channels 7 and 8 are left. Sound effects such as `PLAY COIN` do not affect the song.
 
 The project `Projects/trackerdemo.amosproj` plays Forest Song, the song from Forest Hop.
 
@@ -300,6 +300,7 @@ More songs in C64 style are in `Sound/Tracker` and are used by the example proje
 | `winter_evening.amostrk` | `weather` | slow and wistful, with bells |
 | `snake.amostrk` | `snake` | bouncy game music with short, choppy notes |
 | `frog_hop.amostrk` | `froghop` | cheerful game music for Frog Hop |
+| `neon_horizon.amostrk` | – | eight channels: a lead with a C64 echo, filter bass, arpeggios, two pad voices and drums; open it in the tracker and watch the oscilloscopes |
 
 Open them in the tracker to see how the sounds and effects are made.
 
@@ -315,7 +316,9 @@ END PROC
 
 ### The tracker in the editor
 
-The **TRACKER** button opens a window where you write the songs. In the middle is the pattern with the four channels, on the left the order list and on the right the instruments.
+The **TRACKER** button opens a window where you write the songs. In the middle is the pattern with the song's channels, on the left the order list and on the right the instruments. Above the pattern each channel has an oscilloscope, which shows the channel's sound wave as it plays, and a level meter. They move when you try notes on the keyboard too, so you can see what an instrument sounds like.
+
+**Channels.** **Channels** in the toolbar sets how many channels the song has, from 4 to 8. Four is like ProTracker and leaves four synth channels for sound effects; eight gives room for fuller music. With many channels the text in the pattern gets smaller so that everything fits. If you choose fewer channels and the ones taken away have notes, the tracker asks first: the notes stay until you save, but are not saved.
 
 **Entering notes.** The keyboard works like a piano, as in ProTracker. The bottom row of letters (`Z S X D C V G B H N J M`) is one octave and the top row (`Q 2 W 3 E R 5 T 6 Y 7 U I`) the next. The note gets the instrument selected in the list, and you hear it while you hold the key. `1` lets go of the note (`===`). After each note the cursor moves down as many rows as **Step** says. **Octave** chooses which octave the piano starts on, and `F1` and `F2` change the octave.
 
@@ -329,7 +332,15 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **The order list.** **INS** adds a place after the selected one, **DEL** removes it. **PAT -** and **PAT +** change which pattern the place plays; after the last pattern **PAT +** makes a new empty one. **CLONE PATTERN** copies the pattern to a new one, so that you can make a variation without changing the original. **Rows** is how many rows the pattern has.
 
-**The instrument panel.** Everything you change is heard straight away, even while the song plays. The table is written with one step per line, and the box turns red if a step is wrong. A new song has six ready-made instruments to start with: lead, bass, chord, kick, snare and hi-hat.
+**Choosing an instrument.** Click an instrument in the list to give new notes that instrument. The keyboard stays in the pattern, so you can go on typing notes straight away.
+
+**The instrument page.** **INSTRUMENT** above the pattern (or `F4`, or a double-click in the list) shows the settings of the selected instrument, and **PATTERN** (or `F3`) goes back. The settings are in cards, and three of them have a picture of what the settings do:
+
+- **SOUND** shows the waveform. For a pulse wave with PWM, dashed lines show how far the pulse width swings.
+- **ENVELOPE** shows how the volume rises (A), falls to the sustain level (D, S) while the key is held, and fades away (R) when the note is let go.
+- **FILTER** shows which frequencies come through, from deep on the left to bright on the right. The dotted line is the cutoff. With a filter envelope a dashed curve shows where the envelope takes the filter.
+
+Everything you change is heard straight away, even while the song plays, and the pictures change with it. On the instrument page the piano keys play the instrument without writing anything in the pattern. When you have typed a value in a box, press `Enter` to go back to playing (`Esc` in the table, where `Enter` makes a new line), or click on an empty part of the page. The table is written with one step per line, and the box turns red if a step is wrong. A new song has six ready-made instruments to start with: lead, bass, chord, kick, snare and hi-hat.
 
 **Saving.** **SAVE** saves the song as an `.amostrk` file, ideally in `Sound/Tracker` in the project folder. The status bar then shows the line that loads the song, for example `TRACK LOAD "Sound/Tracker/mysong.amostrk"`. If you export the game the file comes along, since its name is in quotation marks in the program.
 
@@ -456,7 +467,7 @@ WAIT 800
 | `Step` | footsteps |
 | `Complete` | level complete |
 
-The sounds play on synth channels 5 – 8, and each new sound takes the channel that becomes free first. A tracker song on channels 1 – 4 therefore carries on undisturbed. If you use `PLAY MUSIC` on channels 5 – 8, the sound effect borrows the channel and gives it back with the same settings afterwards.
+The sounds play on synth channels 5 – 8, and each new sound takes the channel that becomes free first. A tracker song on channels 1 – 4 therefore carries on undisturbed. While a song with more channels plays, the sounds only use the channels above the song's; with six channels, 7 and 8. A song with all eight channels lends channel 8 to the sound while it plays, as in many C64 games, and that channel of the song comes back at its next note. If you use `PLAY MUSIC` on channels 5 – 8, the sound effect borrows the channel and gives it back with the same settings afterwards.
 
 Without a length the sound lasts as long as the instrument is made for: a sound with sustain 0 until it has faded, one with a table until the table ends, and otherwise a quarter of a second. The note decides the pitch, so the same sound can be played higher or lower, for example a coin that sounds brighter for each coin in a row.
 

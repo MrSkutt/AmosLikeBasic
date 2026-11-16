@@ -13,9 +13,14 @@ namespace AmosLikeBasic
     // with the channels separated by |, so that the file can be read and diffed:
     //   "C-4 01 A04|--- .. ...|=== .. ...|E-3 02 C20"
     // Each cell is note, instrument (hex) and effect (letter/digit + two hex digits).
+    //
+    // A song has 4 – 8 channels (Channels); files from before that have 4. The patterns always
+    // hold MaxChannels channels, so that fewer channels and back again loses nothing until saving.
     public sealed class TrackerSong
     {
-        public const int ChannelCount = 4;
+        public const int MaxChannels = 8;
+        public const int MinChannels = 4;
+        public const int DefaultChannels = 4;
         public const int DefaultRows = 64;
         public const int MaxRows = 256;
         public const string FormatName = "AmosTracker";
@@ -24,6 +29,14 @@ namespace AmosLikeBasic
         public string Title { get; set; } = "";
         public int Speed { get; set; } = 6;      // ticks per row
         public int Tempo { get; set; } = 125;    // as in ProTracker: 125 gives 50 ticks per second
+
+        private int _channels = DefaultChannels;
+        public int Channels                      // how many channels the song uses: synth channels 1 – Channels
+        {
+            get => _channels;
+            set => _channels = Math.Clamp(value, MinChannels, MaxChannels);
+        }
+
         public List<TrackerInstrument> Instruments { get; set; } = new();
         public List<int> Order { get; set; } = new() { 0 };
         public List<TrackerPattern> Patterns { get; set; } = new() { new TrackerPattern() };
@@ -37,6 +50,7 @@ namespace AmosLikeBasic
             public string Title { get; set; } = "";
             public int Speed { get; set; } = 6;
             public int Tempo { get; set; } = 125;
+            public int Channels { get; set; } = DefaultChannels;
             public List<TrackerInstrument> Instruments { get; set; } = new();
             public List<int> Order { get; set; } = new();
             public List<List<string>> Patterns { get; set; } = new();
@@ -70,6 +84,7 @@ namespace AmosLikeBasic
                 Title = file.Title ?? "",
                 Speed = Math.Clamp(file.Speed, 1, 31),
                 Tempo = Math.Clamp(file.Tempo, 32, 255),
+                Channels = file.Channels,
                 Instruments = file.Instruments ?? new(),
                 Order = file.Order ?? new(),
                 Patterns = new()
@@ -100,13 +115,14 @@ namespace AmosLikeBasic
                 Title = Title,
                 Speed = Speed,
                 Tempo = Tempo,
+                Channels = Channels,
                 Instruments = Instruments,
                 Order = Order
             };
             foreach (var p in Patterns)
             {
                 var rows = new List<string>(p.Rows);
-                for (int r = 0; r < p.Rows; r++) rows.Add(FormatRow(p, r));
+                for (int r = 0; r < p.Rows; r++) rows.Add(FormatRow(p, r, Channels));
                 file.Patterns.Add(rows);
             }
             return JsonSerializer.Serialize(file, JsonOptions);
@@ -114,9 +130,9 @@ namespace AmosLikeBasic
 
         private static TrackerCell[] ParseRow(string text, int pattern, int row)
         {
-            var cells = new TrackerCell[ChannelCount];
+            var cells = new TrackerCell[MaxChannels];
             var parts = (text ?? "").Split('|');
-            for (int c = 0; c < ChannelCount; c++)
+            for (int c = 0; c < MaxChannels; c++)
             {
                 if (c >= parts.Length) { cells[c] = TrackerCell.Empty; continue; }
                 try { cells[c] = TrackerCell.Parse(parts[c]); }
@@ -128,10 +144,10 @@ namespace AmosLikeBasic
             return cells;
         }
 
-        private static string FormatRow(TrackerPattern p, int row)
+        private static string FormatRow(TrackerPattern p, int row, int channels)
         {
-            var parts = new string[ChannelCount];
-            for (int c = 0; c < ChannelCount; c++) parts[c] = p[row, c].ToString();
+            var parts = new string[channels];
+            for (int c = 0; c < channels; c++) parts[c] = p[row, c].ToString();
             return string.Join("|", parts);
         }
     }
@@ -172,7 +188,7 @@ namespace AmosLikeBasic
 
         public TrackerPattern(int rows = TrackerSong.DefaultRows)
         {
-            _cells = new TrackerCell[Math.Clamp(rows, 1, TrackerSong.MaxRows), TrackerSong.ChannelCount];
+            _cells = new TrackerCell[Math.Clamp(rows, 1, TrackerSong.MaxRows), TrackerSong.MaxChannels];
             Clear();
         }
 
@@ -186,13 +202,13 @@ namespace AmosLikeBasic
 
         public void SetRow(int row, TrackerCell[] cells)
         {
-            for (int c = 0; c < TrackerSong.ChannelCount; c++) _cells[row, c] = cells[c];
+            for (int c = 0; c < TrackerSong.MaxChannels; c++) _cells[row, c] = cells[c];
         }
 
         public void Clear()
         {
             for (int r = 0; r < Rows; r++)
-            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            for (int c = 0; c < TrackerSong.MaxChannels; c++)
                 _cells[r, c] = TrackerCell.Empty;
         }
 
@@ -200,10 +216,10 @@ namespace AmosLikeBasic
         public void Resize(int rows)
         {
             var old = _cells;
-            _cells = new TrackerCell[Math.Clamp(rows, 1, TrackerSong.MaxRows), TrackerSong.ChannelCount];
+            _cells = new TrackerCell[Math.Clamp(rows, 1, TrackerSong.MaxRows), TrackerSong.MaxChannels];
             Clear();
             for (int r = 0; r < Math.Min(old.GetLength(0), Rows); r++)
-            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            for (int c = 0; c < TrackerSong.MaxChannels; c++)
                 _cells[r, c] = old[r, c];
         }
     }

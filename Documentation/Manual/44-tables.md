@@ -115,6 +115,8 @@ Drum sounds on a channel with `PLAY WAVE channel, "Drums"`:
 | `Delete`, `Backspace` | clears whatever the cursor is on, or the selection |
 | `Space` | edit mode on or off; stops the song if it is playing |
 | `F1`, `F2` | octave down or up |
+| `F3`, `F4` | the pattern page or the instrument page |
+| `Enter`, `Esc` | on the instrument page: leaves a box and goes back to playing notes (`Esc` in the table) |
 | `F5` | play the song from the place selected in the order list |
 | `F6`, `F7` | play the pattern from the start or from the cursor |
 | `Esc` | stop |

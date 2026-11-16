@@ -12,6 +12,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 
 namespace AmosLikeBasic;
 
@@ -38,17 +39,21 @@ public partial class TrackerWindow : Window
 
     private readonly DispatcherTimer _timer;
     private readonly List<Action> _instrumentRefresh = new();
+    private readonly List<InstrumentGraph> _graphs = new();
     private TextBox? _tableBox;
+    private TextBlock? _instrumentHeading;
+    private readonly Dictionary<Key, int> _pageNotes = new();   // keys held on the instrument page → channel
 
     private const string KeyHelp =
         "Z–M, Q–P: notes · 1: note off · Space: edit on/off · F5 song · F6 pattern · F7 from cursor · Esc stop · " +
-        "F1/F2 octave · Shift+arrows select · Cmd+C/X/V · Cmd+↑/↓ transpose · Cmd+I / Cmd+Backspace rows · Cmd+Z undo";
+        "F1/F2 octave · F3 pattern · F4 instrument · Shift+arrows select · Cmd+C/X/V · Cmd+↑/↓ transpose · Cmd+I / Cmd+Backspace rows · Cmd+Z undo";
 
     public TrackerWindow()
     {
         InitializeComponent();
         _song = CreateNewSong();
 
+        Scopes.Pattern = Pattern;
         Pattern.BeforeEdit += () => PushUndo();
         Pattern.Edited += SongChanged;
         Pattern.NotePreview += (ch, note) => TryEngine(() => ChiptuneSynth.TrackPreview(_song, Pattern.Instrument, note, ch));
@@ -60,13 +65,21 @@ public partial class TrackerWindow : Window
         {
             if (_loading || OrderList.SelectedIndex < 0) return;
             SelectOrder(OrderList.SelectedIndex);
+            KeepTypingFocus();
         };
         InstrumentList.SelectionChanged += (_, _) =>
         {
             if (_loading || InstrumentList.SelectedIndex < 0) return;
             Pattern.Instrument = InstrumentList.SelectedIndex + 1;
             RefreshInstrumentPanel();
+            KeepTypingFocus();
         };
+
+        InstrumentList.DoubleTapped += (_, _) => ShowInstrumentPage(true);
+        InstrumentKeys.PointerPressed += (_, _) => InstrumentKeys.Focus();
+        InstrumentKeys.KeyDown += InstrumentKeys_OnKeyDown;
+        InstrumentKeys.KeyUp += InstrumentKeys_OnKeyUp;
+        InstrumentKeys.LostFocus += (_, _) => ReleasePageNotes();
 
         TitleBox.TextChanged += (_, _) =>
         {
@@ -88,6 +101,23 @@ public partial class TrackerWindow : Window
             if (_loading || TempoBox.Value == null) return;
             PushUndo("tempo");
             _song.Tempo = (int)TempoBox.Value;
+            SongChanged();
+        };
+        ChannelsBox.ValueChanged += async (_, e) =>
+        {
+            if (_loading || ChannelsBox.Value == null) return;
+            int channels = (int)ChannelsBox.Value;
+            if (channels == _song.Channels) return;
+            if (channels < _song.Channels && !await ConfirmFewerChannelsAsync(channels))
+            {
+                _loading = true;
+                ChannelsBox.Value = _song.Channels;
+                _loading = false;
+                return;
+            }
+            PushUndo("channels");
+            _song.Channels = channels;
+            Pattern.ChannelsChanged();
             SongChanged();
         };
         OctaveBox.ValueChanged += (_, _) => Pattern.Octave = (int)(OctaveBox.Value ?? 4);
@@ -112,7 +142,7 @@ public partial class TrackerWindow : Window
             _timer?.Stop();
             ChiptuneSynth.TrackStop();
             ChiptuneSynth.TrackPreviewStop();
-            for (int c = 1; c <= TrackerSong.ChannelCount; c++) ChiptuneSynth.SetTrackMute(c, false);
+            for (int c = 1; c <= TrackerSong.MaxChannels; c++) ChiptuneSynth.SetTrackMute(c, false);
         };
 
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(30), DispatcherPriority.Background, (_, _) => UpdatePlayback());
@@ -176,7 +206,9 @@ public partial class TrackerWindow : Window
             TitleBox.Text = _song.Title;
             SpeedBox.Value = _song.Speed;
             TempoBox.Value = _song.Tempo;
+            ChannelsBox.Value = _song.Channels;
             Pattern.Song = _song;
+            Pattern.ChannelsChanged();
             if (!keepPositions)
             {
                 _orderPos = 0;
@@ -238,53 +270,87 @@ public partial class TrackerWindow : Window
     private TrackerInstrument? CurrentInstrument =>
         Pattern.Instrument >= 1 && Pattern.Instrument <= _song.Instruments.Count ? _song.Instruments[Pattern.Instrument - 1] : null;
 
+    // The instrument page: cards for the sound, the envelope, the filter, the pitch and the table,
+    // with pictures of what the settings do. The cards wrap onto more rows in a narrow window.
     private void BuildInstrumentPanel()
     {
         var panel = InstrumentPanel;
+        _instrumentHeading = new TextBlock { Classes = { "amos-title" }, TextWrapping = TextWrapping.Wrap };
+        _instrumentRefresh.Add(() => _instrumentHeading.Text = CurrentInstrument == null
+            ? "No instrument. Make one with ADD."
+            : $"INSTRUMENT {Pattern.Instrument:X2}: {CurrentInstrument.Name}");
+        panel.Children.Add(_instrumentHeading);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Play the instrument with the note keys (Z–M, Q–P) while no box is selected. Enter (Esc in the table) " +
+                   "leaves a box and goes back to playing. F3 goes back to the pattern.",
+            Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap
+        });
 
+        var cards = new WrapPanel { Orientation = Orientation.Horizontal };
+        panel.Children.Add(cards);
+
+        // Enter in a box (Esc in the table, where Enter makes a new line) goes back to playing notes.
+        // handledEventsToo: the number box has used Enter to take the typed value by then.
+        panel.AddHandler(KeyDownEvent, (_, e) =>
+        {
+            bool inTable = e.Source is Visual v && _tableBox != null && (v == _tableBox || _tableBox.IsVisualAncestorOf(v));
+            if (e.Key == Key.Escape || (e.Key == Key.Enter && !inTable))
+            {
+                e.Handled = true;
+                Dispatcher.UIThread.Post(() => InstrumentKeys.Focus(), DispatcherPriority.Input);
+            }
+        }, RoutingStrategies.Bubble, handledEventsToo: true);
+
+        // ── The sound ──
+        var sound = Card(cards, "SOUND");
+        AddGraph(sound, new WaveGraph());
         var name = new TextBox();
         name.TextChanged += (_, _) =>
         {
             if ((name.Text ?? "") != (CurrentInstrument?.Name ?? ""))
                 EditInstrument("name", i => i.Name = name.Text ?? "", refreshList: true);
         };
-        AddRow(panel, "Name", name);
+        AddRow(sound, "Name", name);
         _instrumentRefresh.Add(() => name.Text = CurrentInstrument?.Name ?? "");
-
-        AddCombo(panel, "Wave", new[] { "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
+        AddCombo(sound, "Wave", new[] { "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
             i => i.Wave, (i, v) => i.Wave = v);
-        AddNumber(panel, "Volume", 0, 1, 0.01, "0.00", i => i.Volume, (i, v) => i.Volume = v);
+        AddNumber(sound, "Volume", 0, 1, 0.01, "0.00", i => i.Volume, (i, v) => i.Volume = v);
+        AddNumber(sound, "Pulse width %", 1, 99, 1, "0", i => i.PulseWidth, (i, v) => i.PulseWidth = v);
+        AddNumber(sound, "PWM depth %", 0, 49, 1, "0", i => i.PwmDepth, (i, v) => i.PwmDepth = v);
+        AddNumber(sound, "PWM rate Hz", 0, 20, 0.1, "0.0", i => i.PwmRate, (i, v) => i.PwmRate = v);
 
-        AddHeading(panel, "PULSE");
-        AddNumber(panel, "Width %", 1, 99, 1, "0", i => i.PulseWidth, (i, v) => i.PulseWidth = v);
-        AddNumber(panel, "PWM depth %", 0, 49, 1, "0", i => i.PwmDepth, (i, v) => i.PwmDepth = v);
-        AddNumber(panel, "PWM rate Hz", 0, 20, 0.1, "0.0", i => i.PwmRate, (i, v) => i.PwmRate = v);
+        // ── The envelope ──
+        var env = Card(cards, "ENVELOPE");
+        AddGraph(env, new EnvelopeGraph());
+        AddNumber(env, "Attack ms", 0, 5000, 5, "0", i => i.Attack, (i, v) => i.Attack = v);
+        AddNumber(env, "Decay ms", 0, 5000, 10, "0", i => i.Decay, (i, v) => i.Decay = v);
+        AddNumber(env, "Sustain %", 0, 100, 5, "0", i => i.Sustain, (i, v) => i.Sustain = v);
+        AddNumber(env, "Release ms", 0, 5000, 10, "0", i => i.Release, (i, v) => i.Release = v);
 
-        AddHeading(panel, "ENVELOPE");
-        AddNumber(panel, "Attack ms", 0, 5000, 5, "0", i => i.Attack, (i, v) => i.Attack = v);
-        AddNumber(panel, "Decay ms", 0, 5000, 10, "0", i => i.Decay, (i, v) => i.Decay = v);
-        AddNumber(panel, "Sustain %", 0, 100, 5, "0", i => i.Sustain, (i, v) => i.Sustain = v);
-        AddNumber(panel, "Release ms", 0, 5000, 10, "0", i => i.Release, (i, v) => i.Release = v);
+        // ── The filter ──
+        var filter = Card(cards, "FILTER");
+        AddGraph(filter, new FilterGraph());
+        AddCombo(filter, "Type", new[] { "Off", "Low", "High", "Band" }, i => i.Filter, (i, v) => i.Filter = v);
+        AddNumber(filter, "Cutoff Hz", 20, 18000, 50, "0", i => i.Cutoff, (i, v) => i.Cutoff = v);
+        AddNumber(filter, "Resonance %", 0, 100, 5, "0", i => i.Resonance, (i, v) => i.Resonance = v);
+        AddNumber(filter, "Env depth Hz", -18000, 18000, 100, "0", i => i.FilterEnvDepth, (i, v) => i.FilterEnvDepth = v);
+        AddNumber(filter, "Env attack ms", 0, 5000, 5, "0", i => i.FilterEnvAttack, (i, v) => i.FilterEnvAttack = v);
+        AddNumber(filter, "Env decay ms", 1, 5000, 10, "0", i => i.FilterEnvDecay, (i, v) => i.FilterEnvDecay = v);
 
-        AddHeading(panel, "FILTER");
-        AddCombo(panel, "Type", new[] { "Off", "Low", "High", "Band" }, i => i.Filter, (i, v) => i.Filter = v);
-        AddNumber(panel, "Cutoff Hz", 20, 18000, 50, "0", i => i.Cutoff, (i, v) => i.Cutoff = v);
-        AddNumber(panel, "Resonance %", 0, 100, 5, "0", i => i.Resonance, (i, v) => i.Resonance = v);
-        AddNumber(panel, "Env depth Hz", -18000, 18000, 100, "0", i => i.FilterEnvDepth, (i, v) => i.FilterEnvDepth = v);
-        AddNumber(panel, "Env attack ms", 0, 5000, 5, "0", i => i.FilterEnvAttack, (i, v) => i.FilterEnvAttack = v);
-        AddNumber(panel, "Env decay ms", 1, 5000, 10, "0", i => i.FilterEnvDecay, (i, v) => i.FilterEnvDecay = v);
+        // ── Pitch ──
+        var pitch = Card(cards, "PITCH");
+        AddNumber(pitch, "Vibrato cents", 0, 1200, 5, "0", i => i.Vibrato, (i, v) => i.Vibrato = v);
+        AddNumber(pitch, "Vibrato Hz", 0, 30, 0.5, "0.0", i => i.VibratoRate, (i, v) => i.VibratoRate = v);
+        AddNumber(pitch, "Ring mod ch", 0, 8, 1, "0", i => i.Ring, (i, v) => i.Ring = (int)v);
+        AddNumber(pitch, "Sync ch", 0, 8, 1, "0", i => i.Sync, (i, v) => i.Sync = (int)v);
 
-        AddHeading(panel, "PITCH");
-        AddNumber(panel, "Vibrato cents", 0, 1200, 5, "0", i => i.Vibrato, (i, v) => i.Vibrato = v);
-        AddNumber(panel, "Vibrato Hz", 0, 30, 0.5, "0.0", i => i.VibratoRate, (i, v) => i.VibratoRate = v);
-        AddNumber(panel, "Ring mod ch", 0, 8, 1, "0", i => i.Ring, (i, v) => i.Ring = (int)v);
-        AddNumber(panel, "Sync ch", 0, 8, 1, "0", i => i.Sync, (i, v) => i.Sync = (int)v);
-
-        AddHeading(panel, "TABLE (one step per tick)");
+        // ── The table ──
+        var tableCard = Card(cards, "TABLE (one step per tick)");
         var table = new TextBox
         {
             AcceptsReturn = true,
-            Height = 130,
+            Height = 150,
             FontFamily = new FontFamily("Menlo, Consolas, Courier New, monospace"),
             Watermark = "NOISE +24\nPULSE 0\n-12\nP30"
         };
@@ -298,9 +364,36 @@ public partial class TrackerWindow : Window
             if (CurrentInstrument != null && !steps.SequenceEqual(CurrentInstrument.Table))
                 EditInstrument("table", i => i.Table = steps);
         };
-        panel.Children.Add(table);
+        tableCard.Children.Add(table);
         _instrumentRefresh.Add(() => table.Text = string.Join("\n", CurrentInstrument?.Table ?? new List<string>()));
-        AddNumber(panel, "Loop from step", -1, 255, 1, "0", i => i.TableLoop, (i, v) => i.TableLoop = (int)v);
+        AddNumber(tableCard, "Loop from step", -1, 255, 1, "0", i => i.TableLoop, (i, v) => i.TableLoop = (int)v);
+    }
+
+    // A card on the instrument page; returns the panel its rows go in
+    private static StackPanel Card(WrapPanel cards, string title)
+    {
+        var stack = new StackPanel { Spacing = 4 };
+        stack.Children.Add(new TextBlock { Text = title, Classes = { "amos-title" }, Margin = new Thickness(0, 0, 0, 2) });
+        var border = new Border
+        {
+            Width = 340,
+            Margin = new Thickness(0, 0, 10, 10),
+            Padding = new Thickness(10),
+            BorderThickness = new Thickness(2),
+            Child = stack
+        };
+        border[!Border.BackgroundProperty] = new Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension("AmosPanelBg");
+        border[!Border.BorderBrushProperty] = new Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension("AmosPanelBorder");
+        cards.Children.Add(border);
+        return stack;
+    }
+
+    private void AddGraph(StackPanel card, InstrumentGraph graph)
+    {
+        graph.Instrument = () => CurrentInstrument;
+        graph.Margin = new Thickness(0, 0, 0, 4);
+        _graphs.Add(graph);
+        card.Children.Add(graph);
     }
 
     private void AddHeading(StackPanel panel, string text) =>
@@ -363,6 +456,7 @@ public partial class TrackerWindow : Window
         foreach (var r in _instrumentRefresh) r();
         _loading = was;
         ValidateTable();
+        foreach (var g in _graphs) g.InvalidateVisual();
     }
 
     private void EditInstrument(string key, Action<TrackerInstrument> change, bool refreshList = false)
@@ -374,6 +468,8 @@ public partial class TrackerWindow : Window
         change(inst);
         if (refreshList) RefreshInstrumentList();
         if (key == "table") ValidateTable();
+        if (refreshList) _instrumentRefresh[0]();   // the heading shows the name
+        foreach (var g in _graphs) g.InvalidateVisual();
         SongChanged();
     }
 
@@ -460,7 +556,7 @@ public partial class TrackerWindow : Window
 
     private void ApplyMutes()
     {
-        for (int c = 0; c < TrackerSong.ChannelCount; c++)
+        for (int c = 0; c < TrackerSong.MaxChannels; c++)
             ChiptuneSynth.SetTrackMute(c + 1, Pattern.Muted[c]);
     }
 
@@ -469,7 +565,7 @@ public partial class TrackerWindow : Window
         ApplyMutes();
         if (TryEngine(() => ChiptuneSynth.TrackPlay(_song, _orderPos, 0, loop: true)))
             _playMode = PlayMode.Song;
-        Pattern.Focus();
+        KeepTypingFocus();
     }
 
     private void PlayPattern(int row)
@@ -477,7 +573,7 @@ public partial class TrackerWindow : Window
         ApplyMutes();
         if (TryEngine(() => ChiptuneSynth.TrackPlayPattern(_song, Pattern.PatternIndex, row)))
             _playMode = PlayMode.Pattern;
-        Pattern.Focus();
+        KeepTypingFocus();
     }
 
     private void Stop()
@@ -536,6 +632,74 @@ public partial class TrackerWindow : Window
         }
     }
 
+    // Picking an instrument or a position in a list should not take the keys away from the
+    // pattern: you go on typing notes where you were. Posted, so that it runs after the list
+    // has taken the focus for the click.
+    private void KeepTypingFocus() => Dispatcher.UIThread.Post(() =>
+    {
+        if (InstrumentPage.IsVisible) InstrumentKeys.Focus();
+        else Pattern.Focus();
+    }, DispatcherPriority.Input);
+
+    // ════════════════════════════════════════════════════════════════
+    //  The two pages: the pattern and the instrument
+    // ════════════════════════════════════════════════════════════════
+
+    private void ShowInstrumentPage(bool show)
+    {
+        ReleasePageNotes();
+        PatternPage.IsVisible = !show;
+        InstrumentPage.IsVisible = show;
+        PatternTab.IsChecked = !show;
+        InstrumentTab.IsChecked = show;
+        if (show) RefreshInstrumentPanel();
+        KeepTypingFocus();
+    }
+
+    private void PatternTab_OnClick(object? sender, RoutedEventArgs e) => ShowInstrumentPage(false);
+    private void InstrumentTab_OnClick(object? sender, RoutedEventArgs e) => ShowInstrumentPage(true);
+
+    // On the instrument page the note keys play the instrument, on the channel the pattern cursor is in
+    private void InstrumentKeys_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Handled || e.Source != InstrumentKeys || e.KeyModifiers != KeyModifiers.None) return;
+        if (e.Key == Key.F1 || e.Key == Key.F2)
+        {
+            OctaveBox.Value = Math.Clamp(Pattern.Octave + (e.Key == Key.F1 ? -1 : 1), 0, 8);
+            e.Handled = true;
+            return;
+        }
+        int note = PatternView.NoteForKey(e.Key, Pattern.Octave);
+        if (note < 0) return;
+        e.Handled = true;
+        if (_pageNotes.ContainsKey(e.Key)) return;   // key repeat
+        int channel = Pattern.CursorChannel + 1;
+        _pageNotes[e.Key] = channel;
+        TryEngine(() => ChiptuneSynth.TrackPreview(_song, Pattern.Instrument, note, channel));
+    }
+
+    private void InstrumentKeys_OnKeyUp(object? sender, KeyEventArgs e)
+    {
+        if (_pageNotes.Remove(e.Key, out int channel)) ChiptuneSynth.TrackPreviewRelease(channel);
+    }
+
+    private void ReleasePageNotes()
+    {
+        foreach (var ch in _pageNotes.Values) ChiptuneSynth.TrackPreviewRelease(ch);
+        _pageNotes.Clear();
+    }
+
+    // Fewer channels: the notes in the channels taken away stay until the song is saved, then they
+    // are gone. Ask first if there are any.
+    private async Task<bool> ConfirmFewerChannelsAsync(int channels)
+    {
+        bool hasNotes = _song.Patterns.Any(p =>
+            Enumerable.Range(0, p.Rows).Any(r => Enumerable.Range(channels, _song.Channels - channels).Any(c => !p[r, c].IsEmpty)));
+        if (!hasNotes) return true;
+        string which = channels + 1 == _song.Channels ? $"Channel {_song.Channels} has" : $"Channels {channels + 1} – {_song.Channels} have";
+        return await AskAsync("Fewer channels", $"{which} notes. They are not saved with {channels} channels. Go on?", "Yes", "No");
+    }
+
     private void SetEditMode(bool on)
     {
         Pattern.EditMode = on;
@@ -554,6 +718,8 @@ public partial class TrackerWindow : Window
             case Key.F5: PlaySong(); break;
             case Key.F6: PlayPattern(0); break;
             case Key.F7: PlayPattern(Pattern.CursorRow); break;
+            case Key.F3: ShowInstrumentPage(false); break;
+            case Key.F4: ShowInstrumentPage(true); break;
             case Key.Escape: Stop(); break;
             case Key.S when cmd: _ = SaveAsync(false); break;
             case Key.Z when cmd: if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) Redo(); else Undo(); break;
@@ -564,8 +730,8 @@ public partial class TrackerWindow : Window
 
     private void PlaySong_OnClick(object? sender, RoutedEventArgs e) => PlaySong();
     private void PlayPattern_OnClick(object? sender, RoutedEventArgs e) => PlayPattern(0);
-    private void Stop_OnClick(object? sender, RoutedEventArgs e) { Stop(); Pattern.Focus(); }
-    private void EditToggle_OnClick(object? sender, RoutedEventArgs e) { SetEditMode(EditToggle.IsChecked == true); Pattern.Focus(); }
+    private void Stop_OnClick(object? sender, RoutedEventArgs e) { Stop(); KeepTypingFocus(); }
+    private void EditToggle_OnClick(object? sender, RoutedEventArgs e) { SetEditMode(EditToggle.IsChecked == true); KeepTypingFocus(); }
 
     // ════════════════════════════════════════════════════════════════
     //  The order list and patterns
@@ -610,7 +776,7 @@ public partial class TrackerWindow : Window
         RefreshOrderList();
         SelectOrder(_orderPos);
         SongChanged();
-        Pattern.Focus();
+        KeepTypingFocus();
     }
 
     private void ClonePattern_OnClick(object? sender, RoutedEventArgs e)
@@ -619,7 +785,7 @@ public partial class TrackerWindow : Window
         var src = _song.Patterns[Pattern.PatternIndex];
         var copy = new TrackerPattern(src.Rows);
         for (int r = 0; r < src.Rows; r++)
-        for (int c = 0; c < TrackerSong.ChannelCount; c++)
+        for (int c = 0; c < TrackerSong.MaxChannels; c++)
             copy[r, c] = src[r, c];
         _song.Patterns.Add(copy);
         _song.Order[_orderPos] = _song.Patterns.Count - 1;
@@ -627,7 +793,7 @@ public partial class TrackerWindow : Window
         SelectOrder(_orderPos);
         SongChanged();
         SetStatus($"Copied to pattern {_song.Patterns.Count - 1:D2}");
-        Pattern.Focus();
+        KeepTypingFocus();
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -668,7 +834,7 @@ public partial class TrackerWindow : Window
         _song.Instruments.RemoveAt(n - 1);
         foreach (var pat in _song.Patterns)
             for (int r = 0; r < pat.Rows; r++)
-            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            for (int c = 0; c < TrackerSong.MaxChannels; c++)
             {
                 var cell = pat[r, c];
                 if (cell.Instrument < n) continue;
@@ -705,7 +871,7 @@ public partial class TrackerWindow : Window
         LoadSongIntoUi();
         _dirty = false;
         UpdateTitle();
-        Pattern.Focus();
+        KeepTypingFocus();
     }
 
     private async void Load_OnClick(object? sender, RoutedEventArgs e)
@@ -736,7 +902,7 @@ public partial class TrackerWindow : Window
             _dirty = false;
             UpdateTitle();
             UpdateStatus();
-            Pattern.Focus();
+            KeepTypingFocus();
         }
         catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
         {

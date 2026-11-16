@@ -661,8 +661,14 @@ namespace AmosLikeBasic
             {
                 TrackSample();
                 double mix = 0;
+                int pos = _scopePos;
                 for (int c = 0; c < Channels; c++)
-                    mix += RenderVoice(_voices[c]);
+                {
+                    double s = RenderVoice(_voices[c]);
+                    _scope[c][pos] = (float)s;
+                    mix += s;
+                }
+                _scopePos = (pos + 1) & (ScopeSize - 1);
 
                 foreach (var s in _sfx)
                 {
@@ -674,6 +680,31 @@ namespace AmosLikeBasic
 
                 output[i] = (float)SoftClip(mix);
             }
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        //  What each channel sounds like right now, for the tracker's oscilloscopes and meters
+        // ════════════════════════════════════════════════════════════════
+
+        public const int ScopeSize = 2048;   // about 46 ms; a power of two
+        private static readonly float[][] _scope = CreateScopes();
+        private static int _scopePos;       // where the next sample goes
+
+        private static float[][] CreateScopes()
+        {
+            var s = new float[Channels][];
+            for (int c = 0; c < Channels; c++) s[c] = new float[ScopeSize];
+            return s;
+        }
+
+        // Copies the latest samples of a channel (1 – 8), oldest first, into dest (at most ScopeSize).
+        // Read while the audio thread writes, so the oldest few may already be a lap newer; fine for a picture.
+        public static void ReadScope(int channel, Span<float> dest)
+        {
+            var buf = _scope[ChIdx(channel)];
+            int n = Math.Min(dest.Length, ScopeSize);
+            int start = (Volatile.Read(ref _scopePos) - n) & (ScopeSize - 1);
+            for (int i = 0; i < n; i++) dest[i] = buf[(start + i) & (ScopeSize - 1)];
         }
 
         // Leaves normal levels alone, but rounds off peaks instead of clipping them hard

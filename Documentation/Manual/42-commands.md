@@ -766,7 +766,7 @@ There is one map at a time. The function `TILE()` reads it.
 
 ### TRACK
 
-Plays songs from the tracker on synth channels 1 – 4, and tracker instruments as sound effects on channels 5 – 8. See the chapter on sound.
+Plays songs from the tracker on synth channels 1 – 4 (or up to 8 if the song has more channels), and tracker instruments as sound effects on channels 5 – 8, above the song's channels. See the chapter on sound.
 
 ```text
 TRACK LOAD "file"
@@ -788,7 +788,7 @@ TRACK SFX STOP
 | `TRACK VOLUME` | the volume of the song, 0 – 1 |
 | `TRACK LOOP` | 1 (the default) starts again when the song ends, 0 plays it once |
 | `TRACK SFX LOAD` | loads a sound bank: a tracker file whose instruments are sound effects |
-| `TRACK SFX` | plays an instrument from the sound bank (name or number) with a note (`"C-4"`, `"C4"` or a number) on channels 5 – 8 |
+| `TRACK SFX` | plays an instrument from the sound bank (name or number) with a note (`"C-4"`, `"C4"` or a number) on channels 5 – 8, above the song's channels |
 | `TRACK SFX VOLUME` | the volume of the sound effects, 0 – 1 |
 | `TRACK SFX STOP` | silences the sound effects |
 

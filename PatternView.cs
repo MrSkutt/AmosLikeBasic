@@ -33,13 +33,16 @@ public class PatternView : Control
     public int Instrument { get; set; } = 1;   // the instrument new notes get
     public bool EditMode { get; set; } = true;
     public int PlayRow { get; set; } = -1;     // the row being played, -1 = none
-    public bool[] Muted { get; } = new bool[TrackerSong.ChannelCount];
+    public bool[] Muted { get; } = new bool[TrackerSong.MaxChannels];
+
+    // How many channels the song has (4 – 8)
+    public int ChannelCount => Song?.Channels ?? TrackerSong.DefaultChannels;
 
     // Events to the window
     public event Action? BeforeEdit;                 // before the pattern changes, for undo
     public event Action? Edited;                     // after a change
-    public event Action<int, int>? NotePreview;      // channel (1 – 4), note
-    public event Action<int>? NoteRelease;           // channel (1 – 4)
+    public event Action<int, int>? NotePreview;      // channel (1 – the song's channels), note
+    public event Action<int>? NoteRelease;           // channel (1 – the song's channels)
     public event Action<string>? Command;            // "play-song", "play-pattern", "play-cursor", "stop", "toggle-edit", "octave", "undo", "redo", "save"
     public event Action? MuteChanged;
     public event Action? CursorMoved;
@@ -54,7 +57,9 @@ public class PatternView : Control
     private readonly Dictionary<Key, int> _heldNotes = new();   // key → channel that is previewing
 
     private Typeface _typeface = new("Menlo, Consolas, Courier New, monospace");
-    private const double FontSize = 15;
+    // The text shrinks (down to MinFontSize) when all the channels would not fit otherwise
+    private const double MaxFontSize = 15, MinFontSize = 10;
+    private double FontSize = MaxFontSize;
     private double _charW, _rowH;
     private readonly Dictionary<(string, IBrush), FormattedText> _textCache = new();
 
@@ -83,10 +88,53 @@ public class PatternView : Control
 
     private int Rows => Pattern?.Rows ?? TrackerSong.DefaultRows;
 
-    public double PreferredWidth => (RowNumberChars + TrackerSong.ChannelCount * (CellChars + ChannelGapChars)) * _charW + 16;
+    public double PreferredWidth => (RowNumberChars + ChannelCount * (CellChars + ChannelGapChars)) * _charW + 16;
 
-    protected override Size MeasureOverride(Size availableSize) =>
-        new(PreferredWidth, double.IsInfinity(availableSize.Height) ? 400 : availableSize.Height);
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        FitFont(availableSize.Width);
+        return new(PreferredWidth, double.IsInfinity(availableSize.Height) ? 400 : availableSize.Height);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        FitFont(finalSize.Width);
+        return base.ArrangeOverride(finalSize);
+    }
+
+    // The largest font size from MinFontSize to MaxFontSize at which every channel fits in the width
+    private void FitFont(double width)
+    {
+        double size = MaxFontSize;
+        if (!double.IsInfinity(width) && width > 0)
+        {
+            double charsWide = RowNumberChars + ChannelCount * (CellChars + ChannelGapChars);
+            double charAtMax = MeasureCharWidth(MaxFontSize);
+            size = Math.Clamp(Math.Floor((width - 16) / charsWide / charAtMax * MaxFontSize * 2) / 2, MinFontSize, MaxFontSize);
+        }
+        if (size == FontSize) return;
+        FontSize = size;
+        _textCache.Clear();
+        MeasureFont();
+        InvalidateVisual();
+        ChannelsMoved?.Invoke();
+    }
+
+    private double MeasureCharWidth(double size) =>
+        new FormattedText("0000000000", CultureInfo.InvariantCulture, FlowDirection.LeftToRight, _typeface, size, Brushes.White).Width / 10;
+
+    // The channel columns changed place or width (new font size or number of channels)
+    public event Action? ChannelsMoved;
+
+    // After the number of channels changes
+    public void ChannelsChanged()
+    {
+        CursorChannel = Math.Min(CursorChannel, ChannelCount - 1);
+        if (_anchorRow >= 0) _anchorChannel = Math.Min(_anchorChannel, ChannelCount - 1);
+        InvalidateMeasure();
+        InvalidateVisual();
+        ChannelsMoved?.Invoke();
+    }
 
     // ════════════════════════════════════════════════════════════════
     //  The cursor
@@ -104,7 +152,7 @@ public class PatternView : Control
 
         int rows = Rows;
         CursorRow = ((row % rows) + rows) % rows;
-        CursorChannel = Math.Clamp(channel, 0, TrackerSong.ChannelCount - 1);
+        CursorChannel = Math.Clamp(channel, 0, ChannelCount - 1);
         CursorColumn = Math.Clamp(column, 0, ColumnsPerChannel - 1);
         InvalidateVisual();
         CursorMoved?.Invoke();
@@ -151,6 +199,10 @@ public class PatternView : Control
     }
 
     private double ChannelX(int c) => 8 + (RowNumberChars + c * (CellChars + ChannelGapChars)) * _charW;
+
+    // Where channel c's column starts (at the line before it) and how wide it is, for ChannelScopes
+    public double ChannelLeft(int c) => ChannelX(c) - _charW;
+    public double ChannelSpan => (CellChars + ChannelGapChars) * _charW;
 
     private double HeaderH => _rowH + 6;
 
@@ -200,7 +252,7 @@ public class PatternView : Control
 
             ctx.DrawText(Text(r.ToString("D2", CultureInfo.InvariantCulture), r % 4 == 0 ? title : label), new Point(8, y + 1));
 
-            for (int c = 0; c < TrackerSong.ChannelCount; c++)
+            for (int c = 0; c < ChannelCount; c++)
             {
                 double x = ChannelX(c);
                 if (r >= s0 && r <= s1 && c >= sc0 && c <= sc1)
@@ -228,7 +280,7 @@ public class PatternView : Control
         // Kanalrubriker
         ctx.FillRectangle(panel, new Rect(0, 0, w, headerH));
         ctx.DrawLine(new Pen(border, 1), new Point(0, headerH - 1), new Point(w, headerH - 1));
-        for (int c = 0; c < TrackerSong.ChannelCount; c++)
+        for (int c = 0; c < ChannelCount; c++)
         {
             string h = Muted[c] ? $"CH{c + 1} MUTE" : $"CH{c + 1}";
             ctx.DrawText(Text(h, Muted[c] ? dim : title), new Point(ChannelX(c), 3));
@@ -237,7 +289,7 @@ public class PatternView : Control
 
         // Lines between the channels
         var linePen = new Pen(new SolidColorBrush(Color.FromArgb(70, 128, 160, 255)), 1);
-        for (int c = 0; c < TrackerSong.ChannelCount; c++)
+        for (int c = 0; c < ChannelCount; c++)
         {
             double x = ChannelX(c) - _charW;
             ctx.DrawLine(linePen, new Point(x, 0), new Point(x, Bounds.Height));
@@ -253,7 +305,7 @@ public class PatternView : Control
         int visible = Math.Max(1, (int)((Bounds.Height - HeaderH) / _rowH));
         int row = CursorRow - visible / 2 + (int)Math.Floor((p.Y - HeaderH) / _rowH);
         int channel = 0;
-        for (int c = TrackerSong.ChannelCount - 1; c >= 0; c--)
+        for (int c = ChannelCount - 1; c >= 0; c--)
             if (p.X >= ChannelX(c) - _charW) { channel = c; break; }
         double local = (p.X - ChannelX(channel)) / _charW;
         int column = 0;
@@ -363,6 +415,14 @@ public class PatternView : Control
         [Key.I] = 24, [Key.D9] = 25, [Key.O] = 26, [Key.D0] = 27, [Key.P] = 28,
     };
 
+    // The note a piano key plays in an octave (-1 if the key is not a note), for the instrument page
+    public static int NoteForKey(Key key, int octave)
+    {
+        if (!PianoKeys.TryGetValue(key, out int semi)) return -1;
+        int note = (octave + 1) * 12 + semi;
+        return note > 119 ? -1 : note;
+    }
+
     private static int HexDigit(Key key) => key switch
     {
         >= Key.D0 and <= Key.D9 => key - Key.D0,
@@ -420,15 +480,15 @@ public class PatternView : Control
             case Key.Left:
                 if (shift) SetCursor(CursorRow, CursorChannel - 1, CursorColumn, true);
                 else if (CursorColumn > 0) SetCursor(CursorRow, CursorChannel, CursorColumn - 1);
-                else SetCursor(CursorRow, (CursorChannel + 3) % 4, ColumnsPerChannel - 1);
+                else SetCursor(CursorRow, (CursorChannel + ChannelCount - 1) % ChannelCount, ColumnsPerChannel - 1);
                 return;
             case Key.Right:
                 if (shift) SetCursor(CursorRow, CursorChannel + 1, CursorColumn, true);
                 else if (CursorColumn < ColumnsPerChannel - 1) SetCursor(CursorRow, CursorChannel, CursorColumn + 1);
-                else SetCursor(CursorRow, (CursorChannel + 1) % 4, 0);
+                else SetCursor(CursorRow, (CursorChannel + 1) % ChannelCount, 0);
                 return;
             case Key.Tab:
-                SetCursor(CursorRow, (CursorChannel + (shift ? 3 : 1)) % 4, 0);
+                SetCursor(CursorRow, (CursorChannel + (shift ? ChannelCount - 1 : 1)) % ChannelCount, 0);
                 return;
             case Key.F1: Octave = Math.Max(0, Octave - 1); Command?.Invoke("octave"); return;
             case Key.F2: Octave = Math.Min(8, Octave + 1); Command?.Invoke("octave"); return;
@@ -582,7 +642,7 @@ public class PatternView : Control
             for (int c = 0; c < clip.GetLength(1); c++)
             {
                 int row = CursorRow + r, ch = CursorChannel + c;
-                if (row < Rows && ch < TrackerSong.ChannelCount) Pattern![row, ch] = clip[r, c];
+                if (row < Rows && ch < ChannelCount) Pattern![row, ch] = clip[r, c];
             }
         });
         ClearSelection();
@@ -593,7 +653,7 @@ public class PatternView : Control
         _anchorRow = 0;
         _anchorChannel = 0;
         CursorRow = Rows - 1;
-        CursorChannel = TrackerSong.ChannelCount - 1;
+        CursorChannel = ChannelCount - 1;
         InvalidateVisual();
     }
 
@@ -617,7 +677,7 @@ public class PatternView : Control
     private void InsertRow(bool allChannels) => Change(() =>
     {
         var p = Pattern!;
-        for (int c = 0; c < TrackerSong.ChannelCount; c++)
+        for (int c = 0; c < ChannelCount; c++)
         {
             if (!allChannels && c != CursorChannel) continue;
             for (int r = p.Rows - 1; r > CursorRow; r--) p[r, c] = p[r - 1, c];
@@ -629,7 +689,7 @@ public class PatternView : Control
     private void DeleteRow(bool allChannels) => Change(() =>
     {
         var p = Pattern!;
-        for (int c = 0; c < TrackerSong.ChannelCount; c++)
+        for (int c = 0; c < ChannelCount; c++)
         {
             if (!allChannels && c != CursorChannel) continue;
             for (int r = CursorRow; r < p.Rows - 1; r++) p[r, c] = p[r + 1, c];
