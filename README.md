@@ -6,7 +6,7 @@
 
 AMOS Like Basic brings back the workflow of the classic Amiga **AMOS Professional**: write a few lines of BASIC, press run, and get sprites, raster bars, scrolling tilemaps and music on screen right away. It is not an emulator. It is a new engine built on .NET, Avalonia and SkiaSharp, with modern GPU rendering and none of the old hardware limits.
 
-![The IDE](images/Applikation.png)
+![The IDE with Forest Hop loaded](images/ide.png)
 
 ---
 
@@ -190,8 +190,18 @@ Under active development. Commands, APIs and internal architecture may still cha
 
 | | |
 |---|---|
-| ![Adventure game](images/Adventure.png) | ![C64 theme](images/Applikation-C64.png) |
-| ![STOS theme](images/Applikation-STOS.png) | ![Workbench theme](images/Applikation-Workbecnh.png) |
+| ![Forest Hop, a platform game with parallax scrolling](images/foresthop.png) | ![Frog Hop, a game about jumping through moving holes](images/froghop.png) |
+| *Forest Hop* | *Frog Hop* |
+| ![The Forest Hop title screen](images/foresthop-title.png) | ![Raster bars](images/raster_bars.png) |
+| *The Forest Hop title screen* | *Raster bars* |
+
+![The tracker with the Forest Hop song](images/tracker.png)
+*The tracker: four channels, instruments with their own synth settings, and ProTracker-style effects*
+
+| | |
+|---|---|
+| ![The C64 theme](images/ide-c64.png) | ![The Workbench theme](images/ide-workbench.png) |
+| *The C64 theme* | *The Workbench theme* |
 
 ---
 
