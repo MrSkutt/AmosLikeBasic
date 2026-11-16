@@ -53,14 +53,15 @@ The colour names are the web colour names, for example `Black`, `White`, `Red`, 
 
 These fonts come with AMOS Like Basic, so they look the same on every computer. Any font installed on the computer works too, by its name.
 
-| Name in `FONT SET` | Font |
-|---|---|
-| `"C64 Pro Mono"` | the Commodore 64 font, every character equally wide |
-| `"C64 Pro"` | the Commodore 64 font, proportional |
-| `"Topaz"` | the Amiga font from Workbench 2 and 3 (A1200) |
-| `"Topaz A500"` | the Amiga font from Workbench 1 (A500) |
-| `"TopazPlus"` | a sharper version of the A500 font |
-| `"Atari ST"` | the Atari ST system font |
+| Name in `FONT SET` | Font | Made by, licence |
+|---|---|---|
+| `"C64 Pro Mono"` | the Commodore 64 font, every character equally wide | Style (style64.org); free software only |
+| `"C64 Pro"` | the Commodore 64 font, proportional | Style (style64.org); free software only |
+| `"Topaz"` | the Amiga font from Workbench 2 and 3 (A1200) | dMG of Trueschool and Divine Stylers; GPL with font exception |
+| `"Topaz A500"` | the Amiga font from Workbench 1 (A500) | the same |
+| `"TopazPlus"` | a sharper version of the A500 font | the same |
+
+The full licences are in `fonts/LICENSES.md`. The C64 fonts may only be part of software that is given away for free; see the chapter on exporting if you want to sell a game.
 
 ```basic
 FONT SET 16, 16, "Topaz"

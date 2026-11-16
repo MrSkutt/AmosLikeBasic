@@ -24,7 +24,6 @@ public class FontTests(ITestOutputHelper output)
     [InlineData("Topaz")]
     [InlineData("Topaz A500")]
     [InlineData("TopazPlus")]
-    [InlineData("Atari ST")]
     public void FontSetNamesFindTheBundledFont(string name)
     {
         Assert.NotNull(AmosGraphics.BundledFont(name));

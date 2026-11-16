@@ -26,7 +26,16 @@ python3 Tools/export_app.py Projects/mygame.amosproj --name MyGame --include Gra
 
 With `--icon picture.png` the Mac app gets an icon of its own.
 
-> **Note:** The built-in retro fonts for `FONT SET` (see *Tables*) come along in the exported game. Other fonts chosen with `FONT SET` must be installed on the computer that runs the game, or the text falls back to another font. Bitmap fonts loaded with `FONT LOAD` are ordinary image files and are always included.
+> **Note:** The built-in retro fonts for `FONT SET` (see *Tables*) come along in the exported game, in the folder `fonts` together with their licences. Other fonts chosen with `FONT SET` must be installed on the computer that runs the game, or the text falls back to another font. Bitmap fonts loaded with `FONT LOAD` are ordinary image files and are always included.
+
+## Selling your game
+
+Your own code, images and sounds are yours, and AMOS Like Basic's MIT licence lets you sell games made with it. Two things to check first:
+
+- **The C64 fonts** (`"C64 Pro"` and `"C64 Pro Mono"`) may only be part of software that is given away for free. In a game you sell, use another font and delete `C64_Pro-STYLE.ttf` and `C64_Pro_Mono-STYLE.ttf` from the `fonts` folder of the exported app, or ask Style (style64.org) for a licence.
+- **Images, sounds and music you did not make yourself**, including those in the example projects, have their own owners. Make sure you are allowed to use them.
+
+The Topaz fonts are under the GPL with the font exception, which allows them in games you sell.
 
 ## The first time on another computer
 

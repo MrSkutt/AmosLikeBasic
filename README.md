@@ -197,6 +197,8 @@ Under active development. Commands, APIs and internal architecture may still cha
 
 ## License
 
+AMOS Like Basic is under the MIT licence below. The fonts in `fonts/` are not: the C64 fonts by Style may only be part of free software, and the Topaz fonts are under the GPL with the font exception. See [`fonts/LICENSES.md`](fonts/LICENSES.md). SDL2 for Windows (`libs/windows`) is under the zlib licence.
+
 MIT License
 
 Copyright (c) 2025 Mattias Schütt

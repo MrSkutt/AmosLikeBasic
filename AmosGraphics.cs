@@ -2477,7 +2477,6 @@ public sealed class AmosGraphics
         ["Topaz A1200"] = "Topaz a600a1200a400",
         ["Topaz A500"] = "Topaz a500a1000a2000",
         ["TopazPlus"] = "TopazPlus a500a1000a2000",
-        ["Atari ST"] = "Atari ST 8x16 System Font",
     };
 
     internal static SKTypeface? BundledFont(string family)
