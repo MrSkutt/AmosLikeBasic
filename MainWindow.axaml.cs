@@ -54,6 +54,8 @@ public partial class MainWindow : Window
         InitializeAudio();
         
         VariableListBox.DoubleTapped += VariableListBox_DoubleTapped;
+
+        BuildExamplesMenu();
         
         string userDir = Workspace.Projects;
         
@@ -1101,6 +1103,41 @@ public partial class MainWindow : Window
         Editor.TextArea.Caret.BringCaretToView();
     }
     
+    // Project → Examples: one submenu per group, with the description as a tooltip
+    private void BuildExamplesMenu()
+    {
+        var groups = new List<MenuItem>();
+        foreach (var group in Examples.Groups)
+        {
+            var items = new List<MenuItem>();
+            foreach (var example in group.Items)
+            {
+                var item = new MenuItem { Header = example.Title };
+                ToolTip.SetTip(item, example.Description);
+                item.Click += async (_, _) => await OpenExampleAsync(example);
+                items.Add(item);
+            }
+            groups.Add(new MenuItem { Header = group.Name, ItemsSource = items });
+        }
+        ExamplesMenuItem.ItemsSource = groups;
+    }
+
+    private async Task OpenExampleAsync(Examples.Example example)
+    {
+        string path = Path.Combine(Workspace.Projects, example.File + ".amosproj");
+        await OpenProjectFromPathAsync(path);
+        string? opened = _currentProjectFile?.Path.LocalPath;
+        if (opened == null || !string.Equals(Path.GetFullPath(opened), Path.GetFullPath(path),
+                StringComparison.OrdinalIgnoreCase))
+            return;   // not found, or the user cancelled
+
+        configService.Config.LastProjectPath = path;
+        configService.Save();
+        Editor.TextArea.Caret.Offset = 0;
+        Editor.TextArea.Caret.BringCaretToView();
+        await AppendConsoleLineAsync(example.Description);
+    }
+
     public async Task OpenProjectFromStorageFileAsync(IStorageFile file)
     {
         SetProjectLoading(true);

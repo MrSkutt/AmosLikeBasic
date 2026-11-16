@@ -44,4 +44,6 @@ In the game window **F12** switches between window and full screen, and **F8** t
 
 If you downloaded AMOS Like Basic, the example projects are copied to the folder `Documents/AmosLikeBasic` the first time you start it. That is where file names in your programs count from: an image you load with `"Graphics/hero.png"` should be in `Documents/AmosLikeBasic/Graphics`. The images and sounds the examples use come with the program, so they always work.
 
-The **Project** menu has **Export app...**, which turns your game into a finished program that others can run without installing AMOS Like Basic. It is described in the chapter on exporting.
+The quickest way to see what AMOS Like Basic can do is **Project → Examples**. The examples are sorted into games, graphics and effects, and sound and music; open one and press **RUN**. Hold the mouse over a name to see what the example shows. Change as much as you like: the examples are your own copies, and you can save your version under a new name with **Save as...**.
+
+The **Project** menu also has **Export app...**, which turns your game into a finished program that others can run without installing AMOS Like Basic. It is described in the chapter on exporting.

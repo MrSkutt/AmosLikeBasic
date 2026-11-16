@@ -58,12 +58,7 @@ Effects belong to the font, so they survive `FONT CLEAR`. Slow effects like blur
 
 `Projects/froghop.amosproj` is a smaller climbing game drawn entirely with code, using double buffering and sound effects made in the tracker.
 
-The `Projects/` folder contains more examples:
-
-- **Games:** `froghop`, `snake`, `galaga`, `adventure`
-- **Demos:** `raster_bars`, `tunnel`, `solar_system`, `shadow_text`, `weather`, `merry_christmas`, `phalanx`, `parallax_layers`, `font_effects`, `c64_colours`
-- **Sound:** `synth_song`, `synthdemo`, `forestsong`, `trackerdemo`
-- **Techniques:** `animated_sprites`, `sprite_collisions`, `tile_platformer`, `fading_screen`, `fading_sprites`, `guess_the_number`
+The `Projects/` folder contains 25 examples, which the IDE lists under **Project → Examples**, sorted into *Games*, *Graphics and effects* and *Sound and music*. Hover over a name to see what it shows. The list is in [`Examples.cs`](Examples.cs); a test checks that it matches the files in `Projects/`, so a new example must be added there too.
 
 Put your own experiments in a `Sandbox/` folder in the project folder. It is ignored by git, so nothing there ends up on GitHub, and file paths such as `"Graphics/hero.png"` work from there just as they do from `Projects/`. The manual, a step-by-step guide plus a full command reference, is in [`Documentation/AMOS Like Basic - Manual.pdf`](Documentation/AMOS%20Like%20Basic%20-%20Manual.pdf). It is built from the Markdown chapters in `Documentation/Manual` with `python3 Tools/build_manual.py`.
 

@@ -22,6 +22,7 @@
             <MenuItem Header="_Project">
                 <MenuItem Header="New" Click="NewProject_OnClick"/>
                 <MenuItem Header="Open..." Click="OpenProject_OnClick"/>
+                <MenuItem Header="Examples" Name="ExamplesMenuItem"/>
                 <MenuItem Header="Save" Click="SaveProject_OnClick"/>
                 <MenuItem Header="Save as..." Click="SaveAsProject_OnClick"/>
                 <Separator/>
