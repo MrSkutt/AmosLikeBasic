@@ -794,7 +794,7 @@ WAIT milliseconds
 WAIT MUSIC [channel]
 ```
 
-`WAIT VBL` shows what has been drawn and waits for the next frame, 60 times a second. It is the heart of every game loop: sprites, animations and fades are updated here. `WAIT` with a number waits that many milliseconds. `WAIT MUSIC` waits until the synth music (or one channel) has finished.
+`WAIT VBL` shows what has been drawn and waits for the next frame, 60 times a second. It is the heart of every game loop: sprites, animations and fades are updated here. It follows the screen's own refreshes, so movement is smooth: on a 120 Hz screen it waits for every second refresh, so a game runs at the same speed everywhere. `WAIT` with a number waits that many milliseconds. `WAIT MUSIC` waits until the synth music (or one channel) has finished.
 
 ### WHILE ... WEND
 

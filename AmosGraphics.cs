@@ -34,6 +34,13 @@ public sealed class GpuLayer
     public SKColor[] ShaderColorsTo { get; set; } = new SKColor[50];
     
     public Vector4[] ShaderValues { get; set; } = new Vector4[2]; // t.ex. 8 slots
+    // ShaderValues as they were at the latest WAIT VBL (the scroll position is in [0]). The screen
+    // is drawn from this copy, so that it never shows one layer scrolled for the next frame and
+    // another not yet. null = the program does not use WAIT VBL, draw the live values.
+    public Vector4[]? PresentedShaderValues { get; set; }
+
+    // PresentedShaderValues as they were at the latest screen refresh (see LatchShownFrame)
+    public Vector4[]? ShownShaderValues { get; set; }
     
     // Shader-support
     public string? SkSlCode { get; set; }
@@ -62,6 +69,8 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
     }
 
     public Rect Bounds { get; }
+
+    public long Frame { get; init; }   // the WAIT VBL frame this draws (for FrameLog)
 
     public void Dispose()
     {
@@ -121,6 +130,7 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
         finally
         {
             _graphics.CountRenderedFrame(System.Diagnostics.Stopwatch.GetTimestamp() - start);
+            FrameLog.Write("draw", Frame, System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds);
         }
     }
 
@@ -415,7 +425,7 @@ public sealed class LayerDrawOperation
 
         if (effect.Uniforms.Contains("uParams"))
         {
-            var values = _layer.ShaderValues;
+            var values = _layer.ShownShaderValues ?? _layer.PresentedShaderValues ?? _layer.ShaderValues;
             float[] uParamData = new float[values.Length * 4]; // each Vector4 = 4 floats
             for (int i = 0; i < values.Length; i++)
             {
@@ -476,6 +486,37 @@ public sealed class LayerDrawOperation
 public sealed class AmosGpuView : Control
 {
     public AmosGraphics Graphics { get; set; } = null!;
+
+    // The views on screen; the latest one reports the screen refreshes to DisplayClock (WAIT VBL)
+    private static readonly List<AmosGpuView> Shown = new();
+    private TopLevel? _topLevel;
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        _topLevel = TopLevel.GetTopLevel(this);
+        Shown.Add(this);
+        _topLevel?.RequestAnimationFrame(OnRefresh);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        Shown.Remove(this);
+        _topLevel = null;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnRefresh(TimeSpan _)
+    {
+        if (_topLevel == null) return;               // removed from the window
+        if (Shown.Count > 0 && Shown[^1] == this)
+        {
+            // Lock in the frame this refresh shows before WAIT VBL lets the program go on
+            if (Graphics != null && Graphics.LatchShownFrame()) InvalidateVisual();
+            DisplayClock.Tick();
+        }
+        _topLevel.RequestAnimationFrame(OnRefresh);
+    }
     private static readonly string RasterShaderCode = Shader.RasterShaderCode;
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -513,7 +554,9 @@ public sealed class AmosGpuView : Control
             var sprites = spritesCopy.Where(s => s.Layer == -1 || s.Layer == layerIndex).ToList();
             layers.Add(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites));
         }
-        ctx.Custom(new ScreenDrawOperation(screenRect, Graphics, layers));
+        long frame = Graphics.ShownFrame;
+        FrameLog.Write("paint", frame);
+        ctx.Custom(new ScreenDrawOperation(screenRect, Graphics, layers) { Frame = frame });
     }
 }
 
@@ -1395,7 +1438,7 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            return _presentedSprites ?? BuildSpriteStates();
+            return _shownSprites ?? _presentedSprites ?? BuildSpriteStates();
         }
     }
 
@@ -1582,13 +1625,50 @@ public sealed class AmosGraphics
     // null = the program does not use WAIT VBL, draw the live list.
     private List<QueuedFontText>? _presentedFontTexts;
 
+    // Counts the frames presented by WAIT VBL (for FrameLog)
+    public long PresentedFrame { get; private set; }
+
+    // The frame the screen shows: at every screen refresh, before WAIT VBL is let go for the next
+    // frame, the latest presented frame is locked in here. Without this the screen would be drawn
+    // in a race with the BASIC thread: when the program is quick it sometimes presents the next
+    // frame before the refresh is drawn and sometimes after, so the picture now and then stood
+    // still for a refresh and then jumped two frames. null = no game window refreshes (tests).
+    private List<QueuedFontText>? _shownFontTexts;
+    private List<SpriteRenderState>? _shownSprites;
+    public long ShownFrame { get; private set; }
+
+    // Called by the game window at each screen refresh; true when there is a new frame to draw
+    public bool LatchShownFrame()
+    {
+        lock (LockObject)
+        {
+            if (_presentedSprites == null && _presentedFontTexts == null) return false;   // no WAIT VBL yet
+            bool changed = ShownFrame != PresentedFrame;
+            _shownFontTexts = _presentedFontTexts;
+            _shownSprites = _presentedSprites;
+            foreach (var layer in _layers) layer.ShownShaderValues = layer.PresentedShaderValues;
+            ShownFrame = PresentedFrame;
+            return changed;
+        }
+    }
+
+    private void ClearShownFrame()
+    {
+        _shownFontTexts = null;
+        _shownSprites = null;
+        foreach (var layer in _layers) layer.ShownShaderValues = null;
+    }
+
     // Called at WAIT VBL: lock in what should be shown for this frame
     public void PresentFrame()
     {
         lock (LockObject)
         {
+            PresentedFrame++;
             _presentedFontTexts = _fontTexts.ToList();
             _presentedSprites = BuildSpriteStates();
+            foreach (var layer in _layers)
+                layer.PresentedShaderValues = (Vector4[])layer.ShaderValues.Clone();
         }
     }
 
@@ -1596,7 +1676,7 @@ public sealed class AmosGraphics
     {
         lock (LockObject)
         {
-            return (_presentedFontTexts ?? _fontTexts).ToList(); // ✅ Return a copy
+            return (_shownFontTexts ?? _presentedFontTexts ?? _fontTexts).ToList(); // ✅ Return a copy
         }
     }
 
@@ -1609,6 +1689,7 @@ public sealed class AmosGraphics
             _sprites.Clear();
             _groups.Clear();
             _presentedSprites = null;
+            ClearShownFrame();
             _imageBank.Clear();
             _tiles.Clear();
             _tilesInWidth = 0;
@@ -1618,6 +1699,7 @@ public sealed class AmosGraphics
             _fonts.Clear();
             _fontTexts.Clear();
             _presentedFontTexts = null;
+            foreach (var layer in _layers) layer.PresentedShaderValues = null;
             ClearAllRasterBars(0);
         }
     }
@@ -1629,6 +1711,7 @@ public sealed class AmosGraphics
             _sprites.Clear();
             _groups.Clear();
             _presentedSprites = null;
+            ClearShownFrame();
         }
     }
 
@@ -2033,6 +2116,8 @@ public sealed class AmosGraphics
                     for (int i = 0; i < 22; i++) layer.ShaderHeights[i] = 0;
                     // Reset the weather/scroll parameters
                     for (int i = 0; i < layer.ShaderValues.Length; i++) layer.ShaderValues[i] = Vector4.Zero;
+                    layer.PresentedShaderValues = null;
+                    layer.ShownShaderValues = null;
                 }
             }
 

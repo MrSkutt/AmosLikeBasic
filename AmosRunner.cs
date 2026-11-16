@@ -371,7 +371,7 @@ public static partial class AmosRunner
         var lines = programText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
 
         _programStartTime = DateTime.UtcNow;
-        _lastFrameTime = DateTime.MinValue;
+        DisplayClock.StartRun();
         
         GamepadManager.Start();
         ChiptuneSynth.Reset();
@@ -1994,10 +1994,11 @@ public static partial class AmosRunner
                                 animationManager.Tick(graphics); 
                                 
                                 // 3. Wait until the next frame is ready (timing)
-                                await WaitNextFrameAsync(token);
+                                await DisplayClock.WaitFrameAsync(token);
 
                                 // 4. Lock in the frame's texts and signal that the UI should update
                                 graphics.PresentFrame();
+                                FrameLog.Write("vbl", graphics.PresentedFrame);
                                 onGraphicsChanged();
 
                                 // 5. Start drawing on the new inactive frame
@@ -5621,22 +5622,5 @@ public static partial class AmosRunner
         return result;
     }
     
-    private static DateTime _lastFrameTime = DateTime.MinValue;
-
-    private static async Task WaitNextFrameAsync(CancellationToken token)
-    {
-        // ~60 FPS -> 1000ms / 60 ≈ 16.6667ms
-        const double targetMs = 1000.0 / 60.0;
-
-        var now = DateTime.UtcNow;
-        double elapsed = _lastFrameTime == DateTime.MinValue 
-            ? targetMs 
-            : (now - _lastFrameTime).TotalMilliseconds;
-
-        double delay = Math.Max(0, targetMs - elapsed);
-
-        _lastFrameTime = now.AddMilliseconds(delay);
-        await Task.Delay(TimeSpan.FromMilliseconds(delay), token);
-    }
     private record MapDto(int Width, int Height, List<int> Data);
 }

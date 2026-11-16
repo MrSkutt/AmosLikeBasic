@@ -40,7 +40,7 @@ When you start AMOS Like Basic you see the editor, where you write the program. 
 
 If you click in the margin to the left of a line you set a **breakpoint**. The program then stops when it reaches that line, and you can see the value of every variable in the variable panel (press **F1** to show or hide it).
 
-In the game window **F12** switches between window and full screen, and **F8** turns on and off an effect that makes the picture look like an old TV. The title bar of the game window shows how fast the program runs: **FPS** (frames per second), **BASIC** (how much of the time your code is working) and **CPU**.
+In the game window **F12** switches between window and full screen, and **F8** turns on and off an effect that makes the picture look like an old TV. The title bar of the game window shows how fast the program runs: **FPS** (frames per second), **BASIC** (how much of the time your code is working), **CPU**, and **SYNC**: the screen refresh rate that `WAIT VBL` follows, or `timer` when the window is not being drawn.
 
 If you downloaded AMOS Like Basic, the example projects are copied to the folder `Documents/AmosLikeBasic` the first time you start it. That is where file names in your programs count from: an image you load with `"Graphics/hero.png"` should be in `Documents/AmosLikeBasic/Graphics`. The images and sounds the examples use come with the program, so they always work.
 

@@ -797,7 +797,9 @@ public partial class MainWindow : Window
         if (_screenWindow == null) return;
         // BASIC = the share of time the interpreter works between WAIT VBL ("-" without WAIT VBL)
         var basic = stats.BasicPercent < 0 ? "-" : $"{stats.BasicPercent:F0}%";
-        _screenWindow.Title = $"AMOS Screen | FPS {stats.Fps:F0} | BASIC {basic} | CPU {stats.CpuPercent:F0}%";
+        // SYNC = what WAIT VBL keeps time with: the screen's refresh rate, or a timer when the screen is not refreshing
+        var sync = DisplayClock.Active ? $"{1000 / DisplayClock.RefreshMs:F0} Hz" : "timer";
+        _screenWindow.Title = $"AMOS Screen | FPS {stats.Fps:F0} | BASIC {basic} | CPU {stats.CpuPercent:F0}% | SYNC {sync}";
     }
 
     private async void RunButton_OnClick(object? sender, RoutedEventArgs e)
