@@ -548,6 +548,7 @@ RASTER WRAP number, on
 RASTER DEL number
 RASTER CLEAR
 RASTER GFXMODE layer, on
+RASTER COLOUR layer, "colour" [, tolerance]
 RASTER SPACE layer, mode
 ```
 
@@ -558,7 +559,8 @@ RASTER SPACE layer, mode
 | `RASTER WRAP` | 1: the band continues at the top when it goes off the bottom |
 | `RASTER DEL` | removes the band |
 | `RASTER CLEAR` | removes all bands in the layer |
-| `RASTER GFXMODE` | 1: the bands colour what is drawn instead of the background |
+| `RASTER GFXMODE` | 1: the bands colour what is drawn instead of the background; 0 turns `RASTER COLOUR` off |
+| `RASTER COLOUR` | the bands only show where the layer has that colour, as when a palette colour is changed on every line; tolerance in percent, 10 if left out (`RASTER COLOR` works too) |
 | `RASTER SPACE` | the layer's background: 0 normal, 1 space with stars, 2 clouds |
 
 A layer can have 24 colour transitions in total; a band with three colours uses two.

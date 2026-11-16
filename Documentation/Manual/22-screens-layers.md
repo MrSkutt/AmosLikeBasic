@@ -115,6 +115,20 @@ RASTER 1, 0, 0, 480, "#1D4AA0, #3F7FDC, #8CC6FF, #FFE6BF"
 
 That gives a sky that fades from dark blue to light. Raster bars lie *behind* what is drawn in the layer, so you can draw mountains and clouds on top.
 
+Raster bars belong to a layer: the one chosen with `SCREEN SELECT`, or the one after `#`. They fill the parts of their layer where nothing is drawn, so they also cover every layer below. A background therefore goes in the bottom layer, layer 0, and text and figures in the layers above:
+
+```basic
+RASTER #0, 1, 0, 0, 480, "Navy, Purple, Black"
+SCREEN SELECT 1
+INKG "Yellow"
+CIRCLEF 320, 240, 100, 100
+Loop:
+  WAIT VBL
+GOTO Loop
+```
+
+If a band ends up in the wrong layer, everything below it disappears behind the colours.
+
 The bands can be moved with `RASTER MOVE number, y`. Here three bands bounce up and down:
 
 ```basic
@@ -138,9 +152,33 @@ GOTO Loop
 | `RASTER DEL no` | removes the band |
 | `RASTER CLEAR` | removes all bands in the layer |
 | `RASTER GFXMODE layer, 1` | the bands colour what is *drawn* instead of the background |
+| `RASTER COLOUR layer, "colour" [, tolerance]` | the bands only show where the layer has that colour (see below) |
 | `RASTER SPACE layer, mode` | changes the whole layer's background: 0 = normal, 1 = space with stars, 2 = clouds |
 
 A layer can have 24 colour transitions in total. A band with three colours uses two transitions. `RASTER INFO` prints how many are used.
+
+### Rasters on one colour: RASTER COLOUR
+
+On the Amiga and the Atari ST the screen had a palette of colours, and a favourite demo trick was to change one palette colour on every line. Everything drawn in that colour then got a rainbow, while the rest of the picture stayed the same. `RASTER COLOUR` does the same: the layer's raster bars only show where the layer has the colour you give.
+
+```basic
+SCREEN SELECT 1
+INKG "Red"
+BAR 100, 150, 540, 330
+INKG "White"
+BAR 200, 200, 440, 280
+RASTER 1, 0, 0, 480, "Red, Orange, Yellow, Green, Blue, Violet"
+RASTER COLOUR 1, "Red"
+Loop:
+  WAIT VBL
+GOTO Loop
+```
+
+The red frame gets the rainbow, the white box in the middle stays white. It works on everything in the layer: drawings, images, sprites and text with `FONT PRINT`. The project `raster_bars` uses it on the red colour in the middle of a bitmap font.
+
+Put the graphics that should get the rasters in a layer of their own, as above, since all the layer's bands follow the colour. A third value says how far from the colour a dot may be and still get the raster, in percent: `RASTER COLOUR 1, "Red", 25`. The default is 10, enough for the soft edges of scaled-up graphics. `RASTER GFXMODE 1, 0` turns it off again.
+
+> **Note:** Give the colour exactly as it is in the picture. Some programs show the colours of an image slightly changed by the computer's colour settings; a value from the program that made the image, or `RASTER COLOUR` with a larger tolerance, is safer.
 
 ## CRT effect: SCREEN CRT
 

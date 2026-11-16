@@ -42,3 +42,52 @@ public class GraphicsTests
         Assert.NotEqual(before, PixelAt(g, 639, 15));
     }
 }
+
+// RASTER COLOUR: the layer's rasters only show where it has the key colour
+public class RasterColourTests
+{
+    private const string Picture = """
+        SCREEN 640,480
+        INKG "Red" : BAR 0,0,319,479
+        INKG "Blue" : BAR 320,0,639,479
+        RASTER 1, 0, 0, 480, "Lime, Lime"
+        """;
+
+    private static SkiaSharp.SKColor[] Run(string key)
+    {
+        var r = BasicRunner.Run(Picture + "\n" + key + "\nLoop:\n  WAIT VBL\nGOTO Loop", 0.6, capture: true);
+        Assert.True(r.Errors.Count == 0, r.Describe());
+        return new[] { r.Frame!.GetPixel(100, 240), r.Frame!.GetPixel(500, 240) };
+    }
+
+    private static void Near(SkiaSharp.SKColor c, byte r, byte g, byte b)
+    {
+        Assert.InRange(c.Red, Math.Max(0, r - 12), Math.Min(255, r + 12));
+        Assert.InRange(c.Green, Math.Max(0, g - 12), Math.Min(255, g + 12));
+        Assert.InRange(c.Blue, Math.Max(0, b - 12), Math.Min(255, b + 12));
+    }
+
+    [AvaloniaFact]
+    public void The_raster_replaces_only_the_key_colour()
+    {
+        var px = Run("RASTER COLOUR 0, \"Red\"");
+        Near(px[0], 0, 255, 0);     // the red half shows the raster
+        Near(px[1], 0, 0, 255);     // the blue half is untouched
+    }
+
+    [AvaloniaFact]
+    public void The_tolerance_decides_how_close_a_colour_must_be()
+    {
+        // #E00000 is 12 % from the red in the picture
+        Near(Run("RASTER COLOUR 0, \"#E00000\", 0")[0], 255, 0, 0);
+        Near(Run("RASTER COLOUR 0, \"#E00000\", 20")[0], 0, 255, 0);
+        Near(Run("RASTER COLOUR 0, \"#E00000\", 20")[0], 0, 255, 0);
+    }
+
+    [AvaloniaFact]
+    public void Gfxmode_0_turns_the_key_off_again()
+    {
+        var px = Run("RASTER COLOUR 0, \"Red\"\nRASTER GFXMODE 0, 0");
+        Near(px[0], 255, 0, 0);
+    }
+}

@@ -221,6 +221,18 @@ half4 main(float2 p) {
 public sealed class LayerDrawOperation
 {
     private static readonly SKSamplingOptions Sampling = new(SKFilterMode.Linear, SKMipmapMode.None);
+    private static readonly SKSamplingOptions Sharp = new(SKFilterMode.Nearest, SKMipmapMode.None);
+
+    // Sharp pixels when an image is drawn at a whole size (100 %, 200 % ...) and not rotated, as on the
+    // Amiga; smooth otherwise. Smoothing a 200 % bitmap font blends the colours at every edge, which
+    // made a thin line of half-colours that RASTER COLOUR could not recognise.
+    private static SKSamplingOptions SamplingFor(SKCanvas c)
+    {
+        var m = c.TotalMatrix;
+        static bool Whole(float v) => v >= 0.999f && Math.Abs(v - MathF.Round(v)) < 0.001f;
+        bool rotated = Math.Abs(m.SkewX) > 0.0001f || Math.Abs(m.SkewY) > 0.0001f;
+        return !rotated && Whole(Math.Abs(m.ScaleX)) && Whole(Math.Abs(m.ScaleY)) ? Sharp : Sampling;
+    }
 
     private readonly AmosGraphics _graphics;
     private readonly GpuLayer _layer;
@@ -353,7 +365,7 @@ public sealed class LayerDrawOperation
 
             using var img = ToSkImage(charBmp);
             c.DrawImage(img, new SKRect(0, 0, img.Width, img.Height),
-                SKRect.Create(i * f.CharWidth, 0, f.CharWidth, f.CharHeight), Sampling);
+                SKRect.Create(i * f.CharWidth, 0, f.CharWidth, f.CharHeight), SamplingFor(c));
         }
 
         c.Restore();
@@ -397,7 +409,9 @@ public sealed class LayerDrawOperation
         c.RotateDegrees((float)angle);
         c.Scale((float)zoomX, (float)zoomY);
         c.Translate(-cX, -cY);
-        c.DrawImage(img, new SKRect(0, 0, img.Width, img.Height), new SKRect(0, 0, (float)w, (float)h), Sampling, paint);
+        // The size the image is stretched to counts too (a sprite drawn at its own size and zoomed 200 %)
+        c.Scale((float)(w / img.Width), (float)(h / img.Height));
+        c.DrawImage(img, 0, 0, SamplingFor(c), paint);
         c.Restore();
     }
 
@@ -1163,6 +1177,22 @@ public sealed class AmosGraphics
         }
     }
 
+    // RASTER COLOUR: the layer's rasters only show where its pixels have this colour (mode 2 in the
+    // shader). tolerance is how far off a colour may be, 0 – 1. RASTER GFXMODE layer, 0 turns it off.
+    public void SetRasterKeyColour(int layerIdx, Color colour, float tolerance)
+    {
+        lock (LockObject)
+        {
+            var frame = DrawingFrame;
+            if (layerIdx < 0 || layerIdx >= frame.Count) return;
+            var layer = frame[layerIdx];
+            var v0 = layer.ShaderValues[0];
+            layer.ShaderValues[0] = new Vector4(v0.X, v0.Y, 2f, v0.W);
+            var v1 = layer.ShaderValues[1];
+            layer.ShaderValues[1] = new Vector4(v1.X, v1.Y, (colour.R << 16) | (colour.G << 8) | colour.B, Math.Clamp(tolerance, 0f, 1f));
+        }
+    }
+
     public void SetRasterSpaceMode(int layerIdx, int onGraphics)
     {
         lock (LockObject)
@@ -1805,7 +1835,11 @@ public sealed class AmosGraphics
             {
                 var layer = frame[layerIdx];
                 if (slot >= 0 && slot < 2)
-                    layer.ShaderValues[slot] = new Vector4(nr, value, 0f, 0f);
+                {
+                    // z and w of slot 1 hold RASTER COLOUR's key; keep them
+                    var old = layer.ShaderValues[slot];
+                    layer.ShaderValues[slot] = slot == 1 ? new Vector4(nr, value, old.Z, old.W) : new Vector4(nr, value, 0f, 0f);
+                }
             }
 
         }

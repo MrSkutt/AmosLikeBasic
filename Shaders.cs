@@ -227,6 +227,20 @@ for (int i = 35; i < 50; i++) {
 
     half3 combinedBG = hasR ? finalRGB + pCol : pCol;
     
+if (mode > 1.5) {
+    // Colour key (RASTER COLOUR): the raster shows only where the layer has the key colour, like
+    // changing one palette colour line by line on the Amiga. uParams[1].z is the colour as
+    // 0xRRGGBB, uParams[1].w how far a colour may be from it (0 – 1). Everything else is untouched.
+    if (mask.a < 0.01 || !hasR) return mask;
+    float key = uParams[1].z;
+    half3 keyRGB = half3(floor(key / 65536.0), mod(floor(key / 256.0), 256.0), mod(key, 256.0)) / 255.0;
+    half3 rgb = mask.rgb / mask.a;   // the texture has premultiplied alpha
+    half3 diff = abs(rgb - keyRGB);
+    float d = max(diff.r, max(diff.g, diff.b));
+    float tol = uParams[1].w;
+    float w = 1.0 - smoothstep(tol, tol + 0.06, d);   // soft at the edges of the colour
+    return half4(mix(rgb, combinedBG, half(w)) * mask.a, mask.a);
+}
 if (mode > 0.5) {
     // GFX mode: always show the texture, multiply by the raster if there is one
     if (mask.a < 0.01) return half4(0.0, 0.0, 0.0, 0.0);

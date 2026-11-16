@@ -1,3 +1,4 @@
+using Avalonia.Headless;
 using System.Diagnostics;
 using System.Text.Json;
 using Avalonia.Controls;
@@ -14,6 +15,7 @@ public sealed class RunResult
     public Dictionary<string, object> Variables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool Completed { get; set; }
     public double Seconds { get; set; }
+    public SkiaSharp.SKBitmap? Frame { get; set; }   // the game screen at the end, with capture: true
 
     public string Describe() => Errors.Count == 0 ? "no errors" : string.Join("\n", Errors);
 }
@@ -25,7 +27,7 @@ public static class BasicRunner
     public static string ProgramOf(string amosprojPath) =>
         JsonDocument.Parse(File.ReadAllText(amosprojPath)).RootElement.GetProperty("ProgramText").GetString()!;
 
-    public static RunResult Run(string program, double maxSeconds, IReadOnlyCollection<string>? keysDown = null)
+    public static RunResult Run(string program, double maxSeconds, IReadOnlyCollection<string>? keysDown = null, bool capture = false)
     {
         var result = new RunResult();
         var keys = new HashSet<string>(keysDown ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
@@ -73,6 +75,17 @@ public static class BasicRunner
                 Thread.Sleep(4);
             }
             result.Completed = task.IsCompleted;
+            if (capture)
+            {
+                // Make sure the latest frame is drawn before it is captured
+                view.InvalidateVisual();
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+                using var ms = new MemoryStream();
+                window.CaptureRenderedFrame()!.Save(ms);
+                ms.Position = 0;
+                result.Frame = SkiaSharp.SKBitmap.Decode(ms);
+            }
             result.Seconds = sw.Elapsed.TotalSeconds;
             if (task.IsFaulted) lock (result) result.Errors.Add("Crash: " + task.Exception!.GetBaseException());
         }

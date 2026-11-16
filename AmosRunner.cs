@@ -3448,6 +3448,19 @@ public static partial class AmosRunner
                                 graphics.SetRasterGfxMode(layerId, RM);
                                 break;
                             }                        
+                            // RASTER COLOUR layer, "colour" [, tolerance %]: the rasters only show on that colour
+                            if (arg.StartsWith("COLOUR ", StringComparison.OrdinalIgnoreCase) ||
+                                arg.StartsWith("COLOR ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var keyParts = SplitTopLevelCsv(arg[(arg.IndexOf(' ') + 1)..].Trim());
+                                if (keyParts.Count < 2)
+                                    throw new Exception($"RASTER COLOUR needs a layer and a colour at line {ln}");
+                                int layerId = EvalInt(keyParts[0], vars, ln, getInkey, isKeyDown, graphics);
+                                var keyColour = ParseColorFlexible(EvalValue(keyParts[1], vars, ln, getInkey, isKeyDown, graphics)?.ToString() ?? "");
+                                double tolerance = keyParts.Count >= 3 ? EvalDouble(keyParts[2], vars, ln, getInkey, isKeyDown, graphics) : 10;
+                                graphics.SetRasterKeyColour(layerId, keyColour, (float)(tolerance / 100.0));
+                                break;
+                            }
                             if (arg.StartsWith("SPACE ", StringComparison.OrdinalIgnoreCase))
                             {
                                 var moveParts = SplitCsvOrSpaces(arg.Substring(6).Trim());
