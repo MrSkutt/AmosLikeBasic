@@ -56,7 +56,7 @@ public static partial class AmosRunner
         int n = 0;
         try {
             n = (int)Math.Round(Convert.ToDouble(v, CultureInfo.InvariantCulture));
-        } catch { /* Ignorera fel och använd 0 (svart) */ }
+        } catch { /* Ignore errors and use 0 (black) */ }
 
         return n switch
         {
@@ -932,7 +932,7 @@ public static partial class AmosRunner
                         }
                         break;
                     }
-                    if (fcmd == "ENDIF") { /* bara markör */ continue; }
+                    if (fcmd == "ENDIF") { /* just a marker */ continue; }
                     
                     // WHILE / WEND i funktionen
                     if (fcmd == "WHILE")

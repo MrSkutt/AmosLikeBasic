@@ -1,5 +1,7 @@
 # AMOS Like Basic
 
+[![Tests](https://github.com/MrSkutt/AmosLikeBasic/actions/workflows/tests.yml/badge.svg)](https://github.com/MrSkutt/AmosLikeBasic/actions/workflows/tests.yml)
+
 **An AMOS-inspired BASIC environment for modern macOS and Windows.**
 
 AMOS Like Basic brings back the workflow of the classic Amiga **AMOS Professional**: write a few lines of BASIC, press run, and get sprites, raster bars, scrolling tilemaps and music on screen right away. It is not an emulator. It is a new engine built on .NET, Avalonia and SkiaSharp, with modern GPU rendering and none of the old hardware limits.
@@ -78,6 +80,22 @@ dotnet run
 
 NuGet packages are restored automatically. The native audio and input libraries for your platform (`libs/mac` or `libs/windows`) are copied next to the executable at build time.
 
+### Running the tests
+
+```bash
+dotnet test Tests/AmosLikeBasic.Tests.csproj
+```
+
+The tests run headless, without opening any windows, and take about two minutes. They check that:
+
+- every code example in the manual and every example project runs without errors;
+- the language gives the answers the manual promises (comparisons, string functions, `FOR`, `SWAP` ...);
+- the synth keeps time and pitch, the tracker effects and order list work, and every song in `Sound/Tracker` loads, saves and plays;
+- sound effects use channels 5 – 8 and give them back;
+- the tracker editor responds to its keys (notes, effects, transpose, copy and paste, undo).
+
+They run on GitHub for every push and pull request.
+
 ### Dependencies
 
 | Package | Used for |
@@ -102,6 +120,7 @@ NuGet packages are restored automatically. The native audio and input libraries 
 | `MainWindow.axaml(.cs)` | The IDE |
 | `SpriteEditorWindow`, `MapEditorWindow`, `TilePaletteWindow` | Built-in editors |
 | `Projects/` | Example programs (`.amosproj`) |
+| `Tests/` | Automated tests (xUnit, Avalonia headless) |
 | `Graphics/`, `Sound/`, `fonts/` | Assets used by the examples |
 
 ### Exporting a program as an app

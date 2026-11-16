@@ -1,0 +1,228 @@
+using AmosLikeBasic;
+using S = AmosLikeBasic.ChiptuneSynth;
+
+namespace AmosLikeBasic.Tests;
+
+// The synth is rendered straight into buffers and measured
+public class SynthTests : IDisposable
+{
+    private const int SR = S.SampleRate;
+
+    public SynthTests()
+    {
+        S.ManualRendering = true;
+        S.Reset();
+        Render(0.05);   // let the reset commands run
+    }
+
+    public void Dispose()
+    {
+        S.Reset();
+        Render(0.05);
+        S.ManualRendering = false;
+    }
+
+    private static float[] Render(double seconds)
+    {
+        var buffer = new float[(int)(seconds * SR)];
+        S.Render(buffer);
+        return buffer;
+    }
+
+    // Average pitch from upward zero crossings, interpolated between samples
+    private static double Pitch(float[] b, double t0, double t1)
+    {
+        int a = (int)(t0 * SR), e = (int)(t1 * SR);
+        double first = -1, last = -1;
+        int n = 0;
+        for (int i = a + 1; i < e; i++)
+        {
+            if (b[i - 1] <= 0 && b[i] > 0)
+            {
+                double x = i - 1 + b[i - 1] / (b[i - 1] - b[i]);
+                if (first < 0) first = x; else n++;
+                last = x;
+            }
+        }
+        return n > 0 ? SR * n / (last - first) : 0;
+    }
+
+    private static double Rms(float[] b, double t0, double t1)
+    {
+        int a = (int)(t0 * SR), e = (int)(t1 * SR);
+        double s = 0;
+        for (int i = a; i < e; i++) s += b[i] * b[i];
+        return Math.Sqrt(s / (e - a));
+    }
+
+    private static double Semitones(double hz, double baseHz) => 12 * Math.Log2(hz / baseHz);
+
+    [Fact]
+    public void FourQuartersAt120BpmTakeTwoSeconds()
+    {
+        S.SetBpm(120);
+        S.PlayMusic(1, "C4:4 C4 C4 C4");
+        Render(1.95);
+        Assert.True(S.IsPlaying(1));
+        Render(0.1);
+        Assert.False(S.IsPlaying(1));
+    }
+
+    [Fact]
+    public void A4IsTuned()
+    {
+        S.SetWave(1, "Sine");
+        S.SetGate(1, 100);
+        S.PlayMusic(1, "A4:1");
+        var b = Render(0.6);
+        Assert.InRange(Pitch(b, 0.1, 0.5), 438, 442);
+    }
+
+    [Fact]
+    public void EffectsInTheNoteStringTakeNoTime()
+    {
+        S.SetBpm(120);
+        S.PlayMusic(1, "{WAVE SAW; FILTER LOW 300 20} C4:4 {CUT 6000} C4 {ARP 0 4 7} C4 {ARP} C4");
+        Render(1.95);
+        Assert.True(S.IsPlaying(1));
+        Render(0.1);
+        Assert.False(S.IsPlaying(1));
+    }
+
+    [Fact]
+    public void BadNoteStringEffectsGiveClearErrors()
+    {
+        Assert.Contains("unknown effect", Assert.Throws<FormatException>(() => S.PlayMusic(1, "{FOO 1} C4")).Message);
+        Assert.Contains("needs a value", Assert.Throws<FormatException>(() => S.PlayMusic(1, "{CUT} C4")).Message);
+        Assert.Throws<FormatException>(() => S.PlayMusic(1, "{CUT 300 C4"));
+    }
+
+    [Fact]
+    public void BendMovesThePitch()
+    {
+        S.SetWave(1, "Sine");
+        S.SetGate(1, 100);
+        S.SetBend(1, 12);
+        S.PlayMusic(1, "A4:1");
+        var b = Render(0.6);
+        Assert.InRange(Pitch(b, 0.1, 0.5), 875, 885);
+    }
+
+    private static TrackerSong OneChannelSong(params string[] rows)
+    {
+        var json = "{\"Speed\":6,\"Tempo\":125,\"Instruments\":[{\"Wave\":\"Sine\",\"Volume\":0.5,\"Attack\":0,\"Decay\":0,\"Sustain\":100}]," +
+                   "\"Order\":[0],\"Patterns\":[[" + string.Join(",", rows.Select(r => "\"" + r + "\"")) + "]]}";
+        return TrackerSong.FromJson(json);
+    }
+
+    [Fact]
+    public void TrackerSlideUpMovesOneSemitonePerTick()
+    {
+        // Tempo 125 gives 50 ticks a second, so a tick is 20 ms. 110 slides one semitone per tick
+        // on every tick except the first of each row.
+        S.TrackPlay(OneChannelSong("A-4 01 110", "--- .. 110", "--- .. 110"), loop: false);
+        var b = Render(0.36);
+        Assert.InRange(Semitones(Pitch(b, 0.002, 0.02), 440), -0.1, 0.1);   // tick 0
+        Assert.InRange(Semitones(Pitch(b, 0.342, 0.36), 440), 14.9, 15.1);  // tick 17: 15 slides
+    }
+
+    [Fact]
+    public void TrackerTonePortamentoStopsAtTheTarget()
+    {
+        S.TrackPlay(OneChannelSong("A-4 01 ...", "A-5 01 3FF", "--- .. 300"), loop: false);
+        var b = Render(0.36);
+        Assert.InRange(Semitones(Pitch(b, 0.30, 0.36), 440), 11.9, 12.1);
+    }
+
+    [Fact]
+    public void TrackerPatternBreakAndJumpFollowTheOrderList()
+    {
+        var song = TrackerSong.FromJson("{\"Speed\":6,\"Tempo\":125,\"Order\":[0,1,1]," +
+            "\"Patterns\":[[\"A-4 01 D02\",\"--- .. ...\"],[\"--- .. ...\",\"--- .. ...\",\"C-5 01 ...\",\"--- .. B00\"]]}");
+        S.TrackPlay(song, loop: false);
+        var positions = new List<string>();
+        for (int i = 0; i < 6; i++)
+        {
+            Render(0.12);
+            positions.Add($"{S.TrackPosition}:{S.TrackRow}");
+        }
+        Assert.Equal(new[] { "1:2", "1:3", "0:0", "1:2", "1:3", "0:0" }, positions);
+    }
+
+    [Fact]
+    public void TrackerSongStopsWhenNotLooping()
+    {
+        S.TrackPlay(OneChannelSong("A-4 01 ...", "---", "---", "---"), loop: false);
+        Render(0.45);
+        Assert.True(S.IsTrackPlaying());
+        Render(0.1);
+        Assert.False(S.IsTrackPlaying());
+    }
+
+    public static IEnumerable<object[]> SongFiles() =>
+        Directory.GetFiles(Repo.PathOf("Sound/Tracker"), "*.amostrk").OrderBy(f => f).Select(f => new object[] { Path.GetFileName(f) });
+
+    [Theory]
+    [MemberData(nameof(SongFiles))]
+    public void SongFilesLoadSaveAndPlay(string file)
+    {
+        var song = TrackerSong.Load(Repo.PathOf("Sound/Tracker/" + file));
+        string json = song.ToJson();
+        Assert.Equal(json, TrackerSong.FromJson(json).ToJson());
+
+        S.TrackPlay(song);
+        var b = Render(3);
+        float peak = b.Max(Math.Abs);
+        Assert.InRange(peak, 0.05f, 1.0f);
+    }
+
+    [Fact]
+    public void BadTrackerFilesGiveClearErrors()
+    {
+        Assert.Contains("is not a note", Assert.Throws<FormatException>(() =>
+            TrackerSong.FromJson("{\"Patterns\":[[\"H-4 01 ...\"]]}")).Message);
+        Assert.Contains("pattern 3", Assert.Throws<FormatException>(() =>
+            TrackerSong.FromJson("{\"Order\":[3]}")).Message);
+    }
+
+    [Fact]
+    public void SoundEffectsUseChannelsFiveToEightAndGiveThemBack()
+    {
+        var bank = TrackerSong.Load(Repo.PathOf("Sound/Tracker/sfx.amostrk"));
+        var jump = bank.Instruments.First(i => i.Name == "Jump");
+
+        // Four sounds at once get one channel each
+        var channels = Enumerable.Range(0, 4).Select(_ => S.PlayTrackSfx(jump, 1, 60)).ToArray();
+        Assert.Equal(new[] { 5, 6, 7, 8 }, channels);
+        Render(1);
+
+        // Channel 5 had a sawtooth set up with PLAY before the effect borrowed it
+        S.SetWave(5, "Sawtooth");
+        S.SetVolume(5, 0.4);
+        S.SetGate(5, 100);
+        S.PlayMusic(5, "A3:1");
+        var before = Render(0.5);
+        S.StopMusic();
+        Render(0.3);
+        S.PlayTrackSfx(bank.Instruments.First(i => i.Name == "Coin"), 4, 83, channel: 5);
+        Render(1);
+        S.PlayMusic(5, "A3:1");
+        var after = Render(0.5);
+        Assert.InRange(Rms(after, 0.1, 0.4), Rms(before, 0.1, 0.4) * 0.95, Rms(before, 0.1, 0.4) * 1.05);
+        Assert.InRange(Pitch(after, 0.1, 0.4), 218, 222);
+    }
+
+    [Fact]
+    public void SoundEffectsLeaveTheSongAlone()
+    {
+        var song = TrackerSong.Load(Repo.PathOf("Sound/Tracker/forest_song.amostrk"));
+        var bank = TrackerSong.Load(Repo.PathOf("Sound/Tracker/sfx.amostrk"));
+        S.TrackPlay(song);
+        Render(0.5);
+        int row = S.TrackRow;
+        S.PlayTrackSfx(bank.Instruments.First(i => i.Name == "Explosion"), 5, 60);
+        Render(0.5);
+        Assert.True(S.IsTrackPlaying());
+        Assert.True(S.TrackRow > row);
+    }
+}

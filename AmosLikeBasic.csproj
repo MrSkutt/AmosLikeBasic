@@ -6,15 +6,18 @@
         <ApplicationManifest>app.manifest</ApplicationManifest>
         <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-        <!-- Interpretatorns huvudloop är en stor metod. Med denna kompileras den optimerat direkt
-             i stället för att gå långsamt den första tiden av varje programkörning (~45 ms extra).
-             Kostar ungefär 50 ms längre start av appen. -->
+        <!-- The interpreter's main loop is a big method. With this it is compiled optimised straight
+             away instead of running slowly for the first moments of every program run (~45 ms extra).
+             Costs about 50 ms longer app start-up. -->
         <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
 
         <!-- We use RuntimeIdentifiers (plural) to support both platforms -->
         <RuntimeIdentifiers>osx-arm64;win-x64</RuntimeIdentifiers>
         <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx-arm64</RuntimeIdentifier>
         <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</RuntimeIdentifier>
+
+        <!-- The test project lives in Tests/ under this folder and must not be compiled into the app -->
+        <DefaultItemExcludes>$(DefaultItemExcludes);Tests/**</DefaultItemExcludes>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -38,7 +41,7 @@
         <PackageReference Include="Un4seen.Bass" Version="2.4.18" />
     </ItemGroup>
 
-    <!-- Resurser -->
+    <!-- Resources -->
     <ItemGroup>
         <None Include="Sound/**/*" CopyToOutputDirectory="PreserveNewest" />
         <None Include="Graphics/**/*" CopyToOutputDirectory="PreserveNewest" />

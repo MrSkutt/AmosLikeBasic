@@ -213,7 +213,9 @@ namespace AmosLikeBasic
         {
             int samples = length / sizeof(float);
             if (_renderBuffer.Length < samples) _renderBuffer = new float[samples];
-            Render(_renderBuffer.AsSpan(0, samples));
+            // A test that calls Render itself owns the synth; the stream only plays silence then
+            if (ManualRendering) Array.Clear(_renderBuffer, 0, samples);
+            else Render(_renderBuffer.AsSpan(0, samples));
             Marshal.Copy(_renderBuffer, 0, buffer, samples);
             return samples * sizeof(float);
         }
@@ -228,7 +230,7 @@ namespace AmosLikeBasic
                 long due = sw.ElapsedTicks * SampleRate / Stopwatch.Frequency;
                 while (rendered < due)
                 {
-                    Render(buf);
+                    if (!ManualRendering) Render(buf);
                     rendered += buf.Length;
                 }
                 Thread.Sleep(5);
