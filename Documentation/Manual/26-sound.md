@@ -300,7 +300,7 @@ More songs in C64 style are in `Sound/Tracker` and are used by the example proje
 | `winter_evening.amostrk` | `weather` | slow and wistful, with bells |
 | `snake.amostrk` | `snake` | bouncy game music with short, choppy notes |
 | `frog_hop.amostrk` | `froghop` | cheerful game music for Frog Hop |
-| `neon_horizon.amostrk` | – | eight channels: a lead with a C64 echo, filter bass, arpeggios, two pad voices and drums; open it in the tracker and watch the oscilloscopes |
+| `neon_horizon.amostrk` | `oldschool_demo` | eight channels: a lead with a C64 echo, filter bass, arpeggios, two pad voices and drums; open it in the tracker and watch the oscilloscopes |
 
 Open them in the tracker to see how the sounds and effects are made.
 

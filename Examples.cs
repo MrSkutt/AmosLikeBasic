@@ -25,6 +25,7 @@ public static class Examples
         }),
         new Group("Graphics and effects", new[]
         {
+            new Example("oldschool_demo", "Oldschool Demo", "Copper bars, chrome bobs, a bouncing logo and a sine scroller, Amiga style"),
             new Example("raster_bars", "Raster Bars", "Moving colour bars behind a picture, demo style"),
             new Example("tunnel", "Sine Tunnel", "An animated tunnel with particles and a scrolling text"),
             new Example("parallax_layers", "Parallax Layers", "Mountain ranges that scroll at different speeds; steer with left and right"),

@@ -108,119 +108,98 @@ for (int i = 35; i < 50; i++) {
     }
 }
 
-    // 2. WEATHER (unchanged)
+    // 2. WEATHER: PARTICLE 1 = snow, 2 = rain, 3 = space. Three layers each, far to near, for depth.
+    // Every cell of a grid holds at most one flake, drop or star, placed so that it never crosses
+    // the cell's edge, so each pixel only has to look at its own cell in each layer.
     half3 pCol = half3(0.0);
     if (weatherType > 0.5) {
-        float size = 15.0 + weatherDensity;
-        float2 uv = fragCoord / iResolution.xy;
-        
-        float windStrength = sin(iTime * 0.5) * 0.0;
-        float windOffset = windStrength * iTime;
-        float baseWindStrength = sin(iTime * 0.5) * 0.8;
-
-        float2 windVector = float2(windOffset, 0.0);
-        float2 grid = (uv + windVector / size) * float2(size, size * (iResolution.y / iResolution.x));
-        
-        float2 id = floor(grid);
-        float2 gUv = fract(grid) - 0.5;
-        
-        float h1 = hash(id.x * 123.0 + id.y * 456.0);
-        float h2 = hash(h1 * 789.0);
-        float h3 = hash(h2 * 321.0);
-        
-        float layerDepth = fract(h3 * 3.0);
-        float depthScale = 0.6 + layerDepth * 0.4;
-        
-        float2 pOffset = float2(h2 - 0.5, h3 - 0.5) * 0.8;
+        float amount = clamp(weatherDensity, 1.0, 30.0) / 10.0;     // 1 = the usual amount
+        float gust = sin(iTime * 0.23) * 0.6 + sin(iTime * 0.61 + 1.3) * 0.4;   // slow wind gusts, -1 .. 1
 
         if (weatherType < 1.5) { // SNOW
-            float windStrength = baseWindStrength * 2.5;
-            float speed = (3.4 + h1 * 0.4) * depthScale;
-            
-            float sway = sin(iTime * 1.2 + h1 * 6.28) * 0.25;
-            float drift = windStrength * 0.8;
-            float pX = fract(pOffset.x + sway + drift + 0.5) - 0.5;
-            float pY = fract(h1 + iTime * speed) - 0.5;
-            
-            float2 dv = gUv - float2(pX, pY);
-            
-            float rotation = windStrength * 2.0 + iTime + h1 * 6.28;
-            float cosR = cos(rotation);
-            float sinR = sin(rotation);
-            float2 dvRot;
-            dvRot.x = dv.x * cosR - dv.y * sinR;
-            dvRot.y = dv.x * sinR + dv.y * cosR;
-            
-            float d = length(dvRot);
-            float flakeSize = (0.03 + h2 * 0.04) * depthScale;
-            
-            if (d < flakeSize) {
-                float t = d / flakeSize;
-                t = saturate(t);
-                float a = 1.0 - (t * t * (3.0 - 2.0 * t));
-                
-                float brightness = 0.5 + depthScale * 0.5;
-                pCol = half3(brightness * 0.9, brightness * 0.95, brightness);
-                
-                float sparkle = sin(iTime * 3.0 + h1 * 20.0) * 0.5 + 0.5;
-                pCol = pCol * half(0.85 + sparkle * 0.15);
+            for (int L = 0; L < 3; L++) {
+                float near = float(L) / 2.0;                         // 0 far .. 1 near
+                float cell = mix(46.0, 74.0, near) / sqrt(amount);
+                // pixels per second; heavier snow falls faster (x1.3 at the usual amount 10, x1.8 at 20)
+                float speed = mix(22.0, 70.0, near) * (0.8 + 0.5 * amount);
+                float2 p = fragCoord;
+                p.y -= iTime * speed;
+                p.x -= iTime * gust * mix(6.0, 26.0, near) + float(L) * 37.0;
+                float2 id = floor(p / cell);
+                float2 f = p - id * cell;
+                float h = hash(id.x * 127.1 + id.y * 311.7 + float(L) * 74.7);
+                if (h > 0.55 + 0.1 * near) continue;                 // not every cell has a flake
+                float r = mix(1.1, 3.4, near) * (0.7 + 0.6 * hash(h * 91.3));
+                float m = r + 6.0;                                   // room for the sway and the glow
+                float2 c = float2(m + hash(h * 13.7) * (cell - 2.0 * m), m + hash(h * 57.1) * (cell - 2.0 * m));
+                c.x += sin(iTime * (0.8 + h * 1.2) + h * 40.0) * 4.0;   // each flake sways
+                float d = length(f - c);
+                float core = 1.0 - smoothstep(r * 0.55, r, d);
+                float glow = (1.0 - smoothstep(r, r * 2.6, d)) * 0.35;
+                float bright = mix(0.45, 1.0, near);
+                pCol += half3(0.86, 0.92, 1.0) * half((core + glow) * bright);
             }
         }
 
-        else if (weatherType < 2.5) { // REGN
-            float windStrength = baseWindStrength * 0.6;
-            float speed = (10.0 + h1 * 4.0) * depthScale;
-            float pY = fract(h1 + iTime * speed) - 0.5;
-            
-            float pX = fract(pOffset.x + windStrength * 0.2 + 0.5) - 0.5;
-            
-            float windAngle = windStrength * 20.0;
-            float angle = (h2 - 0.5) * (15.0 * 3.1415926 / 180.0) + 
-                          (windAngle * 3.1415926 / 180.0);
-            float cosA = cos(angle);
-            float sinA = sin(angle);
-
-            float2 dv = gUv - float2(pX, pY);
-            float2 dvRot;
-            dvRot.x = dv.x * cosA - dv.y * sinA;
-            dvRot.y = dv.x * sinA + dv.y * cosA;
-
-            dvRot *= float2(25.0 * depthScale, 0.8);
-
-            float radius = 0.28;
-            float t = length(dvRot) / radius;
-            t = saturate(t);
-            
-            float a = (1.0 - (t * t * (3.0 - 2.0 * t))) * (0.5 + depthScale * 0.25);
-
-            half3 col = half3(0.6, 0.7, 1.0);
-            pCol = pCol * (1.0 - half(a)) + col * half(a);
+        else if (weatherType < 2.5) { // RAIN
+            float slant = 0.18 + gust * 0.1;                         // x per y: the rain leans with the wind
+            for (int L = 0; L < 3; L++) {
+                float near = float(L) / 2.0;
+                float cellX = mix(9.0, 16.0, near) / sqrt(amount);
+                float cellY = mix(120.0, 220.0, near);
+                // heavier rain falls faster (x0.7 at the usual amount 10, x0.95 at 20); the streaks
+                // are as long as the drop moves in a short moment, so they follow the speed
+                float pace = 0.45 + 0.25 * amount;
+                float speed = mix(520.0, 1050.0, near) * pace;
+                float len = mix(10.0, 34.0, near) * (0.5 + 0.5 * pace);
+                float2 p = fragCoord;
+                p.x -= p.y * slant;                                  // lean the columns
+                p.y -= iTime * speed;
+                p.x -= iTime * speed * slant;
+                float2 id = floor(float2(p.x / cellX, p.y / cellY));
+                float h = hash(id.x * 157.3 + id.y * 113.9 + float(L) * 31.1);
+                if (h > 0.45) continue;
+                float2 f = float2(p.x - id.x * cellX, p.y - id.y * cellY);
+                float cx = cellX * (0.3 + 0.4 * hash(h * 71.9));
+                float cy = len + hash(h * 23.3) * (cellY - 2.0 * len);
+                float dx = abs(f.x - cx);
+                float t = (f.y - cy) / len;                          // 0 at the tail, 1 at the head
+                if (t < 0.0 || t > 1.0) continue;
+                float w = mix(0.6, 1.1, near);
+                float line = 1.0 - smoothstep(w * 0.4, w, dx);
+                float a = line * t * t * mix(0.35, 0.8, near);       // brighter towards the head
+                pCol += half3(0.62, 0.72, 0.95) * half(a);
+            }
         }
 
-        else { // STARS
-            float blinkSpeed = 0.8 + h2 * 1.4;
-            float shimmer = sin(iTime * blinkSpeed + h1 * 10.0) * 0.5 + 0.5;
-            
-            float starSize = 0.02 + h3 * 0.025;
-            float dist = length(gUv - pOffset);
-            
-            if (dist < starSize) {
-                float t = dist / starSize;
-                t = saturate(t);
-                float glow = 1.0 - (t * t * (3.0 - 2.0 * t));
-                
-                float hue = h1;
-                half3 starColor;
-                if (hue < 0.3) {
-                    starColor = half3(1.0, 1.0, 0.95);
-                } else if (hue < 0.6) {
-                    starColor = half3(0.95, 0.95, 1.0);
-                } else {
-                    starColor = half3(1.0, 0.98, 0.9);
-                }
-                
-                float brightness = shimmer * glow * (0.6 + h2 * 0.4);
-                pCol = starColor * half(brightness);
+        else { // SPACE: stars drifting sideways at three distances, over a faint nebula
+            float2 q = fragCoord / iResolution.y;
+            float n = sin(q.x * 3.1 + iTime * 0.02) * sin(q.y * 2.3 - iTime * 0.015)
+                    + 0.5 * sin(q.x * 7.3 - q.y * 5.1 + iTime * 0.03);
+            n = clamp(n * 0.5 + 0.3, 0.0, 1.0);
+            pCol += half3(0.10, 0.03, 0.16) * half(n) + half3(0.0, 0.05, 0.10) * half(1.0 - n) * 0.6;
+
+            for (int L = 0; L < 3; L++) {
+                float near = float(L) / 2.0;
+                float cell = mix(26.0, 70.0, near) / sqrt(amount);
+                float2 p = fragCoord;
+                p.x += iTime * mix(4.0, 24.0, near);                 // parallax: near stars move faster
+                float2 id = floor(p / cell);
+                float2 f = p - id * cell;
+                float h = hash(id.x * 91.7 + id.y * 271.3 + float(L) * 19.1);
+                if (h > 0.6) continue;
+                float2 c = float2(4.0 + hash(h * 33.3) * (cell - 8.0), 4.0 + hash(h * 77.7) * (cell - 8.0));
+                float2 dv = f - c;
+                float d = length(dv);
+                float size = mix(0.6, 1.6, near) * (0.6 + hash(h * 5.1));
+                float twinkle = 0.75 + 0.25 * sin(iTime * (1.5 + h * 4.0) + h * 60.0);
+                float star = exp(-d * d / (size * size)) * twinkle;
+                // A small cross of light on the brightest
+                if (near > 0.9 && h < 0.12)
+                    star += (exp(-abs(dv.y) * 1.5) * exp(-abs(dv.x) * 0.35) + exp(-abs(dv.x) * 1.5) * exp(-abs(dv.y) * 0.35)) * 0.35 * twinkle;
+                float k = hash(h * 9.9);
+                half3 col = k < 0.25 ? half3(0.70, 0.80, 1.0) : k < 0.6 ? half3(1.0, 1.0, 1.0) : k < 0.85 ? half3(1.0, 0.92, 0.70) : half3(1.0, 0.65, 0.55);
+                pCol += col * half(star * mix(0.5, 1.0, near));
             }
         }
     }
