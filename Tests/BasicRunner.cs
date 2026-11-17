@@ -27,7 +27,9 @@ public static class BasicRunner
     public static string ProgramOf(string amosprojPath) =>
         JsonDocument.Parse(File.ReadAllText(amosprojPath)).RootElement.GetProperty("ProgramText").GetString()!;
 
-    public static RunResult Run(string program, double maxSeconds, IReadOnlyCollection<string>? keysDown = null, bool capture = false)
+    // input: the lines INPUT gets, in turn (then empty lines)
+    public static RunResult Run(string program, double maxSeconds, IReadOnlyCollection<string>? keysDown = null, bool capture = false,
+        IReadOnlyList<string>? input = null)
     {
         var result = new RunResult();
         var keys = new HashSet<string>(keysDown ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
@@ -49,6 +51,7 @@ public static class BasicRunner
         var cts = new CancellationTokenSource();
         var sw = Stopwatch.StartNew();
         string rawPrint = "";
+        int inputIndex = 0;
         var task = Task.Run(() => AmosRunner.ExecuteAsync(program,
             line =>
             {
@@ -68,7 +71,15 @@ public static class BasicRunner
             null, cts.Token,
             v => { lock (result) result.Variables = new Dictionary<string, object>(v, StringComparer.OrdinalIgnoreCase); },
             _ => Task.CompletedTask,
-            () => Task.FromResult("")));
+            () =>
+            {
+                lock (result)
+                {
+                    if (input == null || inputIndex >= input.Count) return Task.FromResult("");
+                    result.Prints.Add("> " + input[inputIndex]);
+                    return Task.FromResult(input[inputIndex++]);
+                }
+            }));
 
         try
         {
