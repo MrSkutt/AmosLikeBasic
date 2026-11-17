@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Platform.Storage;
@@ -165,7 +166,7 @@ public partial class MainWindow : Window
         var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
         if (clipboard != null)
         {
-            string? text = await clipboard.GetTextAsync();
+            string? text = await clipboard.TryGetTextAsync();
             if (!string.IsNullOrEmpty(text))
             {
                 // If there is a selection, overwrite it (both Insert and Replace are handled by Replace)

@@ -387,13 +387,13 @@ public class PatternView : Control
         e.Handled = true;
     }
 
-    protected override void OnGotFocus(GotFocusEventArgs e)
+    protected override void OnGotFocus(FocusChangedEventArgs e)
     {
         base.OnGotFocus(e);
         InvalidateVisual();
     }
 
-    protected override void OnLostFocus(Avalonia.Interactivity.RoutedEventArgs e)
+    protected override void OnLostFocus(FocusChangedEventArgs e)
     {
         base.OnLostFocus(e);
         ReleaseHeldNotes();

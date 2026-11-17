@@ -352,7 +352,7 @@ public partial class TrackerWindow : Window
             AcceptsReturn = true,
             Height = 150,
             FontFamily = new FontFamily("Menlo, Consolas, Courier New, monospace"),
-            Watermark = "NOISE +24\nPULSE 0\n-12\nP30"
+            PlaceholderText = "NOISE +24\nPULSE 0\n-12\nP30"
         };
         ToolTip.SetTip(table, "Each line is one tick: a wave (PULSE, SQUARE, TRIANGLE, SAWTOOTH, SINE, NOISE), " +
                               "semitones from the note (+12, -5) and/or pulse width (P30)");

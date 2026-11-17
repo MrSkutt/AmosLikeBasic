@@ -52,7 +52,7 @@ public class ArrayViewerWindow : Window
 
         var searchBox = new TextBox
         {
-            Watermark = "Filter by value or index...",
+            PlaceholderText = "Filter by value or index...",
             Margin = new Thickness(6, 4, 6, 4),
             FontSize = 12
         };
