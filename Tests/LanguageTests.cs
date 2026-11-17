@@ -61,6 +61,11 @@ public class LanguageTests
         Case("whole-number variable", "A%=7/2\nPRINT A%", "3"),
         Case("CONST", "CONST MAXV=5\nPRINT MAXV * 2", "10"),
         Case("STRING$", "PRINT STRING$(3, \"*\") & STRING$(2, 65)", "***AA"),
+        Case("MICROS and MILLIS without brackets", "WAIT 20\nPRINT MICROS > 15000 AND MILLIS > 15 AND MICROS() > 15000", "1"),
+        Case("WAIT with decimals", "T0 = MICROS\nFOR I = 1 TO 20\n WAIT 0.5\nNEXT I\nPRINT (MICROS - T0) >= 10000", "1"),
+        Case("CHR$ drops the decimals", "PRINT CHR$(65.7) & ASC(PETSCII$(205.9))", "A57549"),
+        Case("CHR$ beyond 255", "PRINT ASC(CHR$(9472))", "9472"),
+        Case("PETSCII$", "PRINT ASC(PETSCII$(176)) & \" \" & ASC(PETSCII$(65))", "57520 57409"),
         Case("SPACE$", "PRINT \"[\" & SPACE$(2) & \"]\"", "[  ]"),
 
         // DIM gives the highest index

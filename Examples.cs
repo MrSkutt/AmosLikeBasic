@@ -40,6 +40,7 @@ public static class Examples
             new Example("weather", "Snow and Rain", "The particle effects for snow and rain"),
             new Example("merry_christmas", "Merry Christmas", "A Christmas card with music, rasters and particles"),
             new Example("c64_colours", "C64 Colours", "The 16 colours of the palette in the C64 font"),
+            new Example("c64_maze", "C64 Maze", "The famous one-line maze from the Commodore 64"),
         }),
         new Group("Sound and music", new[]
         {

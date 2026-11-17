@@ -152,4 +152,6 @@ On Windows `Cmd` is `Ctrl` instead.
 
 **The C64 font has no Å, Ä or Ö.** With `FONT SET 16,16,"C64 PRO MONO"` they become dashes, and so do other letters with accents. Choose words without them, or another font.
 
+**C64 graphics characters come from PETSCII$.** `CHR$(176)` is the character 176 of Unicode, which the C64 font does not have, so it shows as a box. `PETSCII$(176)` gives the C64's own character 176. The PETSCII codes are the same as on a real C64.
+
 **Font text stays.** Text from `FONT PRINT` is redrawn every frame until it is removed with `FONT CLEAR`. Text that changes must therefore start with `FONT CLEAR` every lap.

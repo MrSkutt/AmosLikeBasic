@@ -33,7 +33,7 @@ Angles are given in **degrees**, not radians.
 | Function | Gives | Example | Result |
 |---|---|---|---|
 | `ASC(s$)` | the character code of the first character | `ASC("A")` | `65` |
-| `CHR$(code)` | the character with that code | `CHR$(65)` | `A` |
+| `CHR$(code)` | the character with that (Unicode) code; decimals are dropped | `CHR$(65)` | `A` |
 | `FIND(s$, find$ [, start])` | where find$ first appears, counted from **0**; –1 if it is not there | `FIND("PINECONE", "E")` | `3` |
 | `FINDLAST(s$, find$)` | where find$ last appears, from 0; –1 if it is not there | `FINDLAST("PINECONE", "E")` | `7` |
 | `HEX(x)` | the number in hexadecimal | `HEX(255)` | `FF` |
@@ -42,6 +42,7 @@ Angles are given in **degrees**, not radians.
 | `LEN(s$)` | the number of characters | `LEN("PINECONE")` | `8` |
 | `LOWER$(s$)` | small letters | `LOWER$("HELLO")` | `hello` |
 | `MID$(s$, start [, n])` | n characters from position start (from 1), or the rest | `MID$("PINECONE", 2, 3)` | `INE` |
+| `PETSCII$(code)` | the C64 character with that PETSCII code, for the C64 fonts: letters, and the graphics characters such as blocks, lines and card suits | `PETSCII$(115)` | ♥ |
 | `REPEAT$(s$, n)` | the text n times | `REPEAT$("=", 5)` | `=====` |
 | `REPLACE$(s$, old$, new$)` | replaces every old$ with new$ | `REPLACE$("cat", "c", "h")` | `hat` |
 | `RIGHT$(s$, n)` | the last n characters | `RIGHT$("PINECONE", 4)` | `CONE` |

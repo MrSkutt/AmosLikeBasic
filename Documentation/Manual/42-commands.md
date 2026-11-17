@@ -530,11 +530,17 @@ Writes a value in the text console and moves to the next line. `PRINT` with no v
 ### PRINTG
 
 ```text
-PRINTG [#layer,] value
+PRINTG [#layer,] value [; value | , value ...] [;]
 PRINTG [#layer,] AT column, row, value
+PRINTG WRAP ON | OFF
 ```
 
-Like `PRINT`, but writes in the graphics with the `TEXT` font and the `INKG` colour.
+Like `PRINT`, but writes in the graphics with the `TEXT` font and the `INKG` colour; `;` and `,` work as in `PRINT`. Text that reaches the right edge carries on on the next row, and at the bottom the text scrolls up, as on a C64; `PRINTG WRAP OFF` lets it run past the edge instead. With `FONT SET 16,16,"C64 PRO MONO"` the screen is 40 characters wide, and the classic C64 maze is one line:
+
+```basic
+FONT SET 16,16,"C64 PRO MONO"
+10 PRINTG PETSCII$(205.5 + RND(1));: GOTO 10
+```
 
 ### PROC
 

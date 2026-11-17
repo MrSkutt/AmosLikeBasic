@@ -85,7 +85,7 @@ public static partial class AmosRunner
         "FINDLAST", "HEX", "HIT", "HITBOX", "HITBOXGROUP", "HITCIRCLE", "HITCIRCLEGROUP", "HITGROUP",
         "INC", "INKEY$", "INSTR", "INT", "JOIN$", "JOYAXIS", "JOYSTATE", "KEYSTATE", "LAYERFADING",
         "LEFT$", "LEN", "LOG", "LOG10", "LOG2", "LOWER$", "MAX", "MICROS", "MID$", "MILLIS", "MIN",
-        "PLAYING", "REPEAT$", "REPLACE$", "RIGHT$", "RND", "SGN", "SIN", "SPACE$", "SPLIT$", "SQR", "STR$", "STRING$", "TAN",
+        "PETSCII$", "PLAYING", "REPEAT$", "REPLACE$", "RIGHT$", "RND", "SGN", "SIN", "SPACE$", "SPLIT$", "SQR", "STR$", "STRING$", "TAN",
         "TICKS", "TILE", "TRACKPLAYING", "TRACKPOS", "TRACKROW", "TRIM$", "UPPER$", "VAL", "WORD$"
     };
 
@@ -197,11 +197,18 @@ public static partial class AmosRunner
         {
             t.SkipWs();
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return new InkeyNode();
-            if (id.Equals("TICKS", StringComparison.OrdinalIgnoreCase))
+            // TICKS, MILLIS and MICROS work with or without ()
+            if (id.Equals("TICKS", StringComparison.OrdinalIgnoreCase) || id.Equals("MILLIS", StringComparison.OrdinalIgnoreCase))
             {
                 t.TryConsume('(');
                 t.TryConsume(')');
                 return new TicksNode();
+            }
+            if (id.Equals("MICROS", StringComparison.OrdinalIgnoreCase))
+            {
+                t.TryConsume('(');
+                t.TryConsume(')');
+                return new TicksNode(1000.0);
             }
 
             if (t.TryConsume('('))
@@ -276,11 +283,13 @@ public static partial class AmosRunner
 
     private sealed class TicksNode : ExprNode
     {
+        private readonly double _scale;
+        public TicksNode(double scale = 1.0) => _scale = scale;   // 1 for milliseconds, 1000 for microseconds
         public override object Eval(in EvalContext c)
         {
             if (_programStartTime == DateTime.MinValue)
                 _programStartTime = DateTime.UtcNow;
-            return (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
+            return (DateTime.UtcNow - _programStartTime).TotalMilliseconds * _scale;
         }
     }
 
@@ -553,7 +562,8 @@ public static partial class AmosRunner
         ["UPPER$"] = new(1, 1, (a, _) => ValueToString(a[0]).ToUpperInvariant()),
         ["LOWER$"] = new(1, 1, (a, _) => ValueToString(a[0]).ToLowerInvariant()),
         ["TRIM$"] = new(1, 1, (a, _) => ValueToString(a[0]).Trim()),
-        ["CHR$"] = new(1, 1, (a, _) => ((char)Math.Clamp(Round(a[0]), 0, 255)).ToString()),
+        ["CHR$"] = new(1, 1, (a, _) => CharOf(Num(a[0]))),
+        ["PETSCII$"] = new(1, 1, (a, _) => PetsciiOf(Num(a[0]))),
         ["ASC"] = new(1, 1, (a, _) => { var str = ValueToString(a[0]); return str.Length > 0 ? (double)str[0] : 0.0; }),
         ["VAL"] = new(1, 1, (a, _) =>
         {

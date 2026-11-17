@@ -681,6 +681,9 @@ public sealed class AmosGraphics
         CursorY = Math.Clamp(y, 0, TextRows - 1);
     }
 
+    // PRINTG WRAP: text that reaches the right edge carries on on the next row, as on a C64
+    public bool TextWrap { get; set; } = true;
+
     public void ConsolePrint(string text, bool newLine = true)
     {
         // Split into lines to handle \n correctly
@@ -689,10 +692,22 @@ public sealed class AmosGraphics
         for (int i = 0; i < lines.Length; i++)
         {
             string line = lines[i];
-            if (line.Length > 0)
+            if (!TextWrap || TextCols <= 0)
             {
-                // Draw the text graphically at the current position
-                DrawStringInternal(line);
+                if (line.Length > 0) DrawStringInternal(line);
+            }
+            else
+            {
+                // As much as fits on the row, then on to the next row (which scrolls at the bottom)
+                while (line.Length > 0)
+                {
+                    int room = TextCols - CursorX;
+                    if (room <= 0) { ConsoleNewLine(); continue; }
+                    var part = line.Length > room ? line[..room] : line;
+                    DrawStringInternal(part);
+                    line = line[part.Length..];
+                    if (CursorX >= TextCols) ConsoleNewLine();
+                }
             }
 
             // If it is the last part and newLine is false, no line break (semicolon in BASIC)

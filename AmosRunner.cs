@@ -109,12 +109,39 @@ public static partial class AmosRunner
         return sb.ToString();
     }
     
+    // CHR$: the character with a Unicode code (not only 0 - 255, so the C64 font's own characters can be reached)
+    private static string CharOf(double value)
+    {
+        int code = (int)Math.Floor(value);   // as in BASIC: CHR$(65.7) is "A"
+        code = Math.Clamp(code, 0, 0x10FFFF);
+        return code is >= 0xD800 and <= 0xDFFF ? "" : char.ConvertFromUtf32(code);
+    }
+
+    // PETSCII$: a C64 character by its PETSCII code. The C64 fonts keep the C64's characters, graphics
+    // included, at U+E000 + the code ("Direct PETSCII"); ordinary letters are there too.
+    private static string PetsciiOf(double code) => ((char)(0xE000 + ((int)Math.Floor(code) & 0xFF))).ToString();
+
     // STRING$: a character repeated; the character is the first of a text, or a character code
     private static string StringOf(object count, object ch)
     {
         int n = (int)Math.Round(Convert.ToDouble(count, CultureInfo.InvariantCulture));
         string c = ch is string s ? (s.Length > 0 ? s[..1] : "") : ((char)(int)Math.Round(Convert.ToDouble(ch, CultureInfo.InvariantCulture))).ToString();
         return n <= 0 || c.Length == 0 ? "" : new string(c[0], n);
+    }
+
+    // WAIT milliseconds, decimals included. Task.Delay alone rounds to whole milliseconds and often
+    // sleeps longer (up to ~15 ms on Windows), so WAIT 0.5 and WAIT 0.6 differed a lot: it sleeps
+    // most of the time and then waits the last couple of milliseconds out against the clock.
+    private static async Task PreciseWaitAsync(double ms, CancellationToken token)
+    {
+        if (ms <= 0) return;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        if (ms > 3) await Task.Delay(TimeSpan.FromMilliseconds(ms - 2), token);
+        while (sw.Elapsed.TotalMilliseconds < ms)
+        {
+            token.ThrowIfCancellationRequested();
+            Thread.SpinWait(20);
+        }
     }
 
     private const int PrintZone = 14;   // PRINT A, B: B starts at the next multiple of 14 characters
@@ -1606,17 +1633,30 @@ public static partial class AmosRunner
                             }
                             else
                             {
-                                // Vanlig PRINT
-                                // Check whether it ends with , to avoid a newline
-                                bool newLine = true;
-                                if (printArg.EndsWith(","))
+                                var upperArg = printArg.ToUpperInvariant();
+                                if (upperArg is "WRAP ON" or "WRAP 1" or "WRAP TRUE")
+                                    graphics.TextWrap = true;
+                                else if (upperArg is "WRAP OFF" or "WRAP 0" or "WRAP FALSE")
+                                    graphics.TextWrap = false;
+                                else
                                 {
-                                    newLine = false;
-                                    printArg = printArg[..^1];
+                                    // As PRINT: A; B joins, A, B goes to the next tab stop, a ; or , at the end
+                                    // stays on the same row
+                                    var printed = new StringBuilder();
+                                    char lastSep = '\0';
+                                    foreach (var (expr, sep) in SplitPrintItems(printArg))
+                                    {
+                                        if (expr.Length > 0)
+                                            printed.Append(ValueToString(EvalValue(expr, vars, ln, getInkey, isKeyDown, graphics)));
+                                        if (sep == ',')
+                                        {
+                                            int column = graphics.CursorX + printed.Length;
+                                            printed.Append(' ', PrintZone - column % PrintZone);
+                                        }
+                                        lastSep = sep;
+                                    }
+                                    graphics.ConsolePrint(printed.ToString(), lastSep is not (';' or ','));
                                 }
-
-                                var valToPrint = EvalValue(printArg, vars, ln, getInkey, isKeyDown, graphics);
-                                graphics.ConsolePrint(ValueToString(valToPrint), newLine);
                             }
                             
                             if (savedScreen.HasValue)
@@ -2294,8 +2334,8 @@ public static partial class AmosRunner
                             }
                             else
                             {
-                                int ms = Math.Max(0, EvalInt(arg, vars, ln, getInkey, isKeyDown, graphics));
-                                await Task.Delay(ms, token);
+                                double ms = EvalDouble(arg, vars, ln, getInkey, isKeyDown, graphics);
+                                await PreciseWaitAsync(ms, token);
                             }
                             break;
                         case "ANIM":
@@ -4381,6 +4421,10 @@ public static partial class AmosRunner
                 }
                 catch (Exception ex)
                 {
+                    // The program was stopped (STOP, a new run, the window closed): end quietly, also
+                    // under ON ERROR RESUME NEXT
+                    if (ex is OperationCanceledException && token.IsCancellationRequested) return;
+
                     // Keep the error information in BASIC variables so that you can check what happened
                     setVar("ERR$", ex.Message);
                     setVar("ERL", ln);
@@ -4401,7 +4445,6 @@ public static partial class AmosRunner
                     else
                     {
                         // BREAK (the default): report and end
-                        if (ex.Message == "A task was canceled.") {return;}
                         await appendLineAsync($"Runtime Error at line {ln}: {ex.Message}");
                         // Rethrow or return to stop completely
                         return;
@@ -4441,7 +4484,8 @@ public static partial class AmosRunner
             if (q) continue;
             if (l[i] == ':') { stmtStart = i + 1; continue; }
             if (l[i] != ';') continue;
-            bool inPrint = IndexOfWordOutsideQuotes(l[stmtStart..i], "PRINT") >= 0;   // also IF X THEN PRINT A; B
+            var stmt = l[stmtStart..i];
+            bool inPrint = IndexOfWordOutsideQuotes(stmt, "PRINT") >= 0 || IndexOfWordOutsideQuotes(stmt, "PRINTG") >= 0;   // also IF X THEN PRINT A; B
             if (inPrint && i > 0 && l[i - 1] != ' ' && l[i - 1] != '\t') continue;
             return l[..i].Trim();
         }
@@ -4601,7 +4645,9 @@ public static partial class AmosRunner
         if (t.TryReadIdentifier(out var id)) {
             t.SkipWs();
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
-            if (id.Equals("TICKS", StringComparison.OrdinalIgnoreCase)) 
+            // TICKS, MILLIS and MICROS work with or without ()
+            if (id.Equals("TICKS", StringComparison.OrdinalIgnoreCase) || id.Equals("MILLIS", StringComparison.OrdinalIgnoreCase)
+                || id.Equals("MICROS", StringComparison.OrdinalIgnoreCase))
             {
                 t.TryConsume('(');
                 t.TryConsume(')');
@@ -4609,7 +4655,8 @@ public static partial class AmosRunner
                 if (_programStartTime == DateTime.MinValue)
                     _programStartTime = DateTime.UtcNow;
     
-                return (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
+                double msNow = (DateTime.UtcNow - _programStartTime).TotalMilliseconds;
+                return id.Equals("MICROS", StringComparison.OrdinalIgnoreCase) ? msNow * 1000.0 : msNow;
             }
             if (t.TryConsume('(')) {
                 if (v.ContainsKey("__functions__"))
@@ -4634,8 +4681,12 @@ public static partial class AmosRunner
                     object val = ParseExpr(ref t, v, ln, gk, ikd, g); t.TryConsume(')'); return ValueToString(val);
                 }
                 if (id.Equals("CHR$", StringComparison.OrdinalIgnoreCase)) {
-                    int ascii = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
-                    t.TryConsume(')'); return ((char)Math.Clamp(ascii, 0, 255)).ToString();
+                    double code = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
+                    t.TryConsume(')'); return CharOf(code);
+                }
+                if (id.Equals("PETSCII$", StringComparison.OrdinalIgnoreCase)) {
+                    double code = Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture);
+                    t.TryConsume(')'); return PetsciiOf(code);
                 }
                 if (id.Equals("ASC", StringComparison.OrdinalIgnoreCase)) {
                     object val = ParseExpr(ref t, v, ln, gk, ikd, g);

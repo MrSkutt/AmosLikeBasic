@@ -91,3 +91,30 @@ public class RasterColourTests
         Near(px[0], 255, 0, 0);
     }
 }
+
+// PRINTG wraps at the right edge like a C64, unless PRINTG WRAP OFF
+public class PrintgWrapTests
+{
+    [AvaloniaFact]
+    public void Text_carries_on_on_the_next_row()
+    {
+        var g = new AmosGraphics();
+        g.Screen(640, 480);
+        g.ConfigureText(16, 16, "C64 Pro Mono");   // 40 columns
+        g.ConsolePrint(new string('*', 45), newLine: false);
+        Assert.Equal(1, g.CursorY);
+        Assert.Equal(5, g.CursorX);
+    }
+
+    [AvaloniaFact]
+    public void Wrap_off_runs_past_the_edge()
+    {
+        var g = new AmosGraphics();
+        g.Screen(640, 480);
+        g.ConfigureText(16, 16, "C64 Pro Mono");
+        g.TextWrap = false;
+        g.ConsolePrint(new string('*', 45), newLine: false);
+        Assert.Equal(0, g.CursorY);
+        Assert.Equal(45, g.CursorX);
+    }
+}
