@@ -1,8 +1,7 @@
 name: Tests
 
 on:
-  push:
-    branches: [main]
+  push:            # every branch, so that work on a branch is tested on Mac and Windows too
   pull_request:
 
 jobs:
