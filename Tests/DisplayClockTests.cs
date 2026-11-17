@@ -48,6 +48,24 @@ public class DisplayClockTests : IDisposable
         Assert.All(Gaps(frames).Skip(30), g => Assert.InRange(g, 2, 3));
     }
 
+    [Fact]
+    public void A_second_call_for_the_same_refresh_is_not_a_new_refresh()
+    {
+        Play(1000.0 / 60, 60);                       // the refresh rate is known: 16.7 ms
+        double last = 1000 + 59 * 1000.0 / 60;
+        Assert.True(DisplayClock.IsDuplicateRefresh(last + 0.1));
+        Assert.False(DisplayClock.IsDuplicateRefresh(last + 16.7));
+    }
+
+    [Fact]
+    public void A_slow_start_does_not_make_refreshes_count_as_duplicates()
+    {
+        Play(1000.0 / 30, 40);                       // the first frames came at 30 per second
+        double last = 1000 + 39 * 1000.0 / 30;
+        Assert.False(DisplayClock.IsDuplicateRefresh(last + 16.7));   // a normal 60 Hz refresh still counts
+        Assert.False(DisplayClock.IsDuplicateRefresh(last + 4.2));    // even at 240 Hz
+    }
+
     [Theory]
     [InlineData(1000.0 / 60, 1)]
     [InlineData(1000.0 / 59.94, 1)]

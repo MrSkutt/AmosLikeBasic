@@ -47,6 +47,20 @@ public static class DisplayClock
     // True while a game window reports its refreshes
     public static bool Active { get { lock (Gate) return Clock.Elapsed.TotalMilliseconds - _lastTickMs < StaleMs; } }
 
+    // Avalonia now and then calls the refresh callback twice for the same screen refresh, a fraction
+    // of a millisecond apart. Counting both let a quick program finish two frames in one refresh, so
+    // one was never shown and the picture seemed to stop and jump. A refresh within DuplicateMs of
+    // the last one is the same refresh. (A fixed limit: one taken from the measured refresh rate could
+    // lock itself at half the rate when a slow start made the measured rate low.)
+    private const double DuplicateMs = 3;   // well below the 4.2 ms of a 240 Hz screen
+
+    public static bool IsDuplicateRefresh() => IsDuplicateRefresh(Clock.Elapsed.TotalMilliseconds);
+
+    internal static bool IsDuplicateRefresh(double nowMs)
+    {
+        lock (Gate) return nowMs - _lastTickMs < DuplicateMs;
+    }
+
     // Called by the game window at every screen refresh (on the UI thread)
     public static void Tick()
     {

@@ -547,7 +547,7 @@ public sealed class AmosGpuView : Control
     private void OnRefresh(TimeSpan _)
     {
         if (_topLevel == null) return;               // removed from the window
-        if (Shown.Count > 0 && Shown[^1] == this)
+        if (Shown.Count > 0 && Shown[^1] == this && !DisplayClock.IsDuplicateRefresh())
         {
             // Lock in the frame this refresh shows before WAIT VBL lets the program go on
             if (Graphics != null && Graphics.LatchShownFrame()) InvalidateVisual();
