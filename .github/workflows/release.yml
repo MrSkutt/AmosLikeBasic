@@ -28,7 +28,7 @@ jobs:
           dotnet-version: 9.0.x
 
       - name: Test
-        run: dotnet test Tests/AmosLikeBasic.Tests.csproj -c Release
+        run: dotnet test Tests/AmosLikeBasic.Tests.csproj -c Release --logger "console;verbosity=normal"
 
       - name: Build the downloads
         run: python3 Tools/build_release.py "${{ github.event.inputs.version || github.ref_name }}"

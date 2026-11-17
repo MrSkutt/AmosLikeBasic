@@ -66,8 +66,9 @@ public class DisplayClockTests : IDisposable
         DisplayClock.StartRun();
         var sw = System.Diagnostics.Stopwatch.StartNew();
         for (int i = 0; i < 30; i++) await DisplayClock.WaitFrameAsync(CancellationToken.None);
-        // 30 frames = 0.5 s; generous limits since the test machines are busy
-        Assert.InRange(sw.Elapsed.TotalMilliseconds, 400, 900);
+        // 30 frames = 0.5 s. It must wait (not run as fast as it can), but a busy build machine can
+        // oversleep a lot, so the upper limit is loose.
+        Assert.InRange(sw.Elapsed.TotalMilliseconds, 400, 3000);
     }
 
     [Fact]
