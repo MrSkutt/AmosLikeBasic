@@ -105,13 +105,13 @@ def song(title, speed, tempo, instruments, patterns, order, channels=8, level=1.
 def acid_sunrise():
     I = [
         load("Bass", "Acid Bass"),                                    # 1
-        load("Lead", "Supersaw Lead", Volume=0.16),                   # 2
-        load("Pad", "Warm Pad", Volume=0.12),                         # 3
-        load("Drums", "808 Kick", Volume=0.45),                       # 4
-        load("Drums", "Clap"),                                        # 5
-        load("Drums", "Closed Hihat"),                                # 6
-        load("Drums", "Open Hihat"),                                  # 7
-        load("FX", "Sci-Fi Bleeps", Volume=0.08),                     # 8
+        load("Lead", "Supersaw Lead", Volume=0.16, EchoMix=25, EchoSyncRows=3, EchoFeedback=35),   # 2
+        load("Pad", "Stereo Pad", Volume=0.12),                       # 3  drifts between the sides
+        load("Drums", "808 Kick", Volume=0.3),                        # 4
+        load("Drums", "Clap", Pan=-20),                               # 5
+        load("Drums", "Closed Hihat", Pan=35),                        # 6
+        load("Drums", "Open Hihat", Pan=-35),                         # 7
+        load("FX", "Sci-Fi Bleeps", Volume=0.08, Pan=60),             # 8
         load("Bass", "Wobble Bass"),                                  # 9
     ]
     roots = ["A-1", "F-1", "C-2", "G-1"]
@@ -193,12 +193,13 @@ def deep_space():
     I = [
         load("Pad", "Space Drone", Volume=0.11),                      # 1
         load("Pad", "Glass Pad", Volume=0.13),                        # 2
-        load("Pluck", "Music Box", Volume=0.22),                      # 3
+        load("Pluck", "Music Box", Volume=0.22, EchoMix=30, EchoSyncRows=6, EchoFeedback=40,
+             Lfo2={"Target": "Pan", "Shape": "Sine", "Depth": 60, "Rate": 0.15, "SyncRows": 0, "Delay": 0, "Retrigger": False}),   # 3
         load("Bass", "Sub Bass", Volume=0.3),                         # 4
         load("FX", "Ufo", Volume=0.14),                               # 5
         load("FX", "Wind", Volume=0.12),                              # 6
-        load("Percussion", "Shaker", Volume=0.12),                    # 7
-        load("Percussion", "Wood Block", Volume=0.25),                # 8
+        load("Percussion", "Shaker", Volume=0.12, Pan=40),            # 7
+        load("Percussion", "Wood Block", Volume=0.25, Pan=-40),       # 8
         load("Lead", "Sine Whistle", Volume=0.2),                     # 9
     ]
     roots = ["D-2", "A#1", "F-2", "C-2"]
@@ -263,13 +264,13 @@ def deep_space():
 def pixel_rush():
     I = [
         load("Chip", "C64 Lead", Volume=0.17),                        # 1
-        load("Chip", "Minor Chord", Volume=0.09),                     # 2
-        load("Chip", "Major Chord", Volume=0.09),                     # 3
+        load("Chip", "Minor Chord", Volume=0.09, Pan=-30),            # 2
+        load("Chip", "Major Chord", Volume=0.09, Pan=-30),            # 3
         load("Chip", "NES Triangle", Volume=0.3),                     # 4
         load("Drums", "Kick"),                                        # 5
         load("Drums", "Snare"),                                       # 6
-        load("Drums", "Closed Hihat", Volume=0.12),                   # 7
-        load("Chip", "Trill", Volume=0.12),                           # 8
+        load("Drums", "Closed Hihat", Volume=0.12, Pan=30),           # 7
+        load("Chip", "Trill", Volume=0.12, Pan=40),                   # 8
         load("FX", "Power Up", Volume=0.12),                          # 9
         load("Bass", "C64 Bass", Volume=0.2),                         # 10
     ]
@@ -303,6 +304,7 @@ def pixel_rush():
     arp(intro)
     drums(intro, 5, 7, "x.x.x.x.x.x.x.x.")
     intro.play(48, 7, n("E-5"), 9)
+    intro.off(58, 7)
 
     run = Pattern(8)
     arp(run)
@@ -334,6 +336,7 @@ def pixel_rush():
     for i in range(56, 64):
         bridge.put(i, 4, "C-4", 6)   # snare roll
     bridge.play(48, 7, n("E-5"), 9)
+    bridge.off(58, 7)
 
     return song("Pixel Rush", 6, 150, I, [intro, run, verse, chorus, bridge], [0, 1, 2, 3, 2, 3, 4, 3], level=0.66)
 

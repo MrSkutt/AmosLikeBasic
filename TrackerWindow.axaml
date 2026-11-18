@@ -24,7 +24,7 @@
                 <Button Content="PLAY SONG" Classes="amos-button" Click="PlaySong_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F5"/>
                 <Button Content="PLAY PATTERN" Classes="amos-button" Click="PlayPattern_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F6"/>
                 <Button Content="STOP" Classes="amos-button" Click="Stop_OnClick" Focusable="False" Margin="0,0,14,0" ToolTip.Tip="Esc"/>
-                <ToggleButton Name="EditToggle" Content="EDIT" Classes="amos-button" IsChecked="True" Focusable="False" Margin="0,0,4,0"
+                <ToggleButton Name="EditToggle" Content="EDIT" Classes="amos-button" IsChecked="False" Focusable="False" Margin="0,0,4,0"
                               Click="EditToggle_OnClick" ToolTip.Tip="Space"/>
                 <CheckBox Name="FollowCheck" Content="Follow" IsChecked="True" Focusable="False" Margin="4,0,14,0" Foreground="{DynamicResource AmosLabelFg}"/>
 

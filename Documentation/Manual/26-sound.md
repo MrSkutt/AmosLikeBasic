@@ -211,6 +211,23 @@ Two special effects from the SID chip in the C64. Both link one channel to anoth
 
 `PLAY RING channel, 0` and `PLAY SYNC channel, 0` turn them off. The source channel must be playing a note for anything to happen.
 
+### A second oscillator, LFOs, echo and stereo
+
+The same sound tools as the tracker's instruments work with `PLAY` too:
+
+```basic
+PLAY WAVE 1, "Sawtooth"
+PLAY OSC2 1, "Sawtooth", 0, 10, 50          ; two saws 10 cents apart: a fat lead
+PLAY FILTER 1, "LOW", 1500, 40
+PLAY LFO 1, 1, "CUTOFF", "TRIANGLE", 18, 2  ; the filter opens and closes twice a second
+PLAY ECHO 1, 30, 330, 45                    ; an echo a third of a second later
+PLAY PAN 2, -60                             ; channel 2 to the left
+PLAY MUSIC 1, "A3:4 C4 E4 A4"
+WAIT MUSIC
+```
+
+`PLAY OSC2` mixes in a second oscillator, tuned in semitones and cents from the note. `PLAY LFO` lets LFO 1 or 2 move the pitch, volume, cutoff, resonance, pulse width, oscillator 2 or the pan, with depth in cents (pitch), semitones (cutoff) or percent. `PLAY ECHO` repeats the sound, and `PLAY PAN` places the channel from left (-100) to right (100). The LFOs start again on every note. In a melody they are written `{OSC2 SAW 0 10 50}`, `{LFO 1 CUTOFF TRIANGLE 18 2}`, `{ECHO 30 330 45}` and `{PAN -60}`; `{LFO 1 OFF}`, `{OSC2 OFF}` and `{ECHO 0}` turn them off.
+
 ### Effects in the notes
 
 The settings above can also go *inside* the note string, in braces `{ }`. Then the sound changes right there in the melody, without your program having to do anything while the song plays. The effects take no time, so the rhythm is not affected:
@@ -244,6 +261,10 @@ The effects have the same names and values as the `PLAY` commands, but without t
 | `{GLIDE 50}` | gliding between notes |
 | `{BEND 2}` | moves the pitch a number of semitones |
 | `{RING 2}`, `{SYNC 2}` | ring modulation and sync with another channel |
+| `{OSC2 SAW 0 10 50}` | the second oscillator: wave, semitones, cents and mix; `{OSC2 OFF}` turns it off |
+| `{LFO 1 CUTOFF TRIANGLE 18 2}` | LFO 1 or 2: target, wave, depth, rate in Hz and delay in ms; `{LFO 1 OFF}` |
+| `{ECHO 30 330 45}` | echo: mix, time and feedback; `{ECHO 0}` turns it off |
+| `{PAN -60}` | where in stereo, -100 to 100 |
 
 A common trick in C64 music is to change chords with arpeggio every bar. Then a single channel is enough for a whole chord accompaniment:
 
@@ -331,7 +352,7 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **Saving as a sound file.** **WAV** in the toolbar saves the song as a WAV file, to use the music in a video, send it to a friend or play it anywhere. It is made much faster than the song plays, and it is the song as you hear it: muted channels are left out, so you can also save the drums or the melody on their own.
 
-**Edit.** `Space` turns edit mode on and off. When it is off you can play on the piano keys without anything being written in the pattern, for example to try out an instrument. The cursor row is red while edit is on. If the song is playing, `Space` stops it instead.
+**Edit.** `Space` (or **EDIT** in the toolbar) turns edit mode on and off. It is off when the tracker opens, so the keys only play until you turn it on. When it is off you can play on the piano keys without anything being written in the pattern, for example to try out an instrument. The cursor row is red while edit is on. If the song is playing, `Space` stops it instead.
 
 **Selecting and changing.** Hold `Shift` and move the cursor, or drag with the mouse, to select a block. `Cmd+C`, `Cmd+X` and `Cmd+V` copy, cut and paste (`Ctrl` on Windows). `Cmd+↑` and `Cmd+↓` move the notes a semitone, with `Shift` an octave. `Cmd+I` (or `Insert`) inserts an empty row and `Cmd+Backspace` removes the row, in the cursor's channel or with `Shift` in all channels. `Cmd+Z` undoes and `Cmd+Shift+Z` redoes.
 
@@ -395,8 +416,9 @@ The effect is a letter or digit and two hex digits. Most only apply on their own
 | `Gxx` | filter frequency: 00 is 20 Hz, 80 about 640 Hz and FF 18 000 Hz; turns on low-pass if the filter is off |
 | `Hxx` | filter resonance, 00 – FF |
 | `Ixx` | pulse width, 80 is 50 % |
+| `8xx` | pan: 00 left, 80 the middle, FF right |
 
-`G`, `H` and `I` stay on the channel until it changes instrument, so a filter can open slowly over many notes.
+`G`, `H`, `I` and `8` stay on the channel until it changes instrument, so a filter can open slowly over many notes.
 
 ### Instruments
 
@@ -420,6 +442,10 @@ That table is a kick drum: a short click of square wave and then a triangle wave
 
 A tracker instrument can have a **second oscillator** that is mixed with the first. Choose its **Wave** (Off turns it off), how many **Semitones** above or below the note it plays, a **Detune** in cents and how much of it is heard (**Mix**). Two sawtooth waves a few cents apart (Detune 5 – 12) give the fat, swirling sound of a classic synth lead; +7 or +12 semitones gives a fifth or an octave on top of every note. In the file it is `"Osc2Wave": "Sawtooth", "Osc2Semitones": 0, "Osc2Detune": 8, "Osc2Mix": 50`.
 
+#### Stereo
+
+The synth plays in stereo. **PAN** under the amp envelope places an instrument from left (-100) to right (100); the middle (0) sounds the same on both sides, just as before. Effect `8xx` pans a channel in the song as in ProTracker, and an LFO with **Pan** as its target moves the sound from side to side. The WAV file is in stereo too. In the file it is `"Pan": -40`.
+
 #### Echo
 
 **ECHO** makes the sound come back after a while, a little quieter each time, like a voice in a cave or the classic tape echo. **Mix** is how loud the echo is (0 is off), **Time** how long it takes to come back (up to 2000 ms), and **Feedback** how much of each echo comes back again: 0 gives one echo, 70 a long trail. **Sync rows** above 0 sets the time in rows of the song instead, so the echo falls on the beat: 3 rows gives the dotted rhythm that so much synth music uses. The echo goes on after the note has ended. In the file it is `"EchoMix": 35, "EchoTime": 300, "EchoFeedback": 45, "EchoSyncRows": 3`.
@@ -437,6 +463,7 @@ An **LFO** (low frequency oscillator) is a slow wave that moves one setting up a
 | Pulse width | % | the moving, chorus-like pulse sound of the C64 |
 | Osc 2 pitch | cents | oscillator 2 swaying against oscillator 1 |
 | Osc 2 mix | % | the sound shifting between the two oscillators |
+| Pan | % | the sound moving between the left and right speaker (auto-pan) |
 
 The waves are sine, triangle, square, saw up, saw down and **random**, which jumps to a new value every period, the bubbling computer sound of old science fiction. **Rate** is the speed in Hz. **Sync rows** above 0 ties the speed to the song instead: 4 means one period every four rows, so the effect pulses in time with the music even when the tempo changes. **Delay** lets the LFO grow in over that many milliseconds, so that a long note starts straight and then gets vibrato. **Restart on note** starts the wave from the beginning on every note; turned off, it runs on freely. The graph shows the wave, the delay and what it moves.
 

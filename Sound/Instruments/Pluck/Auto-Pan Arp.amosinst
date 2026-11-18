@@ -1,0 +1,26 @@
+{
+  "Name": "Auto-Pan Arp",
+  "Wave": "Pulse",
+  "Volume": 0.16,
+  "PulseWidth": 30,
+  "Attack": 0,
+  "Decay": 400,
+  "Sustain": 30,
+  "Release": 150,
+  "Table": [
+    "0",
+    "+7",
+    "+12",
+    "+7"
+  ],
+  "TableLoop": 0,
+  "Lfo1": {
+    "Target": "Pan",
+    "Shape": "Triangle",
+    "Depth": 80,
+    "Rate": 4,
+    "SyncRows": 4,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

@@ -31,7 +31,7 @@ public class PatternView : Control
     public int Octave { get; set; } = 4;
     public int EditStep { get; set; } = 1;
     public int Instrument { get; set; } = 1;   // the instrument new notes get
-    public bool EditMode { get; set; } = true;
+    public bool EditMode { get; set; }   // off when the tracker opens: the keys play without writing
     public int PlayRow { get; set; } = -1;     // the row being played, -1 = none
     public bool[] Muted { get; } = new bool[TrackerSong.MaxChannels];
 

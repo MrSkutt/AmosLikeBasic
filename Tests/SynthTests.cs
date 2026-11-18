@@ -336,4 +336,97 @@ public class SynthTests : IDisposable
         Assert.Equal(3, S.ChannelWithInstrument(2));
         Assert.Equal(0, S.ChannelWithInstrument(5));
     }
+
+    // Loudness of the left and right side of a stereo buffer between two times
+    private static (double left, double right) Sides(float[] b, double t0, double t1)
+    {
+        double l = 0, r = 0;
+        int a = (int)(t0 * SR), e = (int)(t1 * SR);
+        for (int i = a; i < e; i++) { l += b[2 * i] * b[2 * i]; r += b[2 * i + 1] * b[2 * i + 1]; }
+        return (Math.Sqrt(l / (e - a)), Math.Sqrt(r / (e - a)));
+    }
+
+    private static float[] RenderStereo(double seconds)
+    {
+        var buffer = new float[(int)(seconds * SR) * 2];
+        S.RenderStereo(buffer);
+        return buffer;
+    }
+
+    [Fact]
+    public void InTheMiddleBothSidesAreTheOldSound()
+    {
+        S.TrackPlay(SongWith(""), loop: false);
+        var b = RenderStereo(0.2);
+        var (l, r) = Sides(b, 0.05, 0.2);
+        Assert.True(l > 0.1);
+        Assert.Equal(l, r, 4);
+    }
+
+    [Fact]
+    public void PanToTheRightLeavesTheLeftSideQuiet()
+    {
+        S.TrackPlay(SongWith("\"Pan\":100"), loop: false);
+        var (l, r) = Sides(RenderStereo(0.2), 0.05, 0.2);
+        Assert.True(r > 0.1);
+        Assert.True(l < r * 0.01);
+    }
+
+    [Fact]
+    public void Effect8PansAsInProTracker()
+    {
+        // 800 is hard left
+        S.TrackPlay(SongWith("", "A-4 01 800", "--- .. ...", "--- .. ..."), loop: false);
+        var (l, r) = Sides(RenderStereo(0.2), 0.05, 0.2);
+        Assert.True(l > 0.1);
+        Assert.True(r < l * 0.02);
+    }
+
+    [Fact]
+    public void PanLfoMovesTheSoundFromSideToSide()
+    {
+        // A square LFO at 2 Hz, full depth: right for 0.25 s, then left
+        S.TrackPlay(SongWith("\"Lfo1\":{\"Shape\":\"Square\",\"Target\":\"Pan\",\"Rate\":2,\"Depth\":100}"), loop: false);
+        var b = RenderStereo(0.5);
+        var first = Sides(b, 0.03, 0.22);
+        var second = Sides(b, 0.28, 0.47);
+        Assert.True(first.right > first.left * 10);
+        Assert.True(second.left > second.right * 10);
+    }
+
+    [Fact]
+    public void PlayOsc2LfoEchoAndPanWorkInAMelody()
+    {
+        // Oscillator 2 an octave up takes the whole sound, panned right
+        S.SetWave(1, "SINE");
+        S.PlayMusic(1, "{OSC2 SINE 12 0 100; PAN 100} A4:1");
+        var b = RenderStereo(0.3);
+        var mono = new float[b.Length / 2];
+        for (int i = 0; i < mono.Length; i++) mono[i] = b[2 * i + 1];
+        Assert.InRange(Semitones(Pitch(mono, 0.05, 0.25), 440), 11.9, 12.1);
+        var (l, r) = Sides(b, 0.05, 0.25);
+        Assert.True(l < r * 0.01);
+    }
+
+    [Fact]
+    public void PlayLfoCommandMovesThePitch()
+    {
+        S.SetWave(1, "SINE");
+        S.SetLfo(1, 1, "PITCH", "SQUARE", 100, 2);
+        S.PlayMusic(1, "A4:1");
+        var b = Render(0.5);
+        Assert.InRange(Semitones(Pitch(b, 0.03, 0.22), 440), 0.9, 1.1);
+        Assert.InRange(Semitones(Pitch(b, 0.28, 0.47), 440), -1.1, -0.9);
+    }
+
+    [Fact]
+    public void PlayEchoRepeatsTheSound()
+    {
+        S.SetWave(1, "SINE");
+        S.SetAdsr(1, 0, 30, 0, 10);
+        S.SetEcho(1, 50, 200, 0);
+        S.PlayMusic(1, "A4:16");
+        var b = Render(0.5);
+        Assert.True(Loudness(b, 0.2, 0.23) > Loudness(b, 0.12, 0.18) * 5);
+    }
 }

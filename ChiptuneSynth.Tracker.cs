@@ -46,6 +46,7 @@ namespace AmosLikeBasic
             public LfoSettings?[] Lfos = NoLfos;
             public double EchoTime = 0.3, EchoFeedback = 0.4, EchoMix;
             public int EchoSyncRows;
+            public double Pan;
             public TableStep[] Table = Array.Empty<TableStep>();
             public int TableLoop = -1;
         }
@@ -90,7 +91,7 @@ namespace AmosLikeBasic
             public int TableIndex, TableOffset;
             public int DelayNote = TrackerCell.NoNote;
             // Set with G, H and I. Apply until the channel changes instrument.
-            public double? Cutoff, Resonance, PulseWidth;
+            public double? Cutoff, Resonance, PulseWidth, Pan;
             // Sound effect: samples left until the note is released, and the channel's PLAY settings from before
             public bool Sfx;
             public long SfxReleaseLeft;
@@ -180,7 +181,7 @@ namespace AmosLikeBasic
                 ch.InstNumber = instrument;
                 ch.Vol = 64;
                 ch.Effect = '\0';
-                ch.Cutoff = ch.Resonance = ch.PulseWidth = null;
+                ch.Cutoff = ch.Resonance = ch.PulseWidth = ch.Pan = null;
                 TriggerTrackNote(c, note);
             });
             EnsureStarted();
@@ -255,7 +256,7 @@ namespace AmosLikeBasic
                 ch.InstNumber = number;
                 ch.Vol = 64;
                 ch.Effect = '\0';
-                ch.Cutoff = ch.Resonance = ch.PulseWidth = null;
+                ch.Cutoff = ch.Resonance = ch.PulseWidth = ch.Pan = null;
                 ch.SfxReleaseLeft = releaseSamples;
                 TriggerTrackNote(c0, note);
                 UpdateTrackVoice(c0);
@@ -432,6 +433,7 @@ namespace AmosLikeBasic
                 EchoSyncRows = Math.Clamp(src.EchoSyncRows, 0, 64),
                 EchoFeedback = Math.Clamp(src.EchoFeedback / 100.0, 0, 0.9),
                 EchoMix = Math.Clamp(src.EchoMix / 100.0, 0, 1),
+                Pan = Math.Clamp(src.Pan / 100.0, -1, 1),
                 Table = steps.ToArray(),
                 TableLoop = src.TableLoop < steps.Count ? src.TableLoop : -1
             };
@@ -445,10 +447,16 @@ namespace AmosLikeBasic
         }
 
         // The LFO in the synth's units (null when it does nothing)
-        private static LfoSettings? CompileLfo(TrackerLfo? src)
+        private static LfoSettings? CompileLfo(TrackerLfo? src) =>
+            src == null ? null : MakeLfo(src.Target, src.Shape, src.Depth, src.Rate, src.SyncRows, src.Delay, src.Retrigger);
+
+        // An LFO from its names and the depth in the target's unit (cents for pitch, semitones for the
+        // cutoff, % otherwise), as the tracker and PLAY LFO give them; null when it does nothing
+        public static LfoSettings? MakeLfo(string? targetName, string? shapeName, double depthIn, double rateHz,
+                                           int syncRows, double delayMs, bool retrigger)
         {
-            if (src == null || src.Depth == 0) return null;
-            var target = (src.Target ?? "Off").Replace(" ", "").ToUpperInvariant() switch
+            if (depthIn == 0) return null;
+            var target = (targetName ?? "Off").Replace(" ", "").ToUpperInvariant() switch
             {
                 "PITCH" => LfoTarget.Pitch,
                 "VOLUME" => LfoTarget.Volume,
@@ -457,14 +465,15 @@ namespace AmosLikeBasic
                 "PULSEWIDTH" => LfoTarget.PulseWidth,
                 "OSC2PITCH" => LfoTarget.Osc2Pitch,
                 "OSC2MIX" => LfoTarget.Osc2Mix,
+                "PAN" => LfoTarget.Pan,
                 _ => LfoTarget.Off
             };
             if (target == LfoTarget.Off) return null;
-            var shape = (src.Shape ?? "Sine").Replace(" ", "").ToUpperInvariant() switch
+            var shape = (shapeName ?? "Sine").Replace(" ", "").ToUpperInvariant() switch
             {
                 "TRIANGLE" => LfoShape.Triangle,
                 "SQUARE" => LfoShape.Square,
-                "SAWUP" => LfoShape.SawUp,
+                "SAWUP" or "SAW" => LfoShape.SawUp,
                 "SAWDOWN" => LfoShape.SawDown,
                 "RANDOM" => LfoShape.Random,
                 _ => LfoShape.Sine
@@ -472,13 +481,13 @@ namespace AmosLikeBasic
             // Cents for pitch become semitones, procent becomes 0 – 1; the cutoff is in semitones already
             double depth = target switch
             {
-                LfoTarget.Pitch or LfoTarget.Osc2Pitch => Math.Clamp(src.Depth, -4800, 4800) / 100.0,
-                LfoTarget.Cutoff => Math.Clamp(src.Depth, -96, 96),
-                LfoTarget.PulseWidth => Math.Clamp(src.Depth, -49, 49) / 100.0,
-                _ => Math.Clamp(src.Depth, -100, 100) / 100.0
+                LfoTarget.Pitch or LfoTarget.Osc2Pitch => Math.Clamp(depthIn, -4800, 4800) / 100.0,
+                LfoTarget.Cutoff => Math.Clamp(depthIn, -96, 96),
+                LfoTarget.PulseWidth => Math.Clamp(depthIn, -49, 49) / 100.0,
+                _ => Math.Clamp(depthIn, -100, 100) / 100.0
             };
-            return new LfoSettings(shape, target, Math.Clamp(src.Rate, 0, 100), Math.Clamp(src.SyncRows, 0, 256),
-                                   depth, Math.Max(0, src.Delay) / 1000.0, src.Retrigger);
+            return new LfoSettings(shape, target, Math.Clamp(rateHz, 0, 100), Math.Clamp(syncRows, 0, 256),
+                                   depth, Math.Max(0, delayMs) / 1000.0, retrigger);
         }
 
         // "NOISE +24", "PULSE", "-12", "P30", "TRIANGLE 0 P50"
@@ -553,7 +562,7 @@ namespace AmosLikeBasic
                 ch.Effect = '\0';
                 ch.VibSpeed = ch.VibDepth = ch.VibPhase = ch.PortaSpeed = 0;
                 ch.DelayNote = TrackerCell.NoNote;
-                ch.Cutoff = ch.Resonance = ch.PulseWidth = null;
+                ch.Cutoff = ch.Resonance = ch.PulseWidth = ch.Pan = null;
             }
 
             _trackPreview = false;
@@ -663,7 +672,7 @@ namespace AmosLikeBasic
                 if (cell.Instrument > 0)
                 {
                     var inst = cell.Instrument <= d.Instruments.Length ? d.Instruments[cell.Instrument - 1] : DefaultInstrument;
-                    if (inst != ch.Inst) ch.Cutoff = ch.Resonance = ch.PulseWidth = null;
+                    if (inst != ch.Inst) ch.Cutoff = ch.Resonance = ch.PulseWidth = ch.Pan = null;
                     ch.Inst = inst;
                     ch.InstNumber = cell.Instrument;
                     ch.Vol = 64;
@@ -720,6 +729,10 @@ namespace AmosLikeBasic
                         break;
                     case 'I':
                         _voices[c].PulseWidth = (ch.PulseWidth = Math.Clamp(p / 255.0, 0.01, 0.99)).Value;
+                        break;
+                    case '8':
+                        // Pan as in ProTracker: 00 left, 80 the middle, FF right
+                        _voices[c].Pan = (ch.Pan = Math.Clamp((p - 128) / 127.0, -1, 1)).Value;
                         break;
                 }
             }
@@ -823,6 +836,7 @@ namespace AmosLikeBasic
             v.EchoSyncRows = inst.EchoSyncRows;
             v.EchoFeedback = inst.EchoFeedback;
             v.EchoMix = inst.EchoMix;
+            v.Pan = ch.Pan ?? inst.Pan;
             v.LfoTime = 0;   // the LFOs' delay starts again with every note
             for (int k = 0; k < inst.Lfos.Length; k++)
                 if (inst.Lfos[k] is { Retrigger: true })

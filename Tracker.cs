@@ -183,6 +183,9 @@ namespace AmosLikeBasic
         public double Osc2Detune { get; set; }             // cent
         public double Osc2Mix { get; set; } = 50;          // procent of oscillator 2 in the sound
 
+        // Where in stereo: -100 left, 0 the middle, 100 right (effect 8xx changes it in a song)
+        public double Pan { get; set; }
+
         // Echo: the sound comes back after a while, a little quieter each time. Mix 0 is off.
         public double EchoTime { get; set; } = 300;        // ms, at most 2000
         public int EchoSyncRows { get; set; }              // > 0: the time is this many rows of the song
@@ -205,7 +208,7 @@ namespace AmosLikeBasic
     {
         public static readonly string[] Shapes = { "Sine", "Triangle", "Square", "Saw up", "Saw down", "Random" };
         public static readonly string[] Targets =
-            { "Off", "Pitch", "Volume", "Cutoff", "Resonance", "Pulse width", "Osc 2 pitch", "Osc 2 mix" };
+            { "Off", "Pitch", "Volume", "Cutoff", "Resonance", "Pulse width", "Osc 2 pitch", "Osc 2 mix", "Pan" };
 
         public string Shape { get; set; } = "Sine";
         public string Target { get; set; } = "Off";

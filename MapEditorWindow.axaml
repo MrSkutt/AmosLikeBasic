@@ -53,6 +53,10 @@
                         </ScrollViewer>
                     </Border>
                     <Button Content="Load Tileset..." Click="LoadTiles_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
+                    <TextBlock Text="Show this tile as a figure (for MAP OBJECTS):" Foreground="{DynamicResource AmosLabelFg}" TextWrapping="Wrap" FontSize="11"/>
+                    <ComboBox Name="FigureBox" HorizontalAlignment="Stretch" PlaceholderText="(the tile itself)"
+                              ToolTip.Tip="A marker tile drawn as the sprite the program puts there; the game itself is not changed"
+                              DropDownOpened="FigureBox_OnDropDownOpened" SelectionChanged="FigureBox_OnSelectionChanged"/>
 
                     <TextBlock Text="MAP" Classes="amos-title" HorizontalAlignment="Center" Margin="0,6,0,0"/>
                     <Grid ColumnDefinitions="Auto, *, Auto, *">

@@ -46,6 +46,7 @@ public class TrackerViewTests : IDisposable
         Dispatcher.UIThread.RunJobs();
         w.FindControl<PatternView>("Pattern")!.Focus();
         Dispatcher.UIThread.RunJobs();
+        Press(w, Key.Space);   // edit on (the tracker opens with it off)
         return w;
     }
 

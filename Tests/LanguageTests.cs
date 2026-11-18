@@ -63,6 +63,7 @@ public class LanguageTests
         Case("STRING$", "PRINT STRING$(3, \"*\") & STRING$(2, 65)", "***AA"),
         Case("MAP OBJECTS finds the marker tiles", "TILE MAP 4,3\nTILE SET 1,0,5 : TILE SET 3,2,5 : TILE SET 2,1,7\nMAP OBJECTS 5, X(), Y(), N\nPRINT N & \":\" & X(0) & \",\" & Y(0) & \" \" & X(1) & \",\" & Y(1) & \" \" & TILE(0,32,0) & \" \" & TILE(0,64,32)", "2:32,0 96,64 -1 7"),
         Case("MAP OBJECTS KEEP leaves the tiles", "TILE MAP 2,1\nTILE SET 1,0,5\nDIM X(10) : DIM Y(10)\nMAP OBJECTS 5, X(), Y(), N, KEEP\nPRINT N & \" \" & TILE(0,32,0)", "1 5"),
+        Case("PLAY OSC2, LFO, ECHO and PAN", "PLAY OSC2 1, \"SAW\", 0, 8, 50\nPLAY LFO 1, 1, \"CUTOFF\", \"TRIANGLE\", 24, 2\nPLAY ECHO 1, 30, 250, 40\nPLAY PAN 1, -50\nPLAY LFO 1, 1, \"OFF\"\nPLAY OSC2 1, \"OFF\"\nPRINT 1", "1"),
         Case("SCREEN CRT with every setting", "SCREEN CRT 1, 10, 20, 30, 40, 150, 60\nSCREEN CRT 0\nPRINT 1", "1"),
         Case("MICROS and MILLIS without brackets", "WAIT 20\nPRINT MICROS > 15000 AND MILLIS > 15 AND MICROS() > 15000", "1"),
         Case("WAIT with decimals", "T0 = MICROS\nFOR I = 1 TO 20\n WAIT 0.5\nNEXT I\nPRINT (MICROS - T0) >= 10000", "1"),

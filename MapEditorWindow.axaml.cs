@@ -58,6 +58,89 @@ public partial class MapEditorWindow : Window
         Map.Refresh();
     }
 
+    // ══════════════════════════════════════════════════════════════
+    //  FIGURES: marker tiles shown as the sprite the program puts there
+    // ══════════════════════════════════════════════════════════════
+
+    // Kept in the map file ("Figures"); MAP LOAD does not read them, so the game is not changed
+    public sealed record MapFigure(int Tile, string File, int FrameWidth, int FrameHeight, int OffsetX = 0, int OffsetY = 0);
+
+    private readonly Dictionary<int, MapFigure> _figures = new();
+    private bool _fillingFigures;
+
+    private void SetFigures(IEnumerable<MapFigure>? figures)
+    {
+        _figures.Clear();
+        foreach (var f in figures ?? Array.Empty<MapFigure>()) _figures[f.Tile] = f;
+        ShowFigures();
+    }
+
+    private void ShowFigures()
+    {
+        var pictures = new Dictionary<int, (Bitmap bitmap, MapFigure figure)>();
+        foreach (var f in _figures.Values)
+            if (FigureBitmap(f.File) is { } b) pictures[f.Tile] = (b, f);
+        Map.Figures = pictures;
+        Palette.Figures = pictures;
+        Map.InvalidateVisual();
+        Palette.InvalidateVisual();
+        ShowFigureChoice();
+    }
+
+    private readonly Dictionary<string, Bitmap?> _figureBitmaps = new(StringComparer.OrdinalIgnoreCase);
+
+    private Bitmap? FigureBitmap(string file)
+    {
+        if (_figureBitmaps.TryGetValue(file, out var cached)) return cached;
+        Bitmap? b = null;
+        try { b = new Bitmap(ResourceLoader.GetPath(file)); }
+        catch (Exception) { }
+        return _figureBitmaps[file] = b;
+    }
+
+    private sealed record FigureChoice(string Text, ProgramAssets.Asset? Asset)
+    {
+        public override string ToString() => Text;
+    }
+
+    // The sprites and images the program loads; choosing one shows the selected tile as it
+    private void FigureBox_OnDropDownOpened(object? sender, EventArgs e)
+    {
+        _fillingFigures = true;
+        var items = new List<FigureChoice> { new("(the tile itself)", null) };
+        foreach (var a in ProgramAssets.Find(_programText?.Invoke() ?? "").Where(a => a.Kind is "SPRITE" or "IMAGE"))
+            if (items.All(i => i.Asset?.File != a.File))
+                items.Add(new FigureChoice(Path.GetFileName(a.File) + (a.HasFrameSize ? $"  {a.FrameWidth}×{a.FrameHeight}" : ""), a));
+        FigureBox.ItemsSource = items;
+        FigureBox.SelectedItem = items.FirstOrDefault(i => _figures.TryGetValue(_selectedTileIndex, out var f) && i.Asset?.File == f.File);
+        _fillingFigures = false;
+    }
+
+    private void FigureBox_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingFigures || FigureBox.SelectedItem is not FigureChoice choice || _selectedTileIndex < 0) return;
+        if (choice.Asset == null) _figures.Remove(_selectedTileIndex);
+        else
+        {
+            var a = choice.Asset;
+            var bitmap = FigureBitmap(a.File);
+            int w = a.FrameWidth ?? bitmap?.PixelSize.Width ?? 32, h = a.FrameHeight ?? bitmap?.PixelSize.Height ?? 32;
+            _figures[_selectedTileIndex] = new MapFigure(_selectedTileIndex, a.File, w, h);
+        }
+        ShowFigures();
+        StatusText.Text = "Save the map to keep the figures.";
+    }
+
+    // The combo box shows the figure of the tile selected
+    private void ShowFigureChoice()
+    {
+        _fillingFigures = true;
+        FigureBox.PlaceholderText = _figures.TryGetValue(_selectedTileIndex, out var f)
+            ? Path.GetFileName(f.File) : "(the tile itself)";
+        FigureBox.SelectedItem = null;
+        _fillingFigures = false;
+    }
+
     private void SelectTile(int index)
     {
         var tiles = _gfx.GetTileBitmaps();
@@ -68,6 +151,7 @@ public partial class MapEditorWindow : Window
         SelectedTileImage.Source = has ? tiles[index] : null;
         var (tw, th) = _gfx.GetTileSize();
         SelectedTileText.Text = tiles.Count == 0 ? "No tiles loaded" : $"Tile {index}   ({tiles.Count} tiles, {tw}×{th})";
+        ShowFigureChoice();
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -362,6 +446,7 @@ public partial class MapEditorWindow : Window
         MapWidthUpDown.Value = dto.Width;
         MapHeightUpDown.Value = dto.Height;
         SetMapFile(path);
+        SetFigures(dto.Figures);
         RefreshMap();
     }
 
@@ -400,7 +485,8 @@ public partial class MapEditorWindow : Window
 
     private async System.Threading.Tasks.Task WriteMapTo(Stream stream)
     {
-        var dto = new MapDto(_gfx.GetMapWidth(), _gfx.GetMapHeight(), ReadMap().ToList());
+        var dto = new MapDto(_gfx.GetMapWidth(), _gfx.GetMapHeight(), ReadMap().ToList(),
+                             _figures.Count > 0 ? _figures.Values.OrderBy(f => f.Tile).ToList() : null);
         await System.Text.Json.JsonSerializer.SerializeAsync(stream, dto);
     }
 
@@ -418,7 +504,7 @@ public partial class MapEditorWindow : Window
     }
 
     // The map file format, the same as MAP LOAD reads
-    private record MapDto(int Width, int Height, List<int> Data);
+    private record MapDto(int Width, int Height, List<int> Data, List<MapFigure>? Figures = null);
 }
 
 // The map, drawn tile by tile, with a grid and the cell under the pointer marked
@@ -428,6 +514,8 @@ public class MapView : Control
     public double Zoom { get; set; } = 1;
     public bool ShowGrid { get; set; } = true;
     public (int x, int y) Hover { get; set; } = (-1, -1);
+    // Marker tiles drawn as figures: frame 0 of the picture, at its own size
+    public Dictionary<int, (Bitmap bitmap, MapEditorWindow.MapFigure figure)> Figures { get; set; } = new();
 
     public void Refresh()
     {
@@ -461,7 +549,14 @@ public class MapView : Control
                 for (int x = 0; x < mw; x++)
                 {
                     int t = Gfx.GetMapTile(x, y);
-                    if (t >= 0 && t < tiles.Count)
+                    if (Figures.TryGetValue(t, out var fig))
+                    {
+                        var f = fig.figure;
+                        var src = new Rect(0, 0, Math.Min(f.FrameWidth, fig.bitmap.PixelSize.Width), Math.Min(f.FrameHeight, fig.bitmap.PixelSize.Height));
+                        context.DrawImage(fig.bitmap, src,
+                            new Rect(x * cw + f.OffsetX * Zoom, y * ch + f.OffsetY * Zoom, src.Width * Zoom, src.Height * Zoom));
+                    }
+                    else if (t >= 0 && t < tiles.Count)
                         context.DrawImage(tiles[t], new Rect(x * cw, y * ch, cw, ch));
                 }
 
@@ -484,6 +579,7 @@ public class TilePaletteView : Control
     public AmosGraphics? Gfx { get; set; }
     public int Selected { get; set; }
     public event Action<int>? TileSelected;
+    public Dictionary<int, (Bitmap bitmap, MapEditorWindow.MapFigure figure)> Figures { get; set; } = new();
 
     private (int cols, double cw, double ch) Layout()
     {
@@ -515,7 +611,19 @@ public class TilePaletteView : Control
         var (cols, cw, ch) = Layout();
         using (context.PushRenderOptions(new RenderOptions { BitmapInterpolationMode = BitmapInterpolationMode.None }))
             for (int i = 0; i < tiles.Count; i++)
-                context.DrawImage(tiles[i], new Rect(i % cols * cw, i / cols * ch, cw, ch));
+            {
+                var cell = new Rect(i % cols * cw, i / cols * ch, cw, ch);
+                if (Figures.TryGetValue(i, out var fig))
+                {
+                    // The figure shrunk to fit the cell, keeping its shape
+                    var f = fig.figure;
+                    var src = new Rect(0, 0, Math.Min(f.FrameWidth, fig.bitmap.PixelSize.Width), Math.Min(f.FrameHeight, fig.bitmap.PixelSize.Height));
+                    double scale = Math.Min(cw / src.Width, ch / src.Height);
+                    var size = new Size(src.Width * scale, src.Height * scale);
+                    context.DrawImage(fig.bitmap, src, new Rect(cell.Center.X - size.Width / 2, cell.Center.Y - size.Height / 2, size.Width, size.Height));
+                }
+                else context.DrawImage(tiles[i], cell);
+            }
         if (Selected >= 0 && Selected < tiles.Count)
             context.DrawRectangle(new Pen(new SolidColorBrush(Color.FromRgb(255, 212, 0)), 2),
                 new Rect(Selected % cols * cw + 1, Selected / cols * ch + 1, cw - 2, ch - 2));

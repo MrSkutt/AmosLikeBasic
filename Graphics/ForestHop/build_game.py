@@ -713,7 +713,14 @@ def main():
     cells = [TILE_OF.get(ch, -1) for r in rows for ch in r]
     map_path = os.path.join(ROOT, "Graphics", "ForestHop", "level.amosmap")
     with open(map_path, "w", encoding="utf-8") as f:
-        json.dump({"Width": W, "Height": H, "Data": cells}, f, separators=(",", ":"))
+        # The map editor shows the marker tiles as the figures the game puts there (MAP LOAD skips this)
+        figures = [
+            {"Tile": 12, "File": "Graphics/ForestHop/gem.png", "FrameWidth": 20, "FrameHeight": 20, "OffsetX": 6, "OffsetY": 6},
+            {"Tile": 13, "File": "Graphics/ForestHop/beetle.png", "FrameWidth": 32, "FrameHeight": 32},
+            {"Tile": 14, "File": "Graphics/ForestHop/pinecone.png", "FrameWidth": 32, "FrameHeight": 32},
+            {"Tile": 15, "File": "Graphics/ForestHop/flag.png", "FrameWidth": 48, "FrameHeight": 128},
+        ]
+        json.dump({"Width": W, "Height": H, "Data": cells, "Figures": figures}, f, separators=(",", ":"))
     print(f"wrote {map_path}")
 
     text = PROGRAM.lstrip("\n")

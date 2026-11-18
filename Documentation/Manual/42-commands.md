@@ -484,6 +484,10 @@ PLAY BEND channel, semitones
 PLAY ARP channel, "steps" [, rate]
 PLAY RING channel, source
 PLAY SYNC channel, source
+PLAY OSC2 channel, wave [, semitones [, cents [, mix]]]
+PLAY LFO channel, 1 | 2, target [, wave [, depth [, rate [, delay]]]]
+PLAY ECHO channel, mix [, time [, feedback]]
+PLAY PAN channel, pan
 ```
 
 The synth has eight channels, 1 – 8. Everything except `MUSIC`, `LOOP` and `STOP` is a setting that applies to the channel until it is changed, and it is heard straight away, even in the middle of a note.
@@ -508,6 +512,10 @@ The synth has eight channels, 1 – 8. Everything except `MUSIC`, `LOOP` and `ST
 | `PLAY ARP` | arpeggio: semitone steps such as `"0 4 7"`, rate in steps per second (default 50); `""` turns it off |
 | `PLAY RING` | ring modulation with another channel; 0 turns it off |
 | `PLAY SYNC` | hard sync with another channel; 0 turns it off |
+| `PLAY OSC2` | a second oscillator mixed in: a wave (`"OFF"` turns it off), semitones and cents from the note, and its share 0 – 100 (default 50) |
+| `PLAY LFO` | LFO 1 or 2 moves a setting: `"PITCH"`, `"VOLUME"`, `"CUTOFF"`, `"RESONANCE"`, `"PULSE WIDTH"`, `"OSC 2 PITCH"`, `"OSC 2 MIX"`, `"PAN"` or `"OFF"`; wave `"SINE"`, `"TRIANGLE"`, `"SQUARE"`, `"SAW UP"`, `"SAW DOWN"` or `"RANDOM"`; depth in cents for pitch, semitones for the cutoff, percent otherwise; rate in Hz (default 4); delay in milliseconds before it is at full depth |
+| `PLAY ECHO` | echo: mix 0 – 100 (0 turns it off), time in milliseconds up to 2000 (default 300), feedback 0 – 90 (default 40) |
+| `PLAY PAN` | where in stereo: -100 left, 0 the middle, 100 right |
 
 The settings are reset when the program starts.
 

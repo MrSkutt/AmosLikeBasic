@@ -73,7 +73,19 @@
       "Osc2Wave": "Triangle",
       "Osc2Semitones": 24,
       "Osc2Detune": 6,
-      "Osc2Mix": 35
+      "Osc2Mix": 35,
+      "EchoMix": 30,
+      "EchoSyncRows": 6,
+      "EchoFeedback": 40,
+      "Lfo2": {
+        "Target": "Pan",
+        "Shape": "Sine",
+        "Depth": 60,
+        "Rate": 0.15,
+        "SyncRows": 0,
+        "Delay": 0,
+        "Retrigger": false
+      }
     },
     {
       "Name": "Sub Bass",
@@ -156,7 +168,8 @@
       "Sustain": 0,
       "Release": 40,
       "Filter": "High",
-      "Cutoff": 8000
+      "Cutoff": 8000,
+      "Pan": 40
     },
     {
       "Name": "Wood Block",
@@ -168,7 +181,8 @@
       "Release": 20,
       "Osc2Wave": "Triangle",
       "Osc2Semitones": 17,
-      "Osc2Mix": 30
+      "Osc2Mix": 30,
+      "Pan": -40
     },
     {
       "Name": "Sine Whistle",

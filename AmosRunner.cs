@@ -3689,6 +3689,40 @@ public static partial class AmosRunner
                                     ChiptuneSynth.SetSync(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(pS[2], vars, ln, getInkey, isKeyDown, graphics));
                                     break;
+
+                                // PLAY OSC2 ch, wave$ [, semitones [, cents [, mix %]]]
+                                case "OSC2":
+                                    ChiptuneSynth.SetOsc2(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        ValueToString(EvalValue(pS[2], vars, ln, getInkey, isKeyDown, graphics)),
+                                        pS.Count >= 4 ? EvalDouble(pS[3], vars, ln, getInkey, isKeyDown, graphics) : 0,
+                                        pS.Count >= 5 ? EvalDouble(pS[4], vars, ln, getInkey, isKeyDown, graphics) : 0,
+                                        pS.Count >= 6 ? EvalDouble(pS[5], vars, ln, getInkey, isKeyDown, graphics) : 50);
+                                    break;
+
+                                // PLAY LFO ch, 1|2, target$ [, wave$ [, depth [, rate Hz [, delay ms]]]]
+                                case "LFO":
+                                    ChiptuneSynth.SetLfo(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalInt(pS[2], vars, ln, getInkey, isKeyDown, graphics),
+                                        ValueToString(EvalValue(pS[3], vars, ln, getInkey, isKeyDown, graphics)),
+                                        pS.Count >= 5 ? ValueToString(EvalValue(pS[4], vars, ln, getInkey, isKeyDown, graphics)) : "Sine",
+                                        pS.Count >= 6 ? EvalDouble(pS[5], vars, ln, getInkey, isKeyDown, graphics) : 0,
+                                        pS.Count >= 7 ? EvalDouble(pS[6], vars, ln, getInkey, isKeyDown, graphics) : 4,
+                                        pS.Count >= 8 ? EvalDouble(pS[7], vars, ln, getInkey, isKeyDown, graphics) : 0);
+                                    break;
+
+                                // PLAY ECHO ch, mix % [, time ms [, feedback %]]
+                                case "ECHO":
+                                    ChiptuneSynth.SetEcho(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics),
+                                        pS.Count >= 4 ? EvalDouble(pS[3], vars, ln, getInkey, isKeyDown, graphics) : 300,
+                                        pS.Count >= 5 ? EvalDouble(pS[4], vars, ln, getInkey, isKeyDown, graphics) : 40);
+                                    break;
+
+                                // PLAY PAN ch, -100 (left) .. 100 (right)
+                                case "PAN":
+                                    ChiptuneSynth.SetPan(EvalInt(pS[1], vars, ln, getInkey, isKeyDown, graphics),
+                                        EvalDouble(pS[2], vars, ln, getInkey, isKeyDown, graphics));
+                                    break;
                             }
                             break;
                         }

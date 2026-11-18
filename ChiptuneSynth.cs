@@ -95,6 +95,7 @@ namespace AmosLikeBasic
             // each time EchoFeedback as loud; EchoMix is how loud the echo is (0 = off)
             public double EchoTime = 0.3, EchoFeedback = 0.4, EchoMix;
             public int EchoSyncRows;
+            public double Pan;                             // -1 left, 0 middle, 1 right
 
             // Slides from {SWEEP} and {FADE}: change per sample and number of samples left
             public double CutoffSlide, VolumeSlide;
@@ -122,6 +123,7 @@ namespace AmosLikeBasic
             public double LfoTime;   // seconds since the note started, for the LFOs' delay
             public readonly float[] EchoBuffer = new float[MaxEchoSamples];
             public int EchoPos;
+            public double PanNow;   // the pan with the LFOs, worked out each sample
             public int ArpIndex;
             public double ArpCounter;
             public float[]? Drum;
@@ -148,6 +150,7 @@ namespace AmosLikeBasic
                 Osc2Wave = s.Osc2Wave; Osc2Ratio = s.Osc2Ratio; Osc2Mix = s.Osc2Mix;
                 Lfos = s.Lfos;
                 EchoTime = s.EchoTime; EchoFeedback = s.EchoFeedback; EchoMix = s.EchoMix; EchoSyncRows = s.EchoSyncRows;
+                Pan = s.Pan;
             }
 
             public void ResetSettings()
@@ -167,11 +170,12 @@ namespace AmosLikeBasic
                 Osc2Wave = null; Osc2Ratio = 1; Osc2Mix = 0.5;
                 Lfos = NoLfos;
                 EchoTime = 0.3; EchoFeedback = 0.4; EchoMix = 0; EchoSyncRows = 0;
+                Pan = 0;
             }
         }
 
         public enum LfoShape { Sine, Triangle, Square, SawUp, SawDown, Random }
-        public enum LfoTarget { Off, Pitch, Volume, Cutoff, Resonance, PulseWidth, Osc2Pitch, Osc2Mix }
+        public enum LfoTarget { Off, Pitch, Volume, Cutoff, Resonance, PulseWidth, Osc2Pitch, Osc2Mix, Pan }
 
         // An LFO's settings. Depth is in the target's unit: semitones for pitch and the cutoff,
         // 0 – 1 for volume, resonance, pulse width and mix.
@@ -202,7 +206,7 @@ namespace AmosLikeBasic
         // What the LFOs do to the sound this sample
         private struct Modulation
         {
-            public double Semis, Volume, Cutoff, Resonance, PulseWidth, Osc2Semis, Mix;
+            public double Semis, Volume, Cutoff, Resonance, PulseWidth, Osc2Semis, Mix, Pan;
         }
 
         private static Modulation NextModulation(Voice v, double dt)
@@ -236,6 +240,7 @@ namespace AmosLikeBasic
                     case LfoTarget.PulseWidth: m.PulseWidth += x * l.Depth; break;
                     case LfoTarget.Osc2Pitch: m.Osc2Semis += x * l.Depth; break;
                     case LfoTarget.Osc2Mix: m.Mix += x * l.Depth; break;
+                    case LfoTarget.Pan: m.Pan += x * l.Depth; break;
                 }
             }
             v.LfoTime += dt;
@@ -288,7 +293,7 @@ namespace AmosLikeBasic
                 _started = true;
 
                 _streamProc = StreamCallback;
-                _stream = Bass.CreateStream(SampleRate, 1, BassFlags.Float, _streamProc, IntPtr.Zero);
+                _stream = Bass.CreateStream(SampleRate, 2, BassFlags.Float, _streamProc, IntPtr.Zero);
                 if (_stream != 0)
                 {
                     // No extra buffering: changes from BASIC are heard within a few milliseconds
@@ -311,7 +316,7 @@ namespace AmosLikeBasic
             if (_renderBuffer.Length < samples) _renderBuffer = new float[samples];
             // A test that calls Render itself owns the synth; the stream only plays silence then
             if (ManualRendering) Array.Clear(_renderBuffer, 0, samples);
-            else Render(_renderBuffer.AsSpan(0, samples));
+            else RenderStereo(_renderBuffer.AsSpan(0, samples));
             Marshal.Copy(_renderBuffer, 0, buffer, samples);
             return samples * sizeof(float);
         }
@@ -425,6 +430,46 @@ namespace AmosLikeBasic
             v.FilterEnvAttack = Math.Max(0, attackMs) / 1000.0;
             v.FilterEnvDecay = Math.Max(1, decayMs) / 1000.0;
         }
+
+        // The second oscillator: a wave ("OFF" turns it off), tuned in semitones and cents, and its share in %
+        public static void SetOsc2(int channel, string wave, double semitones = 0, double detuneCents = 0, double mixPercent = 50)
+        {
+            var v = _voices[ChIdx(channel)];
+            v.Osc2Wave = wave.Trim().Equals("OFF", StringComparison.OrdinalIgnoreCase) ? null : ParseOsc2Wave(wave);
+            v.Osc2Ratio = Math.Pow(2, (Math.Clamp(semitones, -48, 48) + Math.Clamp(detuneCents, -1200, 1200) / 100.0) / 12.0);
+            v.Osc2Mix = Math.Clamp(mixPercent / 100.0, 0, 1);
+        }
+
+        private static WaveformType ParseOsc2Wave(string wave)
+        {
+            var w = ParseWave(wave);
+            return w == WaveformType.Drums ? WaveformType.Noise : w;
+        }
+
+        // LFO 1 or 2 of a channel; target "OFF" (or depth 0) turns it off. Depth in cents for pitch,
+        // semitones for the cutoff, % otherwise.
+        public static void SetLfo(int channel, int number, string target, string shape, double depth, double rate = 4, double delayMs = 0)
+        {
+            var v = _voices[ChIdx(channel)];
+            var lfos = (LfoSettings?[])v.Lfos.Clone();   // the old array may be shared with others
+            lfos[Math.Clamp(number, 1, 2) - 1] = MakeLfo(target, shape, depth, rate, 0, delayMs, retrigger: true);
+            v.Lfos = lfos;
+        }
+
+        // Echo: mix % (0 = off), time in ms (at most 2000) and feedback %
+        public static void SetEcho(int channel, double mixPercent, double timeMs = 300, double feedbackPercent = 40)
+        {
+            var v = _voices[ChIdx(channel)];
+            double mix = Math.Clamp(mixPercent / 100.0, 0, 1);
+            if (v.EchoMix <= 0 && mix > 0) Array.Clear(v.EchoBuffer);
+            v.EchoTime = Math.Clamp(timeMs, 1, MaxEchoSeconds * 1000) / 1000.0;
+            v.EchoSyncRows = 0;
+            v.EchoFeedback = Math.Clamp(feedbackPercent / 100.0, 0, 0.9);
+            v.EchoMix = mix;
+        }
+
+        // Pan: -100 left, 0 the middle, 100 right
+        public static void SetPan(int channel, double pan) => _voices[ChIdx(channel)].Pan = Math.Clamp(pan / 100.0, -1, 1);
 
         // Depth in hundredths of a semitone (cents), rate in Hz
         public static void SetVibrato(int channel, double depthCents, double rate)
@@ -711,6 +756,49 @@ namespace AmosLikeBasic
                     double g = Math.Clamp(Num(1, 90) / 100.0, 0.05, 1.0);
                     return v => v.Gate = g;
                 }
+                case "OSC2":
+                {
+                    // {OSC2 SAW 0 8 50}: wave, semitones, cents and mix; {OSC2 OFF} turns it off
+                    Need(1);
+                    WaveformType? wave2 = words[1].Equals("OFF", StringComparison.OrdinalIgnoreCase) ? null : ParseOsc2Wave(words[1]);
+                    double ratio = Math.Pow(2, (Math.Clamp(Num(2, 0), -48, 48) + Math.Clamp(Num(3, 0), -1200, 1200) / 100.0) / 12.0);
+                    double mix = Math.Clamp(Num(4, 50) / 100.0, 0, 1);
+                    return v => { v.Osc2Wave = wave2; v.Osc2Ratio = ratio; v.Osc2Mix = mix; };
+                }
+                case "LFO":
+                {
+                    // {LFO 1 CUTOFF TRIANGLE 24 2 0}: number, target, wave, depth, Hz and delay; {LFO 1 OFF}
+                    Need(2);
+                    int number = Math.Clamp((int)Num(1, 1), 1, 2) - 1;
+                    string target = words[2];
+                    string shape = words.Length > 3 ? words[3] : "Sine";
+                    var lfo = MakeLfo(target, shape, Num(4, 0), Num(5, 4), 0, Num(6, 0), retrigger: true);
+                    return v =>
+                    {
+                        var lfos = (LfoSettings?[])v.Lfos.Clone();
+                        lfos[number] = lfo;
+                        v.Lfos = lfos;
+                    };
+                }
+                case "ECHO":
+                {
+                    // {ECHO 30 250 40}: mix, time and feedback; {ECHO 0} turns it off
+                    Need(1);
+                    double mix = Math.Clamp(Num(1, 0) / 100.0, 0, 1);
+                    double time = Math.Clamp(Num(2, 300), 1, MaxEchoSeconds * 1000) / 1000.0;
+                    double feedback = Math.Clamp(Num(3, 40) / 100.0, 0, 0.9);
+                    return v =>
+                    {
+                        if (v.EchoMix <= 0 && mix > 0) Array.Clear(v.EchoBuffer);
+                        v.EchoMix = mix; v.EchoTime = time; v.EchoFeedback = feedback; v.EchoSyncRows = 0;
+                    };
+                }
+                case "PAN":
+                {
+                    Need(1);
+                    double pan = Math.Clamp(Num(1, 0) / 100.0, -1, 1);
+                    return v => v.Pan = pan;
+                }
                 case "RING":
                 case "SYNC":
                 {
@@ -751,30 +839,50 @@ namespace AmosLikeBasic
         //  The audio thread
         // ════════════════════════════════════════════════════════════════
 
+        // Mono: the middle of the stereo sound (a voice in the middle sounds as it always has)
         public static void Render(Span<float> output)
         {
             for (int i = 0; i < output.Length; i++)
             {
-                TrackSample();
-                double mix = 0;
-                int pos = _scopePos;
-                for (int c = 0; c < Channels; c++)
-                {
-                    double s = RenderVoice(_voices[c]);
-                    _scope[c][pos] = (float)s;
-                    mix += s;
-                }
-                _scopePos = (pos + 1) & (ScopeSize - 1);
+                RenderFrame(out double left, out double right);
+                output[i] = (float)SoftClip((left + right) / 2);
+            }
+        }
 
-                foreach (var s in _sfx)
-                {
-                    var b = s.Buffer;
-                    if (b == null) continue;
-                    if (s.Pos < b.Length) mix += b[s.Pos++];
-                    else s.Buffer = null;
-                }
+        // Stereo, left and right in turn (what the sound card and WAV export get)
+        public static void RenderStereo(Span<float> output)
+        {
+            for (int i = 0; i + 1 < output.Length; i += 2)
+            {
+                RenderFrame(out double left, out double right);
+                output[i] = (float)SoftClip(left);
+                output[i + 1] = (float)SoftClip(right);
+            }
+        }
 
-                output[i] = (float)SoftClip(mix);
+        private static void RenderFrame(out double left, out double right)
+        {
+            TrackSample();
+            left = right = 0;
+            int pos = _scopePos;
+            for (int c = 0; c < Channels; c++)
+            {
+                var v = _voices[c];
+                double s = RenderVoice(v);
+                _scope[c][pos] = (float)s;
+                // In the middle a voice is as loud on both sides as in mono; to the side it fades out on the other one
+                double pan = v.PanNow;
+                left += pan > 0 ? s * (1 - pan) : s;
+                right += pan < 0 ? s * (1 + pan) : s;
+            }
+            _scopePos = (pos + 1) & (ScopeSize - 1);
+
+            foreach (var x in _sfx)
+            {
+                var b = x.Buffer;
+                if (b == null) continue;
+                if (x.Pos < b.Length) { left += b[x.Pos]; right += b[x.Pos]; x.Pos++; }
+                else x.Buffer = null;
             }
         }
 
@@ -852,6 +960,7 @@ namespace AmosLikeBasic
             }
 
             double dt = 1.0 / SampleRate;
+            v.PanNow = v.Pan;   // the LFOs may move it below
 
             // Volume without crackle when it changes
             v.Gain += (v.Volume - v.Gain) * 0.002;
@@ -872,6 +981,7 @@ namespace AmosLikeBasic
                     v.Freq = v.TargetFreq;
 
                 var mod = NextModulation(v, dt);
+                v.PanNow = Math.Clamp(v.Pan + mod.Pan, -1, 1);
                 double semis = v.Bend + mod.Semis;
                 if (v.VibratoDepth > 0)
                 {
@@ -1123,6 +1233,9 @@ namespace AmosLikeBasic
                 v.TargetFreq = e.Freq;
                 v.Stage = EnvStage.Attack;   // starts from the current level, without a click
                 v.FilterEnvRising = true;
+                v.LfoTime = 0;               // the LFOs start again with the note
+                for (int k = 0; k < v.Lfos.Length; k++)
+                    if (v.Lfos[k] is { Retrigger: true }) { v.LfoPhases[k] = 0; v.LfoRandom[k] = NextLfoRandom(); }
                 v.ArpIndex = 0;
                 v.ArpCounter = 0;
                 v.GateLeft = noteSamples * v.Gate;

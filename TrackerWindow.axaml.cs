@@ -362,6 +362,8 @@ public partial class TrackerWindow : Window
         AddVSlider(adsr, "D", 1, 5000, true, i => i.Decay, (i, v) => i.Decay = v, "decay", "0", "ms");
         AddVSlider(adsr, "S", 0, 100, false, i => i.Sustain, (i, v) => i.Sustain = v, "sustain", "0", "%");
         AddVSlider(adsr, "R", 1, 5000, true, i => i.Release, (i, v) => i.Release = v, "release", "0", "ms");
+        var panRow = KnobRow(amp);
+        AddKnob(panRow, "PAN", -100, 100, i => i.Pan, (i, v) => i.Pan = v, "pan", "+0;-0;0", bipolar: true, step: 1);
 
         // ── EFFECTS ──
         var fx = Card(cards, "EFFECTS", 300);
@@ -1148,7 +1150,7 @@ public partial class TrackerWindow : Window
             var samples = await Task.Run(() => ChiptuneSynth.RenderSong(song, progress: s =>
                 Dispatcher.UIThread.Post(() => SetStatus($"Making the WAV file... {s:0} s"))));
             await Task.Run(() => ChiptuneSynth.WriteWav(path, samples));
-            SetStatus($"Saved {Path.GetFileName(path)} ({samples.Length / (double)ChiptuneSynth.SampleRate:0.0} s)");
+            SetStatus($"Saved {Path.GetFileName(path)} ({samples.Length / 2.0 / ChiptuneSynth.SampleRate:0.0} s, stereo)");
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

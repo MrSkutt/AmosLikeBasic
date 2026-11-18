@@ -107,7 +107,7 @@ public class InstrumentLibraryTests : IDisposable
         var song = TrackerSong.Load(Repo.PathOf("Sound/Tracker/pixel_rush.amostrk"));
         var samples = S.RenderSong(song);
         // 51.2 s of song and a short ringing out, the silence after it trimmed
-        Assert.InRange(samples.Length / (double)S.SampleRate, 51.2, 54.5);
+        Assert.InRange(samples.Length / 2.0 / S.SampleRate, 51.2, 54.5);   // stereo
         Assert.True(samples.Max(x => Math.Abs(x)) > 0.3);
 
         string file = Path.Combine(Path.GetTempPath(), "amos-song-" + Guid.NewGuid().ToString("N") + ".wav");

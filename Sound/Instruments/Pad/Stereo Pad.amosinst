@@ -1,0 +1,32 @@
+{
+  "Name": "Stereo Pad",
+  "Wave": "Sawtooth",
+  "Volume": 0.13,
+  "Attack": 700,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 1400,
+  "Filter": "Low",
+  "Cutoff": 1600,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Detune": 10,
+  "Osc2Mix": 50,
+  "Lfo1": {
+    "Target": "Pan",
+    "Shape": "Sine",
+    "Depth": 70,
+    "Rate": 0.2,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  },
+  "Lfo2": {
+    "Target": "Cutoff",
+    "Shape": "Sine",
+    "Depth": 6,
+    "Rate": 0.3,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

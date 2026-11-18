@@ -138,6 +138,8 @@ public class ChannelCountTests : IDisposable
 
         pattern.Focus();
         Dispatcher.UIThread.RunJobs();
+        w.KeyPress(Key.Space, RawInputModifiers.None, PhysicalKey.None, null);   // edit on
+        Dispatcher.UIThread.RunJobs();
         for (int i = 0; i < 7; i++)
         {
             w.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.None, null);

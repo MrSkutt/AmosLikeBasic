@@ -3,8 +3,8 @@
   "Wave": "Square",
   "Volume": 0.15,
   "Attack": 0,
-  "Decay": 0,
-  "Sustain": 100,
+  "Decay": 500,
+  "Sustain": 0,
   "Release": 80,
   "Table": [
     "0",

@@ -18,6 +18,9 @@ public class TrackerEditorTests
         var pattern = window.FindControl<PatternView>("Pattern")!;
         pattern.Focus();
         Dispatcher.UIThread.RunJobs();
+        Assert.False(pattern.EditMode);   // the tracker opens with edit off ...
+        Press(window, Key.Space);         // ... and Space turns it on, so that notes are written
+        Assert.True(pattern.EditMode);
         return (window, pattern);
     }
 

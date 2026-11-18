@@ -79,6 +79,8 @@ TILE DRAW 0, 0
 
 The places are in dots, so they go straight into `SPRITE POS`. The marker tiles are taken off the map, so call `MAP OBJECTS` before `TILE DRAW`. Forest Hop does this with tiles 12 to 15 for gems, beetles, the start and the flag.
 
+In the map editor you can see the figures themselves instead of the marker tiles: choose the marker tile in the palette and pick its picture under **Show this tile as a figure**. The list holds the pictures your program loads with `SPRITE LOAD` and `IMAGE LOAD`, with their frame size. The map then shows the first frame of the picture on every such cell, at its own size, and the palette shows it too. The choice is saved in the map file; the game is not changed by it, since `MAP LOAD` only reads the tiles. Open Forest Hop's map to see it: the gems, beetles, Pinecone and the flag stand where the game puts them.
+
 ## Levels in DATA
 
 Another way is to draw the level with letters in `DATA` lines, right in the program. Each letter stands for a tile:

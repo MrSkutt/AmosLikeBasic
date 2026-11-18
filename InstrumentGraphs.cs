@@ -325,7 +325,7 @@ public sealed class LfoGraph : InstrumentGraph
         // The filter must be on for the cutoff and resonance to change anything
         if (lfo.Target is "Cutoff" or "Resonance" && (inst.Filter ?? "Off").Equals("Off", StringComparison.OrdinalIgnoreCase))
             speed += "  (turn the filter on)";
-        else if (lfo.Target.StartsWith("Osc 2") && (inst.Osc2Wave ?? "Off").Equals("Off", StringComparison.OrdinalIgnoreCase))
+        else if (lfo.Target.StartsWith("Osc 2", StringComparison.Ordinal) && (inst.Osc2Wave ?? "Off").Equals("Off", StringComparison.OrdinalIgnoreCase))
             speed += "  (turn oscillator 2 on)";
         ctx.DrawText(Text($"{lfo.Target.ToUpperInvariant()}  ±{Math.Abs(lfo.Depth):0.#} {TrackerLfo.UnitOf(lfo.Target)}  {speed}", Label),
             new Point(a.Left, a.Bottom + 3));
