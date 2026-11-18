@@ -23,4 +23,18 @@ jobs:
         run: dotnet build Tests/AmosLikeBasic.Tests.csproj -c Release
 
       - name: Test
-        run: dotnet test Tests/AmosLikeBasic.Tests.csproj -c Release --no-build --logger "console;verbosity=normal"
+        run: dotnet test Tests/AmosLikeBasic.Tests.csproj -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=results.trx" --results-directory TestResults
+
+      # The failed tests as annotations, which show on the run's page (and can be read without the full log)
+      - name: Report failed tests
+        if: failure()
+        shell: python
+        run: |
+          import glob, xml.etree.ElementTree as ET
+          ns = {"t": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          for path in glob.glob("TestResults/**/*.trx", recursive=True):
+              for r in ET.parse(path).getroot().iterfind(".//t:UnitTestResult", ns):
+                  if r.get("outcome") == "Failed":
+                      msg = r.findtext(".//t:Message", default="", namespaces=ns)
+                      msg = " ".join(msg.split())[:900].replace("%", "%25")
+                      print(f"::error title={r.get('testName')[:200]}::{msg}")
