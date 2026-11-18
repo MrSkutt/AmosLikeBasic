@@ -429,4 +429,38 @@ public class SynthTests : IDisposable
         var b = Render(0.5);
         Assert.True(Loudness(b, 0.2, 0.23) > Loudness(b, 0.12, 0.18) * 5);
     }
+
+    [Fact]
+    public void ChangingTheInstrumentChangesTheNoteThatSounds()
+    {
+        // A held A-4; half way the instrument gets oscillator 2 an octave up, and the note goes on with it
+        var song = SongWith("");
+        S.TrackPreview(song, 1, 69, 1);
+        var before = Render(0.2);
+        song.Instruments[0].Osc2Wave = "Sine";
+        song.Instruments[0].Osc2Semitones = 12;
+        song.Instruments[0].Osc2Mix = 100;
+        S.TrackInstrumentChanged(song, 1);
+        var after = Render(0.2);
+        Assert.InRange(Semitones(Pitch(before, 0.05, 0.19), 440), -0.1, 0.1);
+        Assert.InRange(Semitones(Pitch(after, 0.02, 0.19), 440), 11.9, 12.1);
+        // The note was not started again: it is as loud straight after the change as before it
+        Assert.InRange(Loudness(after, 0.0, 0.02) / Loudness(before, 0.15, 0.2), 0.8, 1.25);
+        S.TrackPreviewRelease(1);
+        S.TrackPreviewStop();
+    }
+
+    [Fact]
+    public void AShorterTableDoesNotBreakANoteThatSounds()
+    {
+        var song = SongWith("\"Table\":[\"0\",\"+4\",\"+7\",\"+12\",\"+7\",\"+4\"],\"TableLoop\":0");
+        S.TrackPreview(song, 1, 69, 1);
+        Render(0.09);   // well into the table
+        song.Instruments[0].Table = new() { "0" };
+        S.TrackInstrumentChanged(song, 1);
+        var after = Render(0.2);
+        Assert.InRange(Semitones(Pitch(after, 0.05, 0.19), 440), -0.1, 0.1);
+        S.TrackPreviewRelease(1);
+        S.TrackPreviewStop();
+    }
 }

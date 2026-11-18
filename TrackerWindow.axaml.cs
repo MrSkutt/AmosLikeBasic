@@ -638,6 +638,8 @@ public partial class TrackerWindow : Window
         if (inst == null) return;
         PushUndo("inst:" + Pattern.Instrument + ":" + key);
         change(inst);
+        // The notes that sound right now with the instrument change with it
+        TryEngine(() => ChiptuneSynth.TrackInstrumentChanged(_song, Pattern.Instrument));
         if (refreshList) RefreshInstrumentList();
         if (key == "table") ValidateTable();
         if (refreshList) _instrumentRefresh[0]();   // the heading shows the name

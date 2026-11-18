@@ -808,6 +808,31 @@ namespace AmosLikeBasic
             ch.VibPhase = 0;
 
             var v = _voices[c];
+            SetVoiceFromInstrument(ch, v, inst);
+            v.LfoTime = 0;   // the LFOs' delay starts again with every note
+            for (int k = 0; k < inst.Lfos.Length; k++)
+                if (inst.Lfos[k] is { Retrigger: true })
+                {
+                    // Random starts with a fresh value, the others from the start of the wave
+                    v.LfoPhases[k] = 0;
+                    v.LfoRandom[k] = NextLfoRandom();
+                }
+            v.Arp = Array.Empty<int>();
+            v.Glide = 0;
+            v.Bend = 0;
+            v.CutoffSlideLeft = 0;
+            v.VolumeSlideLeft = 0;
+            v.Drum = null;
+            v.Stage = EnvStage.Attack;   // from the current level, without a click
+            v.FilterEnvRising = true;
+            v.LfoPhase = 0;
+        }
+
+        // The instrument's sound settings on the voice. Used when a note starts, and when the instrument
+        // is changed while a note sounds: then the note goes on (envelope, pitch and LFOs where they are)
+        // with the new sound, so a turn of a knob is heard straight away.
+        private static void SetVoiceFromInstrument(TrackChannel ch, Voice v, TrackInstrument inst)
+        {
             v.Wave = inst.Wave;
             v.PulseWidth = ch.PulseWidth ?? inst.PulseWidth;
             v.PwmDepth = inst.PwmDepth;
@@ -837,23 +862,26 @@ namespace AmosLikeBasic
             v.EchoFeedback = inst.EchoFeedback;
             v.EchoMix = inst.EchoMix;
             v.Pan = ch.Pan ?? inst.Pan;
-            v.LfoTime = 0;   // the LFOs' delay starts again with every note
-            for (int k = 0; k < inst.Lfos.Length; k++)
-                if (inst.Lfos[k] is { Retrigger: true })
+        }
+
+        // An instrument (from 1) of the song was changed: the notes that sound with it take the new
+        // settings at once, whether the song plays or the notes are tried on the keys
+        public static void TrackInstrumentChanged(TrackerSong song, int instrument)
+        {
+            if (instrument < 1 || instrument > song.Instruments.Count) return;
+            var inst = CompileInstrument(song.Instruments[instrument - 1], instrument);
+            _trackCommands.Enqueue(() =>
+            {
+                for (int c = 0; c < TrackerSong.MaxChannels; c++)
                 {
-                    // Random starts with a fresh value, the others from the start of the wave
-                    v.LfoPhases[k] = 0;
-                    v.LfoRandom[k] = NextLfoRandom();
+                    var ch = _trackChannels[c];
+                    if (ch.Sfx || ch.InstNumber != instrument) continue;
+                    ch.Inst = inst;
+                    // A shorter table: carry on from its start rather than past its end
+                    if (ch.TableIndex >= inst.Table.Length) ch.TableIndex = 0;
+                    if (ch.Active && _voices[c].Stage != EnvStage.Idle) SetVoiceFromInstrument(ch, _voices[c], inst);
                 }
-            v.Arp = Array.Empty<int>();
-            v.Glide = 0;
-            v.Bend = 0;
-            v.CutoffSlideLeft = 0;
-            v.VolumeSlideLeft = 0;
-            v.Drum = null;
-            v.Stage = EnvStage.Attack;   // from the current level, without a click
-            v.FilterEnvRising = true;
-            v.LfoPhase = 0;
+            });
         }
 
         private static void ReleaseTrackVoice(int c)
