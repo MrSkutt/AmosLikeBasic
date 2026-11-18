@@ -441,13 +441,15 @@ public static partial class AmosRunner
         CancellationToken token,
         Action<Dictionary<string, object>> onVariablesChanged,
         Func<int, Task> waitForStep, 
-        Func<Task<string>> getConsoleInputAsync) 
+        Func<Task<string>> getConsoleInputAsync,
+        DebugVariables? debugVariables = null) 
     {
         var animationManager = new AnimationManager();
         var vars = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
         long lastVarUpdateTime = long.MinValue / 2;
         const long updateIntervalMs = 500;
         var constants = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // names made with CONST
+        if (debugVariables != null) { debugVariables.Live = vars; debugVariables.Constants = constants; }
         // A local helper function for updating variables and triggering the UI
         var setVar = (string name, object value) => {
             if (constants.Contains(name))
@@ -4839,7 +4841,7 @@ public static partial class AmosRunner
                     int py = 0;
                     if (t.TryConsume(',')) py = (int)Math.Round(Convert.ToDouble(ParseExpr(ref t, v, ln, gk, ikd, g), CultureInfo.InvariantCulture));
                     t.TryConsume(')');
-                    return (double)g.GetMapTile(px / 32, py / 32);
+                    return (double)g.TileAtPoint(px, py);
                 }
                 if (id.Equals("KEYSTATE", StringComparison.OrdinalIgnoreCase)) {
                     var k = ValueToString(ParseExpr(ref t, v, ln, gk, ikd, g)); t.TryConsume(')'); return ikd(k) ? 1.0 : 0.0;

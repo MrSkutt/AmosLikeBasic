@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Builds Projects/foresthop.amosproj from the BASIC code and the level below.
+"""Builds Projects/foresthop.amosproj from the BASIC code, and the level below as the map
+Graphics/ForestHop/level.amosmap (which the map editor can open and change).
 
     python3 Graphics/ForestHop/build_game.py
 
@@ -147,7 +148,10 @@ PROGRAM = r'''
 ;  and chiptune music.
 ;
 ;  All graphics are made by Graphics/ForestHop/generate_assets.py
-;  and the level below by Graphics/ForestHop/build_game.py
+;  and the program and level by Graphics/ForestHop/build_game.py.
+;  The level is a map: open it in the MAP editor (From the program)
+;  and change it there. Tiles 12-15 mark gems, beetles, the start
+;  and the flag.
 ; ════════════════════════════════════════════════════════════════
 
 SCREEN 640,480
@@ -156,7 +160,8 @@ SCREEN 640,480
 LW=120 : LH=15 : WORLDW=LW*32
 GRAV=0.6 : JUMPV=-13.5 : MAXFALL=11
 ACC=0.45 : MAXV=4.2
-TILES$="GDBQULC^bpvm"
+; Marker tiles in the map, where things start
+GEMTILE=12 : BUGTILE=13 : STARTTILE=14 : FLAGTILE=15
 GEMSPR=10 : BUGSPR=70 : FLAGSPR=2 : HUDGEM=3 : SPARKSPR=90 : PLAYER=99
 
 DIM GX(60) : DIM GY(60) : DIM GA(60)
@@ -660,17 +665,17 @@ END PROC
 PROC LoadLevel
   SCREEN SELECT 4
   NG=0 : NE=0
-  RESTORE LevelData
+  MAP LOAD "Graphics/ForestHop/level.amosmap"
+  ; The marker tiles become gems, beetles, the start and the flag,
+  ; and are taken off the map so that they are not drawn
   FOR R=0 TO LH-1
-    READ ROW$
     FOR C=0 TO LW-1
-      CH$=MID$(ROW$,C+1,1)
-      TI=INSTR(TILES$,CH$)-1
-      TILE SET C,R,TI
-      IF CH$="o" THEN GX(NG)=C*32+6 : GY(NG)=R*32+6 : GA(NG)=1 : NG=NG+1
-      IF CH$="e" THEN EX(NE)=C*32 : EY(NE)=R*32 : ED(NE)=-1 : EA(NE)=1 : NE=NE+1
-      IF CH$="S" THEN STARTX=C*32 : STARTY=R*32
-      IF CH$="F" THEN FLAGX=C*32 : FLAGY=R*32
+      TI=TILE(4,C*32,R*32)
+      IF TI=GEMTILE THEN GX(NG)=C*32+6 : GY(NG)=R*32+6 : GA(NG)=1 : NG=NG+1
+      IF TI=BUGTILE THEN EX(NE)=C*32 : EY(NE)=R*32 : ED(NE)=-1 : EA(NE)=1 : NE=NE+1
+      IF TI=STARTTILE THEN STARTX=C*32 : STARTY=R*32
+      IF TI=FLAGTILE THEN FLAGX=C*32 : FLAGY=R*32
+      IF TI>=GEMTILE THEN TILE SET C,R,-1
     NEXT C
   NEXT R
   TILE DRAW #4,0,0
@@ -692,17 +697,23 @@ PROC LoadLevel
   SPRITE ON FLAGSPR
   CPX=STARTX : CPY=STARTY
 END PROC
-
-LevelData:
-@@LEVEL@@
 '''
+
+# The level's characters as tile numbers in tiles.png; the last four are the marker tiles
+TILE_OF = {ch: i for i, ch in enumerate("GDBQULC^bpvmoeSF")}
 
 
 def main():
     rows = build_level()
     gems, bugs = check_level(rows)
-    data = "\n".join(f'DATA "{r}"' for r in rows)
-    text = PROGRAM.replace("@@LEVEL@@", data).lstrip("\n")
+    # The map in the format MAP LOAD reads: the tiles row by row, -1 for empty
+    cells = [TILE_OF.get(ch, -1) for r in rows for ch in r]
+    map_path = os.path.join(ROOT, "Graphics", "ForestHop", "level.amosmap")
+    with open(map_path, "w", encoding="utf-8") as f:
+        json.dump({"Width": W, "Height": H, "Data": cells}, f, separators=(",", ":"))
+    print(f"wrote {map_path}")
+
+    text = PROGRAM.lstrip("\n")
     path = os.path.join(ROOT, "Projects", "foresthop.amosproj")
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"Version": 2, "ProgramText": text}, f, ensure_ascii=False)

@@ -38,7 +38,9 @@ When you start AMOS Like Basic you see the editor, where you write the program. 
 | **TRACKER** | Opens the tracker, where you write music in patterns with notes and effects. |
 | **LOAD** / **SAVE** | Opens and saves projects (files ending in `.amosproj`). |
 
-If you click in the margin to the left of a line you set a **breakpoint**. The program then stops when it reaches that line, and you can see the value of every variable in the variable panel (press **F1** to show or hide it).
+If you click in the margin to the left of a line you set a **breakpoint**. The program then stops when it reaches that line, and you can see the value of every variable in the variable panel (press **F1** to show or hide it, and drag its left edge to make it wider or narrower).
+
+While the program is paused you can also **change** a variable: choose it in the panel, type the new value in the box at the bottom and press **Enter** (or **Set**). Text is typed as it is, numbers as in BASIC (`12`, `-3.5`, `$FF`). Double-click an array to see all its elements; there you change an element the same way. The program carries on with the new values when you press **RESUME** or **STEP**, so you can try out a change without starting again, for example give yourself more lives. The box at the top filters the list by name.
 
 In the game window **F12** switches between window and full screen, and **F8** turns on and off an effect that makes the picture look like an old TV. The title bar of the game window shows how fast the program runs: **FPS** (frames per second), **BASIC** (how much of the time your code is working), **CPU**, and **SYNC**: the screen refresh rate that `WAIT VBL` follows, or `timer` when the window is not being drawn.
 

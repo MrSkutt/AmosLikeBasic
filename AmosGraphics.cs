@@ -2962,6 +2962,9 @@ public sealed class AmosGraphics
     public int GetTilesInWidth() => _tilesInWidth; // NEW: Getter
     public (int width, int height) GetTileSize() => (_tileWidth, _tileHeight);
 
+    // The tile at a point on the map in dots, as TILE(layer, x, y) reads it; -1 outside the map
+    public int TileAtPoint(int x, int y) => GetMapTile(x / Math.Max(1, _tileWidth), y / Math.Max(1, _tileHeight));
+
     public void LoadTileBank(string f, int tw, int th)
     {
         try

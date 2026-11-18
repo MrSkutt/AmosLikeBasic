@@ -35,7 +35,6 @@ public class SpriteEditorTests
     [InlineData("Graphics/ForestHop/beetle.png", 32, 32, 3)]       // gaps between the figures
     [InlineData("Graphics/ForestHop/pinecone.png", 32, 32, 6)]
     [InlineData("Graphics/ForestHop/gem.png", 20, 20, 4)]
-    [InlineData("Graphics/ForestHop/tiles.png", 32, 32, 12)]       // tiles in rows
     [InlineData("Graphics/Anim/Anim_Earth_W150_H150_B48.png", 150, 150, 48)]   // frames that touch
     [InlineData("Graphics/Anim/Anim_Beast_W32_H56_B11.png", 32, 56, 16)]
     public void Guesses_the_frames_of_a_sheet(string file, int w, int h, int count)

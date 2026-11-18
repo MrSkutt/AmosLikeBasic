@@ -615,7 +615,7 @@ public static partial class AmosRunner
             Round(a[0]); // the layer is not used, but is converted to a number first as before
             int px = Round(a[1]);
             int py = a.Length == 3 ? Round(a[2]) : 0;
-            return (double)c.Graphics.GetMapTile(px / 32, py / 32);
+            return (double)c.Graphics.TileAtPoint(px, py);
         }),
     };
 

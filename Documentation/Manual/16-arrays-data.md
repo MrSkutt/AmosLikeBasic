@@ -122,7 +122,7 @@ Vegetables:
 DATA "Carrot", "Cucumber"
 ```
 
-The game Forest Hop keeps its whole level in `DATA` lines, one string per row of the level, and reads it with `RESTORE LevelData` and `READ ROW$`.
+A whole level can be kept in `DATA` lines, one string per row of the level, and read with `RESTORE LevelData` and `READ ROW$` (see *Levels in DATA* in the tiles chapter).
 
 ## Splitting and joining text
 

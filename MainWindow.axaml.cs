@@ -40,6 +40,11 @@ public partial class MainWindow : Window
     private readonly ConfigService configService;
     private readonly HashSet<int> _breakpoints = new(); // breakpoints list
     private Dictionary<string, object>? _currentVars;
+    // The running program's variables, and whether it stands still at a pause so they may be changed
+    private DebugVariables? _debugVars;
+    private volatile bool _stoppedAtPause;
+
+    private sealed record WatchItem(string Name, string Value, string Kind, bool IsArray);
 
     public MainWindow()
     {
@@ -305,7 +310,7 @@ public partial class MainWindow : Window
         // F1 - VARIABLE WATCH
         if (e.Key == Key.F1) 
         { 
-            VariableWatchPanel.IsVisible = !VariableWatchPanel.IsVisible; 
+            ToggleVariableWatch();
             e.Handled = true; 
             return; 
         }
@@ -384,19 +389,110 @@ public partial class MainWindow : Window
 
     private void VariableListBox_DoubleTapped(object? sender, TappedEventArgs e)
     {
-        if (VariableListBox.SelectedItem is not KeyValuePair<string, string> selected)
-            return;
+        if (VariableListBox.SelectedItem is not WatchItem selected) return;
+        if (_currentVars == null || !_currentVars.TryGetValue(selected.Name, out var value)) return;
 
-        var varName = selected.Key;
+        if (value is IAmosArray arr)
+        {
+            // Elements can be changed in the window while the program is paused
+            var viewer = new ArrayViewerWindow(selected.Name, arr, () => _stoppedAtPause, _currentTheme);
+            viewer.Show(this);
+        }
+        else if (_stoppedAtPause)
+        {
+            WatchEditBox.Focus();
+            WatchEditBox.SelectAll();
+        }
+    }
 
-        if (_currentVars == null || !_currentVars.TryGetValue(varName, out var value))
-            return;
+    // ══════════════════════════════════════════════════════════════
+    //  VARIABLE WATCH
+    // ══════════════════════════════════════════════════════════════
 
-        if (value is not IAmosArray arr)
-            return;
+    private GridLength _watchWidth = new(350);
 
-        var viewer = new ArrayViewerWindow(varName, arr);
-        viewer.Show(this);
+    // F1: hides the panel and its splitter, and brings it back at the width it had
+    private void ToggleVariableWatch()
+    {
+        var column = MainSplitGrid.ColumnDefinitions[2];
+        bool show = !VariableWatchPanel.IsVisible;
+        if (!show) _watchWidth = column.Width;
+        VariableWatchPanel.IsVisible = show;
+        WatchSplitter.IsVisible = show;
+        MainSplitGrid.ColumnDefinitions[1].Width = new GridLength(show ? 4 : 0);
+        column.Width = show ? _watchWidth : new GridLength(0);
+    }
+
+    private void ShowVariables(Dictionary<string, object> vars)
+    {
+        _currentVars = new Dictionary<string, object>(vars, StringComparer.OrdinalIgnoreCase);
+        var filter = WatchFilterBox.Text?.Trim() ?? "";
+        var selected = (VariableListBox.SelectedItem as WatchItem)?.Name;
+
+        var items = _currentVars
+            .Where(kvp => !kvp.Key.StartsWith("__") && !kvp.Key.StartsWith("@@"))
+            .Where(kvp => filter.Length == 0 || kvp.Key.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            // Plain variables first, arrays after them
+            .OrderBy(kvp => kvp.Value is IAmosArray)
+            .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(kvp => new WatchItem(kvp.Key, DebugVariables.Show(kvp.Value), KindOf(kvp.Key, kvp.Value), kvp.Value is IAmosArray))
+            .ToList();
+
+        VariableListBox.ItemsSource = items;
+        if (selected != null)
+            VariableListBox.SelectedItem = items.FirstOrDefault(i => i.Name.Equals(selected, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string KindOf(string name, object? value) => value switch
+    {
+        IAmosArray => "array",
+        string => "text",
+        _ => name.EndsWith('%') ? "whole" : "number"
+    };
+
+    private void WatchFilterBox_OnTextChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_currentVars != null) ShowVariables(_currentVars);
+    }
+
+    private void VariableListBox_OnSelectionChanged(object? sender, SelectionChangedEventArgs e) => UpdateWatchEditor();
+
+    // The edit row under the list: for the selected plain variable, while the program is paused
+    private void UpdateWatchEditor()
+    {
+        var item = VariableListBox.SelectedItem as WatchItem;
+        WatchEditError.IsVisible = false;
+        bool canEdit = _stoppedAtPause && item != null && !item.IsArray;
+        WatchEditRow.IsVisible = canEdit;
+        if (!_stoppedAtPause)
+            WatchEditLabel.Text = RunButton.IsEnabled ? "Run the program to watch its variables" : "Pause the program to change a value";
+        else if (item == null)
+            WatchEditLabel.Text = "Choose a variable to change it";
+        else if (item.IsArray)
+            WatchEditLabel.Text = $"Double-click {item.Name} to see and change its elements";
+        else
+        {
+            WatchEditLabel.Text = $"{item.Name} =";
+            var value = _debugVars?.Get(item.Name);
+            WatchEditBox.Text = value is string s ? s : DebugVariables.Show(value);
+        }
+    }
+
+    private void WatchSetButton_OnClick(object? sender, RoutedEventArgs e) => SetWatchedVariable();
+
+    private void WatchEditBox_OnKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { SetWatchedVariable(); e.Handled = true; }
+        else if (e.Key == Key.Escape) { UpdateWatchEditor(); e.Handled = true; }
+    }
+
+    private void SetWatchedVariable()
+    {
+        if (!_stoppedAtPause || _debugVars == null || VariableListBox.SelectedItem is not WatchItem item) return;
+        var error = _debugVars.Set(item.Name, WatchEditBox.Text ?? "");
+        WatchEditError.Text = error ?? "";
+        WatchEditError.IsVisible = error != null;
+        if (error == null) ShowVariables(_debugVars.Snapshot());
     }
     
     private void HandleGlobalKeyUp(object? sender, KeyEventArgs e)
@@ -647,6 +743,8 @@ public partial class MainWindow : Window
         statsTimer.Tick += (_, _) => UpdateScreenTitle(_gfx.TakeFrameStats());
         statsTimer.Start();
         var program = Editor.Text ?? string.Empty;
+        _debugVars = new DebugVariables();
+        _stoppedAtPause = false;
 
         try
         {
@@ -684,22 +782,11 @@ public partial class MainWindow : Window
                     onVariablesChanged: (vars) => {
                         Dispatcher.UIThread.Post(() =>
                         {
-                            _currentVars = new Dictionary<string, object>(
-                                vars, StringComparer.OrdinalIgnoreCase);
-
-                            var displayItems = vars
-                                .Where(kvp => !kvp.Key.StartsWith("__"))
-                                .OrderBy(kvp => kvp.Key)
-                                .Select(kvp => new KeyValuePair<string, string>(
-                                    kvp.Key,
-                                    kvp.Value is IAmosArray arr
-                                        ? $"[Array {string.Join("×", arr.Dimensions.Select(d => d))}]"
-                                        : kvp.Value?.ToString() ?? ""))
-                                .ToList();
-
-                            VariableListBox.ItemsSource = displayItems;
+                            // While paused the list shows what the pause read, which is newer
+                            if (!_stoppedAtPause) ShowVariables(vars);
                         });
                     },
+                    debugVariables: _debugVars,
                     // IMPORTANT: async here for the debug step
                     waitForStep: async (pc) => {
                         // NEW: Check whether we hit a breakpoint
@@ -758,8 +845,14 @@ public partial class MainWindow : Window
                                     }
                                 }
                             });
+                            // The program stands still here: show the variables as they are now and let them be changed
+                            var snapshot = _debugVars?.Snapshot();
                             _stepSignal = new TaskCompletionSource<bool>();
+                            _stoppedAtPause = true;
+                            Dispatcher.UIThread.Post(() => { if (snapshot != null) ShowVariables(snapshot); UpdateWatchEditor(); });
                             await _stepSignal.Task;
+                            _stoppedAtPause = false;
+                            Dispatcher.UIThread.Post(UpdateWatchEditor);
                         }
                     }
                 ); // End of ExecuteAsync
@@ -1337,8 +1430,11 @@ public partial class MainWindow : Window
 
     private List<Button>? _neutralToolbarButtons;
 
+    private AmosTheme? _currentTheme;
+
     private void ApplyTheme(AmosTheme theme)
     {
+        _currentTheme = theme;
         var font = new FontFamily(theme.Font);
 
         // Theme colours for all windows (the sprite and map editors etc.), with readable text colours
@@ -1371,10 +1467,24 @@ public partial class MainWindow : Window
         // Variabelbox
         VariableWatchPanel.Background = new SolidColorBrush(theme.VarWatchBg);
         VariableWatchPanel.BorderBrush = new SolidColorBrush(theme.SplitterColor);
+        WatchSplitter.Background = new SolidColorBrush(theme.SplitterColor);
+        LogSplitter.Background = new SolidColorBrush(theme.SplitterColor);
         VariableListBox.Background = new SolidColorBrush(theme.VarWatchBg);
         VariableListBox.Foreground = new SolidColorBrush(theme.VarWatchFg);
-        StatusText.Foreground = new SolidColorBrush(theme.VarWatchFg);
-        CurrentLineText.Foreground = new SolidColorBrush(theme.VarWatchAccentFg);
+        // Names in the accent colour, values in the text colour, both readable on the theme's background
+        var watchBg = theme.VarWatchBg;
+        var watchFg = ThemeResources.Readable(watchBg, theme.VarWatchFg, theme.EditorFg, Colors.White, Colors.Black);
+        var watchName = ThemeResources.Readable(watchBg, theme.VarWatchAccentFg, theme.AccentColor, watchFg);
+        Application.Current!.Resources["WatchValueBrush"] = new SolidColorBrush(watchFg);
+        Application.Current!.Resources["WatchNameBrush"] = new SolidColorBrush(watchName);
+        Application.Current!.Resources["WatchKindBrush"] = new SolidColorBrush(Color.FromArgb(150, watchFg.R, watchFg.G, watchFg.B));
+        WatchEditPanel.Background = new SolidColorBrush(watchBg);
+        WatchEditPanel.BorderBrush = new SolidColorBrush(theme.SplitterColor);
+        WatchEditLabel.Foreground = new SolidColorBrush(watchFg);
+        var headerFg = ThemeResources.Readable(theme.TopBarBg, theme.VarWatchFg, theme.MenuFg, Colors.White, Colors.Black);
+        WatchTitle.Foreground = new SolidColorBrush(ThemeResources.Readable(theme.TopBarBg, Colors.Yellow, theme.AccentColor, headerFg));
+        StatusText.Foreground = new SolidColorBrush(headerFg);
+        CurrentLineText.Foreground = new SolidColorBrush(ThemeResources.Readable(theme.TopBarBg, theme.VarWatchAccentFg, Colors.Lime, headerFg));
 
         // Toolbar buttons (those without an explicit colour). They are recognised by their XAML colour the first time;
         // after that they have the theme's colour, so the list is kept for later theme changes.

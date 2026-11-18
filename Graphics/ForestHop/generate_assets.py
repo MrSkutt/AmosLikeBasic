@@ -420,6 +420,29 @@ def tile_mushroom():
     return c
 
 
+def marker(figure, ox, oy):
+    """A figure on a dashed yellow frame, so a marker is told apart from a real tile."""
+    c = Canvas(32, 32)
+    for i in range(32):
+        if (i // 4) % 2 == 0:
+            for x, y in ((i, 0), (i, 31), (0, i), (31, i)):
+                c.set(x, y, GOLD_LIGHT)
+    c.blit(figure, ox, oy)
+    return c
+
+
+def flag_marker():
+    """The goal flag made small enough for one tile."""
+    c = Canvas(32, 32)
+    c.rect(8, 3, 9, 29, STONE_LIGHT)
+    c.ellipse(9, 3, 2, 2, GOLD)
+    c.rect(10, 5, 25, 15, LEAF)
+    c.rect(10, 11, 25, 15, LEAF_DARK)
+    c.ellipse(17.5, 10, 2.5, 2.5, GOLD_LIGHT)
+    c.outline()
+    return c
+
+
 def build_tiles():
     tiles = [
         tile_grass(),            # 0 grass (solid)
@@ -434,6 +457,12 @@ def build_tiles():
         tile_flower((240, 110, 170)),  # 9 flower (decoration)
         tile_flower((140, 160, 250)),  # 10 flower (decoration)
         tile_mushroom(),         # 11 mushroom (decoration)
+        # Markers for the map editor: where things start. LoadLevel turns them into
+        # sprites and takes them off the map, so they are never drawn in the game.
+        marker(gem(0), 6, 6),    # 12 gem
+        marker(beetle(0), 0, 0), # 13 beetle
+        marker(pinecone("idle"), 0, 0),  # 14 start
+        marker(flag_marker(), 0, 0),     # 15 flag
     ]
     d = Canvas(32, 32)
     tile_dirt(d, 7)

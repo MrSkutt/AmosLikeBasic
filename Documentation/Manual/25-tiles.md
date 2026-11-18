@@ -64,7 +64,7 @@ TILE DRAW 0, 0
 
 ## Levels in DATA
 
-Another way, which Forest Hop uses, is to draw the level with letters in `DATA` lines. Each letter stands for a tile:
+Another way is to draw the level with letters in `DATA` lines, right in the program. Each letter stands for a tile:
 
 ```basic
 SCREEN SELECT 1

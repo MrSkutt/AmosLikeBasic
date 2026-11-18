@@ -47,22 +47,22 @@ IF CX>550 THEN Cloud CX-640,CY,CS
 
 ## The level
 
-The level is 120 cells wide and 15 high, and it is stored as letters in `DATA` lines, one line per row of the level. `G` is grass, `B` stone, `Q` a bonus block, `o` a gem, `e` a beetle, `S` the start and `F` the flag:
+The level is 120 cells wide and 15 high, and it is a map made for the map editor, `Graphics/ForestHop/level.amosmap`. `LoadLevel` loads it with `MAP LOAD`.
+
+Gems, beetles, the start and the flag are not tiles but sprites. In the map they are **marker tiles**, tiles 12 to 15 in `tiles.png` with a dashed yellow frame. `LoadLevel` looks at every cell with `TILE(...)`, keeps the places of the gems and beetles in arrays, which then become sprites, and takes the markers off the map so that they are never drawn:
 
 ```basic nocheck
-LevelData:
-DATA "........oo....QBQ..............................."
-DATA "GGGGGGGGGGGGGGGGGGGGGG...GGGGGGGGGGGGGG.........."
-```
-
-`LoadLevel` goes through every character. The tile letters become `TILE SET`, and gems and beetles are kept in arrays, which then become sprites:
-
-```basic nocheck
-CH$=MID$(ROW$,C+1,1)
-TI=INSTR(TILES$,CH$)-1
-TILE SET C,R,TI
-IF CH$="o" THEN GX(NG)=C*32+6 : GY(NG)=R*32+6 : GA(NG)=1 : NG=NG+1
-IF CH$="e" THEN EX(NE)=C*32 : EY(NE)=R*32 : ED(NE)=-1 : EA(NE)=1 : NE=NE+1
+MAP LOAD "Graphics/ForestHop/level.amosmap"
+FOR R=0 TO LH-1
+  FOR C=0 TO LW-1
+    TI=TILE(4,C*32,R*32)
+    IF TI=GEMTILE THEN GX(NG)=C*32+6 : GY(NG)=R*32+6 : GA(NG)=1 : NG=NG+1
+    IF TI=BUGTILE THEN EX(NE)=C*32 : EY(NE)=R*32 : ED(NE)=-1 : EA(NE)=1 : NE=NE+1
+    IF TI=STARTTILE THEN STARTX=C*32 : STARTY=R*32
+    IF TI=FLAGTILE THEN FLAGX=C*32 : FLAGY=R*32
+    IF TI>=GEMTILE THEN TILE SET C,R,-1
+  NEXT C
+NEXT R
 ```
 
 All sprites, Pinecone too, are in layer 4 together with the level, in the level's coordinates. When the layer scrolls they follow along by themselves.
@@ -168,10 +168,10 @@ The score is redrawn every frame with a font of its own in layer 5, and the titl
 
 ## The graphics
 
-All the graphics in Forest Hop are made with code, in the Python script `Graphics/ForestHop/generate_assets.py`. It draws Pinecone, the beetle, the gems, the flag, all the tiles and the font pixel by pixel. The level and the code of the game are in `Graphics/ForestHop/build_game.py`, which writes the project file. If you want to change the level, redraw it there and run `python3 Graphics/ForestHop/build_game.py`.
+All the graphics in Forest Hop are made with code, in the Python script `Graphics/ForestHop/generate_assets.py`. It draws Pinecone, the beetle, the gems, the flag, all the tiles and the font pixel by pixel. The code of the game and the first version of the level are in `Graphics/ForestHop/build_game.py`, which writes the project file and the map.
 
 > **Try it:** Make Pinecone faster or let it jump higher by changing `MAXV` and `JUMPV` at the start of the program.
 
 > **Try it:** Add an extra life as a reward for every thousand points.
 
-> **Try it:** Make a level of your own! Change the letters in the `DATA` lines. Remember that Pinecone cannot jump higher than about four cells or further than six.
+> **Try it:** Make a level of your own! Open Forest Hop, press **MAP**, and choose first the tileset and then `level.amosmap` under **From the program**. Draw, put out gems and beetles with the marker tiles, and press **Save**. Remember that Pinecone cannot jump higher than about four cells or further than six.

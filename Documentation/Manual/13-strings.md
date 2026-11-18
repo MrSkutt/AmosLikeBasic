@@ -68,7 +68,7 @@ PRINT INSTR(SENTENCE$, "sea")
 
 This prints `10` and `0`. A third value says where the search should start: `INSTR(SENTENCE$, "e", 5)`.
 
-`INSTR` is handy for turning a character into a number. The game Forest Hop uses it to turn the characters of a level into tile numbers:
+`INSTR` is handy for turning a character into a number, for example the letters of a level drawn in `DATA` lines into tile numbers:
 
 ```basic
 TILES$ = "GDBQ"

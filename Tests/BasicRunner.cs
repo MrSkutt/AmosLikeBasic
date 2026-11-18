@@ -28,9 +28,11 @@ public static class BasicRunner
         JsonDocument.Parse(File.ReadAllText(amosprojPath)).RootElement.GetProperty("ProgramText").GetString()!;
 
     // input: the lines INPUT gets, in turn (then empty lines)
+    // onStep: called before each source line (0-based) with the variables, as the debugger's pause sees them
     public static RunResult Run(string program, double maxSeconds, IReadOnlyCollection<string>? keysDown = null, bool capture = false,
-        IReadOnlyList<string>? input = null)
+        IReadOnlyList<string>? input = null, Action<int, DebugVariables>? onStep = null)
     {
+        var debug = new DebugVariables();
         var result = new RunResult();
         var keys = new HashSet<string>(keysDown ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 
@@ -70,7 +72,7 @@ public static class BasicRunner
             k => { lock (keys) return keys.Contains(k); },
             null, cts.Token,
             v => { lock (result) result.Variables = new Dictionary<string, object>(v, StringComparer.OrdinalIgnoreCase); },
-            _ => Task.CompletedTask,
+            pc => { onStep?.Invoke(pc, debug); return Task.CompletedTask; },
             () =>
             {
                 lock (result)
@@ -79,7 +81,7 @@ public static class BasicRunner
                     result.Prints.Add("> " + input[inputIndex]);
                     return Task.FromResult(input[inputIndex++]);
                 }
-            }));
+            }, debug));
 
         try
         {
