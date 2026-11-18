@@ -41,6 +41,9 @@ namespace AmosLikeBasic
             public double FilterEnvDepth, FilterEnvAttack = 0.005, FilterEnvDecay = 0.2;
             public double VibratoDepth, VibratoRate = 6;
             public int RingSource = -1, SyncSource = -1;
+            public WaveformType? Osc2Wave;
+            public double Osc2Ratio = 1, Osc2Mix = 0.5;
+            public LfoSettings?[] Lfos = NoLfos;
             public TableStep[] Table = Array.Empty<TableStep>();
             public int TableLoop = -1;
         }
@@ -407,9 +410,57 @@ namespace AmosLikeBasic
                 VibratoRate = Math.Max(0, src.VibratoRate),
                 RingSource = src.Ring <= 0 ? -1 : ChIdx(src.Ring),
                 SyncSource = src.Sync <= 0 ? -1 : ChIdx(src.Sync),
+                Osc2Wave = CompileOsc2Wave(src.Osc2Wave),
+                Osc2Ratio = Math.Pow(2, (Math.Clamp(src.Osc2Semitones, -48, 48) + Math.Clamp(src.Osc2Detune, -1200, 1200) / 100.0) / 12.0),
+                Osc2Mix = Math.Clamp(src.Osc2Mix / 100.0, 0, 1),
+                Lfos = new[] { CompileLfo(src.Lfo1), CompileLfo(src.Lfo2) },
                 Table = steps.ToArray(),
                 TableLoop = src.TableLoop < steps.Count ? src.TableLoop : -1
             };
+        }
+
+        private static WaveformType? CompileOsc2Wave(string? wave)
+        {
+            if (string.IsNullOrWhiteSpace(wave) || wave.Equals("Off", StringComparison.OrdinalIgnoreCase)) return null;
+            var w = ParseWave(wave);
+            return w == WaveformType.Drums ? WaveformType.Noise : w;
+        }
+
+        // The LFO in the synth's units (null when it does nothing)
+        private static LfoSettings? CompileLfo(TrackerLfo? src)
+        {
+            if (src == null || src.Depth == 0) return null;
+            var target = (src.Target ?? "Off").Replace(" ", "").ToUpperInvariant() switch
+            {
+                "PITCH" => LfoTarget.Pitch,
+                "VOLUME" => LfoTarget.Volume,
+                "CUTOFF" => LfoTarget.Cutoff,
+                "RESONANCE" => LfoTarget.Resonance,
+                "PULSEWIDTH" => LfoTarget.PulseWidth,
+                "OSC2PITCH" => LfoTarget.Osc2Pitch,
+                "OSC2MIX" => LfoTarget.Osc2Mix,
+                _ => LfoTarget.Off
+            };
+            if (target == LfoTarget.Off) return null;
+            var shape = (src.Shape ?? "Sine").Replace(" ", "").ToUpperInvariant() switch
+            {
+                "TRIANGLE" => LfoShape.Triangle,
+                "SQUARE" => LfoShape.Square,
+                "SAWUP" => LfoShape.SawUp,
+                "SAWDOWN" => LfoShape.SawDown,
+                "RANDOM" => LfoShape.Random,
+                _ => LfoShape.Sine
+            };
+            // Cents for pitch become semitones, procent becomes 0 – 1; the cutoff is in semitones already
+            double depth = target switch
+            {
+                LfoTarget.Pitch or LfoTarget.Osc2Pitch => Math.Clamp(src.Depth, -4800, 4800) / 100.0,
+                LfoTarget.Cutoff => Math.Clamp(src.Depth, -96, 96),
+                LfoTarget.PulseWidth => Math.Clamp(src.Depth, -49, 49) / 100.0,
+                _ => Math.Clamp(src.Depth, -100, 100) / 100.0
+            };
+            return new LfoSettings(shape, target, Math.Clamp(src.Rate, 0, 100), Math.Clamp(src.SyncRows, 0, 256),
+                                   depth, Math.Max(0, src.Delay) / 1000.0, src.Retrigger);
         }
 
         // "NOISE +24", "PULSE", "-12", "P30", "TRIANGLE 0 P50"
@@ -744,6 +795,18 @@ namespace AmosLikeBasic
             v.VibratoRate = inst.VibratoRate;
             v.RingSource = inst.RingSource;
             v.SyncSource = inst.SyncSource;
+            v.Osc2Wave = inst.Osc2Wave;
+            v.Osc2Ratio = inst.Osc2Ratio;
+            v.Osc2Mix = inst.Osc2Mix;
+            v.Lfos = inst.Lfos;
+            v.LfoTime = 0;   // the LFOs' delay starts again with every note
+            for (int k = 0; k < inst.Lfos.Length; k++)
+                if (inst.Lfos[k] is { Retrigger: true })
+                {
+                    // Random starts with a fresh value, the others from the start of the wave
+                    v.LfoPhases[k] = 0;
+                    v.LfoRandom[k] = NextLfoRandom();
+                }
             v.Arp = Array.Empty<int>();
             v.Glide = 0;
             v.Bend = 0;

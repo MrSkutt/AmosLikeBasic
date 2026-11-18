@@ -60,11 +60,14 @@ public abstract class InstrumentGraph : Control
 }
 
 // Two periods of the waveform. For a pulse wave with PWM, faint outlines show how far the
-// width swings.
+// width swings. Mixed: the sound of both oscillators together, with oscillator 2 faint behind.
 public sealed class WaveGraph : InstrumentGraph
 {
+    public bool Mixed { get; init; }
+
     protected override void Draw(DrawingContext ctx, TrackerInstrument inst, Rect a)
     {
+        if (Mixed) { DrawMixed(ctx, inst, a); return; }
         double mid = a.Center.Y, half = a.Height / 2 - 2;
         ctx.DrawLine(new Pen(Grid, 1), new Point(a.Left, mid), new Point(a.Right, mid));
 
@@ -87,7 +90,47 @@ public sealed class WaveGraph : InstrumentGraph
         ctx.DrawText(Text(caption, Label), new Point(a.Left, a.Bottom + 3));
     }
 
-    private static List<Point> Points(Rect a, double mid, double half, string wave, double width)
+    private void DrawMixed(DrawingContext ctx, TrackerInstrument inst, Rect a)
+    {
+        double mid = a.Center.Y, half = a.Height / 2 - 2;
+        ctx.DrawLine(new Pen(Grid, 1), new Point(a.Left, mid), new Point(a.Right, mid));
+        string wave2 = (inst.Osc2Wave ?? "Off").ToUpperInvariant();
+        if (wave2 == "OFF")
+        {
+            ctx.DrawText(Text("OFF  (only oscillator 1 sounds)", Label), new Point(a.Left, a.Bottom + 3));
+            return;
+        }
+        string wave1 = (inst.Wave ?? "Pulse").ToUpperInvariant();
+        double width = Math.Clamp(inst.PulseWidth / 100.0, 0.01, 0.99);
+        double ratio = Math.Pow(2, (inst.Osc2Semitones + inst.Osc2Detune / 100.0) / 12.0);
+        double mix = Math.Clamp(inst.Osc2Mix / 100.0, 0, 1);
+        ctx.DrawGeometry(null, new Pen(Faint, 1, new DashStyle(new double[] { 3, 3 }, 0)),
+            Polyline(Points(a, mid, half, wave2, width, ratio)));
+        var one = Points(a, mid, half, wave1, width);
+        var two = Points(a, mid, half, wave2, width, ratio);
+        // The sum, point by point (both lists have the same x places apart from the extra edge points)
+        var sum = new List<Point>();
+        const int n = 400;
+        for (int i = 0; i <= n; i++)
+        {
+            double x = a.Left + i * a.Width / n;
+            double y1 = YAt(one, x), y2 = YAt(two, x);
+            sum.Add(new Point(x, mid + ((y1 - mid) * (1 - mix) + (y2 - mid) * mix)));
+        }
+        ctx.DrawGeometry(null, new Pen(Line, 2), Polyline(sum));
+        string tune = $"{inst.Osc2Semitones:+0;-0;0} st {inst.Osc2Detune:+0;-0;0} c";
+        ctx.DrawText(Text($"{wave2}  {tune}  mix {inst.Osc2Mix:0} %", Label), new Point(a.Left, a.Bottom + 3));
+    }
+
+    private static double YAt(List<Point> pts, double x)
+    {
+        for (int i = pts.Count - 1; i >= 0; i--)
+            if (pts[i].X <= x) return pts[i].Y;
+        return pts[0].Y;
+    }
+
+    // ratio: the pitch compared with oscillator 1 (oscillator 2 runs that many periods as fast)
+    private static List<Point> Points(Rect a, double mid, double half, string wave, double width, double ratio = 1)
     {
         var pts = new List<Point>();
         const int n = 400;
@@ -95,14 +138,14 @@ public sealed class WaveGraph : InstrumentGraph
         double noise = 0;
         for (int i = 0; i <= n; i++)
         {
-            double t = i / (double)n * 2 % 1.0;   // two periods
+            double t = i / (double)n * 2 * ratio % 1.0;   // two periods of oscillator 1
             double s = wave switch
             {
                 "TRIANGLE" => t < 0.5 ? 4 * t - 1 : 3 - 4 * t,
                 "SAWTOOTH" or "SAW" => 2 * t - 1,
                 "SINE" => Math.Sin(2 * Math.PI * t),
                 "NOISE" => i % 6 == 0 ? noise = rng.Next(2) * 2 - 1 : noise,
-                _ => t < width ? 1 : -1   // PULSE, SQUARE
+                _ => t < (wave == "SQUARE" ? 0.5 : width) ? 1 : -1   // PULSE, SQUARE
             };
             var p = new Point(a.Left + i * a.Width / n, mid - s * half);
             // Vertical edges for the square shapes, so that they look like a scope picture
@@ -224,5 +267,67 @@ public sealed class FilterGraph : InstrumentGraph
             pts.Add(new Point(x(hz), y(20 * Math.Log10(Math.Max(mag, 1e-6)))));
         }
         return Polyline(pts);
+    }
+}
+
+// One second of an LFO (or two periods when it follows the song's rows), with the delay as a
+// growing outline, and what it moves and how much
+public sealed class LfoGraph : InstrumentGraph
+{
+    public Func<TrackerInstrument, TrackerLfo> Lfo { get; init; } = i => i.Lfo1;
+
+    protected override void Draw(DrawingContext ctx, TrackerInstrument inst, Rect a)
+    {
+        var lfo = Lfo(inst);
+        double mid = a.Center.Y, half = a.Height / 2 - 2;
+        ctx.DrawLine(new Pen(Grid, 1), new Point(a.Left, mid), new Point(a.Right, mid));
+        if (lfo.Target == "Off" || lfo.Depth == 0)
+        {
+            ctx.DrawText(Text("OFF  (choose what it moves and a depth)", Label), new Point(a.Left, a.Bottom + 3));
+            return;
+        }
+
+        var shape = Enum.TryParse<ChiptuneSynth.LfoShape>((lfo.Shape ?? "Sine").Replace(" ", ""), true, out var sh)
+            ? sh : ChiptuneSynth.LfoShape.Sine;
+        // The time shown: a second, or two periods of the rows
+        bool synced = lfo.SyncRows > 0;
+        double seconds = synced ? 2 * lfo.SyncRows * 6 * 2.5 / 125 : 1;
+        double rate = synced ? 1 / (lfo.SyncRows * 6 * 2.5 / 125) : lfo.Rate;
+        double delay = Math.Max(0, lfo.Delay) / 1000.0;
+
+        var rng = new Random(3);
+        double random = rng.NextDouble() * 2 - 1;
+        var pts = new List<Point>();
+        const int n = 400;
+        double lastPhase = 0;
+        for (int i = 0; i <= n; i++)
+        {
+            double time = i * seconds / n;
+            double phase = time * rate % 1.0;
+            if (phase < lastPhase) random = rng.NextDouble() * 2 - 1;
+            lastPhase = phase;
+            double fade = delay > 0 ? Math.Min(1, time / delay) : 1;
+            double y = ChiptuneSynth.LfoWave(shape, phase, random) * fade * Math.Sign(lfo.Depth);
+            var p = new Point(a.Left + i * a.Width / n, mid - y * half);
+            if (pts.Count > 0 && Math.Abs(pts[^1].Y - p.Y) > half * 0.5) pts.Add(new Point(p.X, pts[^1].Y));
+            pts.Add(p);
+        }
+        if (delay > 0)
+        {
+            double dx = a.Left + Math.Min(1, delay / seconds) * a.Width;
+            var pen = new Pen(Faint, 1, new DashStyle(new double[] { 3, 3 }, 0));
+            ctx.DrawLine(pen, new Point(a.Left, mid), new Point(dx, mid - half));
+            ctx.DrawLine(pen, new Point(a.Left, mid), new Point(dx, mid + half));
+        }
+        ctx.DrawGeometry(null, new Pen(Line, 2), Polyline(pts));
+
+        string speed = synced ? $"per {lfo.SyncRows} row{(lfo.SyncRows == 1 ? "" : "s")}" : $"{lfo.Rate:0.#} Hz";
+        // The filter must be on for the cutoff and resonance to change anything
+        if (lfo.Target is "Cutoff" or "Resonance" && (inst.Filter ?? "Off").Equals("Off", StringComparison.OrdinalIgnoreCase))
+            speed += "  (turn the filter on)";
+        else if (lfo.Target.StartsWith("Osc 2") && (inst.Osc2Wave ?? "Off").Equals("Off", StringComparison.OrdinalIgnoreCase))
+            speed += "  (turn oscillator 2 on)";
+        ctx.DrawText(Text($"{lfo.Target.ToUpperInvariant()}  ±{Math.Abs(lfo.Depth):0.#} {TrackerLfo.UnitOf(lfo.Target)}  {speed}", Label),
+            new Point(a.Left, a.Bottom + 3));
     }
 }

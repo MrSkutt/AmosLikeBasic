@@ -176,10 +176,47 @@ namespace AmosLikeBasic
         public int Ring { get; set; }                      // channel, 0 = off
         public int Sync { get; set; }                      // channel, 0 = off
 
+        // A second oscillator, mixed with the first: Off or a wave, tuned in semitones and cents
+        // from the note (a few cents give a fat, chorus-like sound)
+        public string Osc2Wave { get; set; } = "Off";
+        public double Osc2Semitones { get; set; }          // -24 – 24
+        public double Osc2Detune { get; set; }             // cent
+        public double Osc2Mix { get; set; } = 50;          // procent of oscillator 2 in the sound
+
+        // Two LFOs that each move one setting up and down while the note sounds
+        public TrackerLfo Lfo1 { get; set; } = new();
+        public TrackerLfo Lfo2 { get; set; } = new();
+
         // One step per tick from when the note starts: "NOISE +24", "PULSE", "-12", "P30" (pulse width).
         // TableLoop is the step the table jumps back to, -1 stays on the last step.
         public List<string> Table { get; set; } = new();
         public int TableLoop { get; set; } = -1;
+    }
+
+    // A low frequency oscillator: a slow wave that moves a setting of the instrument.
+    // Depth is in the target's own unit: cents for pitch, semitones for the cutoff, procent otherwise.
+    public sealed class TrackerLfo
+    {
+        public static readonly string[] Shapes = { "Sine", "Triangle", "Square", "Saw up", "Saw down", "Random" };
+        public static readonly string[] Targets =
+            { "Off", "Pitch", "Volume", "Cutoff", "Resonance", "Pulse width", "Osc 2 pitch", "Osc 2 mix" };
+
+        public string Shape { get; set; } = "Sine";
+        public string Target { get; set; } = "Off";
+        public double Rate { get; set; } = 4;              // Hz, when not in step with the song
+        public int SyncRows { get; set; }                  // > 0: one period takes this many rows
+        public double Depth { get; set; }
+        public double Delay { get; set; }                  // ms until it has grown to full depth
+        public bool Retrigger { get; set; } = true;        // starts from the beginning on every note
+
+        // The unit Depth is given in, for the labels
+        public static string UnitOf(string target) => target switch
+        {
+            "Pitch" or "Osc 2 pitch" => "cents",
+            "Cutoff" => "semitones",
+            "Off" => "",
+            _ => "%"
+        };
     }
 
     public sealed class TrackerPattern

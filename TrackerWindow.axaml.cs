@@ -320,6 +320,15 @@ public partial class TrackerWindow : Window
         AddNumber(sound, "PWM depth %", 0, 49, 1, "0", i => i.PwmDepth, (i, v) => i.PwmDepth = v);
         AddNumber(sound, "PWM rate Hz", 0, 20, 0.1, "0.0", i => i.PwmRate, (i, v) => i.PwmRate = v);
 
+        // ── The second oscillator ──
+        var osc2 = Card(cards, "OSCILLATOR 2");
+        AddGraph(osc2, new WaveGraph { Mixed = true });
+        AddCombo(osc2, "Wave", new[] { "Off", "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
+            i => i.Osc2Wave ?? "Off", (i, v) => i.Osc2Wave = v, "osc2 wave");
+        AddNumber(osc2, "Semitones", -24, 24, 1, "0", i => i.Osc2Semitones, (i, v) => i.Osc2Semitones = v);
+        AddNumber(osc2, "Detune cents", -100, 100, 1, "0", i => i.Osc2Detune, (i, v) => i.Osc2Detune = v);
+        AddNumber(osc2, "Mix %", 0, 100, 5, "0", i => i.Osc2Mix, (i, v) => i.Osc2Mix = v);
+
         // ── The envelope ──
         var env = Card(cards, "ENVELOPE");
         AddGraph(env, new EnvelopeGraph());
@@ -345,6 +354,10 @@ public partial class TrackerWindow : Window
         AddNumber(pitch, "Ring mod ch", 0, 8, 1, "0", i => i.Ring, (i, v) => i.Ring = (int)v);
         AddNumber(pitch, "Sync ch", 0, 8, 1, "0", i => i.Sync, (i, v) => i.Sync = (int)v);
 
+        // ── The LFOs ──
+        AddLfoCard(cards, "LFO 1", i => i.Lfo1 ??= new TrackerLfo());
+        AddLfoCard(cards, "LFO 2", i => i.Lfo2 ??= new TrackerLfo());
+
         // ── The table ──
         var tableCard = Card(cards, "TABLE (one step per tick)");
         var table = new TextBox
@@ -367,6 +380,39 @@ public partial class TrackerWindow : Window
         tableCard.Children.Add(table);
         _instrumentRefresh.Add(() => table.Text = string.Join("\n", CurrentInstrument?.Table ?? new List<string>()));
         AddNumber(tableCard, "Loop from step", -1, 255, 1, "0", i => i.TableLoop, (i, v) => i.TableLoop = (int)v);
+    }
+
+    // An LFO: what it moves, its wave, speed (in Hz or in rows of the song) and depth
+    private void AddLfoCard(WrapPanel cards, string title, Func<TrackerInstrument, TrackerLfo> lfo)
+    {
+        var card = Card(cards, title);
+        AddGraph(card, new LfoGraph { Lfo = lfo });
+        AddCombo(card, "Moves", TrackerLfo.Targets, i => lfo(i).Target, (i, v) => lfo(i).Target = v, title + " Moves");
+        AddCombo(card, "Wave", TrackerLfo.Shapes, i => lfo(i).Shape, (i, v) => lfo(i).Shape = v, title + " Wave");
+        AddNumber(card, "Depth", -1200, 1200, 5, "0", i => lfo(i).Depth, (i, v) => lfo(i).Depth = v, title + " Depth");
+        AddNumber(card, "Rate Hz", 0, 50, 0.1, "0.0", i => lfo(i).Rate, (i, v) => lfo(i).Rate = v, title + " Rate Hz");
+        AddNumber(card, "Sync rows", 0, 64, 1, "0", i => lfo(i).SyncRows, (i, v) => lfo(i).SyncRows = (int)v, title + " Sync rows");
+        AddNumber(card, "Delay ms", 0, 5000, 50, "0", i => lfo(i).Delay, (i, v) => lfo(i).Delay = v, title + " Delay ms");
+        AddCheck(card, "Restart on note", i => lfo(i).Retrigger, (i, v) => lfo(i).Retrigger = v, title + " retrigger");
+        card.Children.Add(new TextBlock
+        {
+            Text = "Depth: cents for pitch, semitones for cutoff, % otherwise. Sync rows above 0 ties the speed to the song.",
+            Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, FontSize = 11
+        });
+    }
+
+    private void AddCheck(StackPanel panel, string label, Func<TrackerInstrument, bool> get, Action<TrackerInstrument, bool> set,
+        string key)
+    {
+        var check = new CheckBox();
+        check.IsCheckedChanged += (_, _) => EditInstrument(key, i => set(i, check.IsChecked == true));
+        AddRow(panel, label, check);
+        _instrumentRefresh.Add(() =>
+        {
+            var inst = CurrentInstrument;
+            check.IsEnabled = inst != null;
+            check.IsChecked = inst != null && get(inst);
+        });
     }
 
     // A card on the instrument page; returns the panel its rows go in
@@ -408,8 +454,9 @@ public partial class TrackerWindow : Window
         panel.Children.Add(grid);
     }
 
+    // key: what undo groups the changes by (the label when not given)
     private void AddNumber(StackPanel panel, string label, double min, double max, double inc, string format,
-        Func<TrackerInstrument, double> get, Action<TrackerInstrument, double> set)
+        Func<TrackerInstrument, double> get, Action<TrackerInstrument, double> set, string? key = null)
     {
         var box = new NumericUpDown
         {
@@ -417,7 +464,7 @@ public partial class TrackerWindow : Window
         };
         box.ValueChanged += (_, _) =>
         {
-            if (box.Value is decimal d) EditInstrument(label, i => set(i, (double)d));
+            if (box.Value is decimal d) EditInstrument(key ?? label, i => set(i, (double)d));
         };
         AddRow(panel, label, box);
         _instrumentRefresh.Add(() =>
@@ -429,12 +476,12 @@ public partial class TrackerWindow : Window
     }
 
     private void AddCombo(StackPanel panel, string label, string[] items,
-        Func<TrackerInstrument, string> get, Action<TrackerInstrument, string> set)
+        Func<TrackerInstrument, string> get, Action<TrackerInstrument, string> set, string? key = null)
     {
         var combo = new ComboBox { ItemsSource = items, HorizontalAlignment = HorizontalAlignment.Stretch };
         combo.SelectionChanged += (_, _) =>
         {
-            if (combo.SelectedItem is string s) EditInstrument(label, i => set(i, s));
+            if (combo.SelectedItem is string s) EditInstrument(key ?? label, i => set(i, s));
         };
         AddRow(panel, label, combo);
         _instrumentRefresh.Add(() =>

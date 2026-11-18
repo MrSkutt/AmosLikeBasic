@@ -225,4 +225,77 @@ public class SynthTests : IDisposable
         Assert.True(S.IsTrackPlaying());
         Assert.True(S.TrackRow > row);
     }
+
+    // A song with one sine instrument with extra settings (JSON) and one row with A-4
+    private static TrackerSong SongWith(string instrumentExtra, params string[] rows)
+    {
+        if (rows.Length == 0) rows = new[] { "A-4 01 ...", "--- .. ...", "--- .. ...", "--- .. ...", "--- .. ...", "--- .. ..." };
+        var json = "{\"Speed\":6,\"Tempo\":125,\"Instruments\":[{\"Wave\":\"Sine\",\"Volume\":0.5,\"Attack\":0,\"Decay\":0,\"Sustain\":100," +
+                   instrumentExtra + "}],\"Order\":[0],\"Patterns\":[[" + string.Join(",", rows.Select(r => "\"" + r + "\"")) + "]]}";
+        return TrackerSong.FromJson(json);
+    }
+
+    private static double Loudness(float[] b, double t0, double t1)
+    {
+        double sum = 0;
+        int a = (int)(t0 * SR), e = (int)(t1 * SR);
+        for (int i = a; i < e; i++) sum += b[i] * b[i];
+        return Math.Sqrt(sum / (e - a));
+    }
+
+    [Fact]
+    public void OscillatorTwoPlaysAtItsOwnPitch()
+    {
+        // All of the sound from oscillator 2, an octave up
+        S.TrackPlay(SongWith("\"Osc2Wave\":\"Sine\",\"Osc2Semitones\":12,\"Osc2Mix\":100"), loop: false);
+        var b = Render(0.3);
+        Assert.InRange(Semitones(Pitch(b, 0.05, 0.25), 440), 11.9, 12.1);
+    }
+
+    [Fact]
+    public void OscillatorTwoOffIsTheOldSound()
+    {
+        S.TrackPlay(SongWith("\"Osc2Wave\":\"Off\",\"Osc2Semitones\":12,\"Osc2Mix\":100"), loop: false);
+        var b = Render(0.3);
+        Assert.InRange(Semitones(Pitch(b, 0.05, 0.25), 440), -0.1, 0.1);
+    }
+
+    [Fact]
+    public void PitchLfoMovesThePitchUpAndDown()
+    {
+        // A square LFO at 2 Hz, 100 cents: a semitone up for 0.25 s, then a semitone down
+        S.TrackPlay(SongWith("\"Lfo1\":{\"Shape\":\"Square\",\"Target\":\"Pitch\",\"Rate\":2,\"Depth\":100}"), loop: false);
+        var b = Render(0.5);
+        Assert.InRange(Semitones(Pitch(b, 0.03, 0.22), 440), 0.9, 1.1);
+        Assert.InRange(Semitones(Pitch(b, 0.28, 0.47), 440), -1.1, -0.9);
+    }
+
+    [Fact]
+    public void LfoInStepWithTheSongFollowsTheRows()
+    {
+        // Speed 6 at tempo 125 is 0.12 s a row; two rows a period: up for one row, down the next
+        S.TrackPlay(SongWith("\"Lfo1\":{\"Shape\":\"Square\",\"Target\":\"Pitch\",\"SyncRows\":2,\"Depth\":200}"), loop: false);
+        var b = Render(0.24);
+        Assert.InRange(Semitones(Pitch(b, 0.02, 0.11), 440), 1.9, 2.1);
+        Assert.InRange(Semitones(Pitch(b, 0.14, 0.23), 440), -2.1, -1.9);
+    }
+
+    [Fact]
+    public void VolumeLfoIsTremolo()
+    {
+        // Square at 2 Hz, full depth: loud for 0.25 s, silent the next 0.25 s
+        S.TrackPlay(SongWith("\"Lfo2\":{\"Shape\":\"Square\",\"Target\":\"Volume\",\"Rate\":2,\"Depth\":100}"), loop: false);
+        var b = Render(0.5);
+        Assert.True(Loudness(b, 0.05, 0.2) > 0.1);
+        Assert.True(Loudness(b, 0.3, 0.45) < 0.01);
+    }
+
+    [Fact]
+    public void LfoDelayLetsItGrowIn()
+    {
+        // Vibrato that has grown to full depth only after 400 ms: almost no change at first
+        S.TrackPlay(SongWith("\"Lfo1\":{\"Shape\":\"Square\",\"Target\":\"Pitch\",\"Rate\":2,\"Depth\":100,\"Delay\":400}"), loop: false);
+        var b = Render(0.1);
+        Assert.InRange(Semitones(Pitch(b, 0.005, 0.03), 440), -0.1, 0.15);
+    }
 }

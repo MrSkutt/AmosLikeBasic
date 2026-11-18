@@ -390,7 +390,7 @@ The effect is a letter or digit and two hex digits. Most only apply on their own
 
 ### Instruments
 
-An instrument has the same settings as the `PLAY` commands: `Wave`, `Volume`, `PulseWidth`, `PwmDepth`, `PwmRate`, `Attack`, `Decay`, `Sustain`, `Release`, `Filter`, `Cutoff`, `Resonance`, `FilterEnvDepth`, `FilterEnvAttack`, `FilterEnvDecay`, `Vibrato`, `VibratoRate`, `Ring` and `Sync`. Those you leave out get default values.
+An instrument has the same settings as the `PLAY` commands: `Wave`, `Volume`, `PulseWidth`, `PwmDepth`, `PwmRate`, `Attack`, `Decay`, `Sustain`, `Release`, `Filter`, `Cutoff`, `Resonance`, `FilterEnvDepth`, `FilterEnvAttack`, `FilterEnvDecay`, `Vibrato`, `VibratoRate`, `Ring` and `Sync`, and besides those a second oscillator and two LFOs (below). Those you leave out get default values.
 
 An instrument can also have a **table** that moves one step per tick from the moment the note starts. Each step can change the waveform, move the note a number of semitones and change the pulse width (`P30` is 30 %). That is how C64 musicians made drums and chords:
 
@@ -399,6 +399,28 @@ An instrument can also have a **table** that moves one step per tick from the mo
 ```
 
 That table is a kick drum: a short click of square wave and then a triangle wave that quickly drops in pitch. `TableLoop` is the step the table starts again from when it reaches the end. Without it the table stays on the last step. A major chord as an arpeggio is `["0", "+4", "+7"]` with `"TableLoop": 0`.
+
+#### Oscillator 2
+
+A tracker instrument can have a **second oscillator** that is mixed with the first. Choose its **Wave** (Off turns it off), how many **Semitones** above or below the note it plays, a **Detune** in cents and how much of it is heard (**Mix**). Two sawtooth waves a few cents apart (Detune 5 – 12) give the fat, swirling sound of a classic synth lead; +7 or +12 semitones gives a fifth or an octave on top of every note. In the file it is `"Osc2Wave": "Sawtooth", "Osc2Semitones": 0, "Osc2Detune": 8, "Osc2Mix": 50`.
+
+#### LFO 1 and LFO 2
+
+An **LFO** (low frequency oscillator) is a slow wave that moves one setting up and down while the note sounds. Each instrument has two. Choose what it **moves**, its **wave** and its **depth**:
+
+| Moves | Depth in | Sounds like |
+|---|---|---|
+| Pitch | cents | vibrato; with a square wave, a trill |
+| Volume | % | tremolo, a pulsing sound |
+| Cutoff | semitones | a wah that opens and closes the filter (the filter must be on) |
+| Resonance | % | a whistling filter that comes and goes |
+| Pulse width | % | the moving, chorus-like pulse sound of the C64 |
+| Osc 2 pitch | cents | oscillator 2 swaying against oscillator 1 |
+| Osc 2 mix | % | the sound shifting between the two oscillators |
+
+The waves are sine, triangle, square, saw up, saw down and **random**, which jumps to a new value every period, the bubbling computer sound of old science fiction. **Rate** is the speed in Hz. **Sync rows** above 0 ties the speed to the song instead: 4 means one period every four rows, so the effect pulses in time with the music even when the tempo changes. **Delay** lets the LFO grow in over that many milliseconds, so that a long note starts straight and then gets vibrato. **Restart on note** starts the wave from the beginning on every note; turned off, it runs on freely. The graph shows the wave, the delay and what it moves.
+
+In the file an LFO is written `"Lfo1": { "Target": "Cutoff", "Shape": "Triangle", "Depth": 24, "SyncRows": 4 }`. The older settings `Vibrato` and `PwmDepth` still work as before.
 
 ### The file
 

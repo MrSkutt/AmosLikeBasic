@@ -86,6 +86,11 @@ namespace AmosLikeBasic
             public double Bend;                            // halvtoner
             public int RingSource = -1, SyncSource = -1;
             public double Gate = 0.9;                      // fraction of the note length the note is held
+            // A second oscillator: its wave (null = off), pitch as a factor of the note, and its share of the sound
+            public WaveformType? Osc2Wave;
+            public double Osc2Ratio = 1, Osc2Mix = 0.5;
+            // Two LFOs (null = off); the settings are shared and never changed, the state is below
+            public LfoSettings?[] Lfos = NoLfos;
 
             // Slides from {SWEEP} and {FADE}: change per sample and number of samples left
             public double CutoffSlide, VolumeSlide;
@@ -107,6 +112,10 @@ namespace AmosLikeBasic
             public double Env;
             public double Gain = 0.3;
             public double LfoPhase, PwmPhase;
+            public double Osc2Phase, NoiseClock2, NoiseOut2 = 1;
+            public int Lfsr2 = 1;
+            public readonly double[] LfoPhases = new double[2], LfoRandom = new double[2];
+            public double LfoTime;   // seconds since the note started, for the LFOs' delay
             public int ArpIndex;
             public double ArpCounter;
             public float[]? Drum;
@@ -130,6 +139,8 @@ namespace AmosLikeBasic
                 Glide = s.Glide; Bend = s.Bend;
                 RingSource = s.RingSource; SyncSource = s.SyncSource;
                 Gate = s.Gate;
+                Osc2Wave = s.Osc2Wave; Osc2Ratio = s.Osc2Ratio; Osc2Mix = s.Osc2Mix;
+                Lfos = s.Lfos;
             }
 
             public void ResetSettings()
@@ -146,7 +157,81 @@ namespace AmosLikeBasic
                 RingSource = -1; SyncSource = -1;
                 Gate = 0.9;
                 CutoffSlideLeft = 0; VolumeSlideLeft = 0;
+                Osc2Wave = null; Osc2Ratio = 1; Osc2Mix = 0.5;
+                Lfos = NoLfos;
             }
+        }
+
+        public enum LfoShape { Sine, Triangle, Square, SawUp, SawDown, Random }
+        public enum LfoTarget { Off, Pitch, Volume, Cutoff, Resonance, PulseWidth, Osc2Pitch, Osc2Mix }
+
+        // An LFO's settings. Depth is in the target's unit: semitones for pitch and the cutoff,
+        // 0 – 1 for volume, resonance, pulse width and mix.
+        public sealed record LfoSettings(LfoShape Shape, LfoTarget Target, double Rate, int SyncRows,
+                                         double Depth, double Delay, bool Retrigger);
+
+        private static readonly LfoSettings?[] NoLfos = new LfoSettings?[2];
+
+        // The LFO's wave at phase 0 – 1, from -1 to 1 (random: a new value every period)
+        public static double LfoWave(LfoShape shape, double phase, double random) => shape switch
+        {
+            LfoShape.Triangle => phase < 0.5 ? 4 * phase - 1 : 3 - 4 * phase,
+            LfoShape.Square => phase < 0.5 ? 1 : -1,
+            LfoShape.SawUp => 2 * phase - 1,
+            LfoShape.SawDown => 1 - 2 * phase,
+            LfoShape.Random => random,
+            _ => Math.Sin(2 * Math.PI * phase)
+        };
+
+        private static uint _lfoSeed = 0x9E3779B9;
+
+        private static double NextLfoRandom()
+        {
+            _lfoSeed ^= _lfoSeed << 13; _lfoSeed ^= _lfoSeed >> 17; _lfoSeed ^= _lfoSeed << 5;
+            return _lfoSeed / (double)uint.MaxValue * 2 - 1;
+        }
+
+        // What the LFOs do to the sound this sample
+        private struct Modulation
+        {
+            public double Semis, Volume, Cutoff, Resonance, PulseWidth, Osc2Semis, Mix;
+        }
+
+        private static Modulation NextModulation(Voice v, double dt)
+        {
+            var m = new Modulation { Volume = 1, Cutoff = 1 };
+            var lfos = v.Lfos;
+            for (int k = 0; k < lfos.Length; k++)
+            {
+                var l = lfos[k];
+                if (l == null || l.Target == LfoTarget.Off || l.Depth == 0) continue;
+                // In step with the song: one period takes SyncRows rows (a tick is 2.5 / tempo seconds)
+                double rate = l.SyncRows > 0
+                    ? Math.Max(1, _trackTempo > 0 ? _trackTempo : 125) * 0.4 / Math.Max(1, _trackSpeed > 0 ? _trackSpeed : 6) / l.SyncRows
+                    : l.Rate;
+                v.LfoPhases[k] += rate * dt;
+                if (v.LfoPhases[k] >= 1)
+                {
+                    v.LfoPhases[k] -= Math.Floor(v.LfoPhases[k]);
+                    v.LfoRandom[k] = NextLfoRandom();
+                }
+                double fade = l.Delay > 0 ? Math.Min(1, v.LfoTime / l.Delay) : 1;
+                double wave = LfoWave(l.Shape, v.LfoPhases[k], v.LfoRandom[k]);
+                double x = wave * fade;
+                switch (l.Target)
+                {
+                    case LfoTarget.Pitch: m.Semis += x * l.Depth; break;
+                    // Tremolo: full volume at the top of the wave, down by the depth at the bottom
+                    case LfoTarget.Volume: m.Volume *= 1 - l.Depth * fade * (1 - wave) / 2; break;
+                    case LfoTarget.Cutoff: m.Cutoff *= Math.Pow(2, x * l.Depth / 12); break;
+                    case LfoTarget.Resonance: m.Resonance += x * l.Depth; break;
+                    case LfoTarget.PulseWidth: m.PulseWidth += x * l.Depth; break;
+                    case LfoTarget.Osc2Pitch: m.Osc2Semis += x * l.Depth; break;
+                    case LfoTarget.Osc2Mix: m.Mix += x * l.Depth; break;
+                }
+            }
+            v.LfoTime += dt;
+            return m;
         }
 
         // Sound effects (PLAY COIN ...) are ready-made sound clips that are mixed in
@@ -757,7 +842,8 @@ namespace AmosLikeBasic
                 else
                     v.Freq = v.TargetFreq;
 
-                double semis = v.Bend;
+                var mod = NextModulation(v, dt);
+                double semis = v.Bend + mod.Semis;
                 if (v.VibratoDepth > 0)
                 {
                     v.LfoPhase += v.VibratoRate * dt;
@@ -778,7 +864,28 @@ namespace AmosLikeBasic
                 if (v.SyncSource >= 0 && _voices[v.SyncSource].Wrapped) v.Phase = 0;
 
                 double t = v.Phase;
-                sample = Oscillator(v, t, inc, dt);
+                double width = v.Wave == WaveformType.Square ? 0.5 : v.PulseWidth;
+                if (v.PwmDepth > 0 && v.PwmRate > 0)
+                {
+                    v.PwmPhase += v.PwmRate * dt;
+                    if (v.PwmPhase >= 1) v.PwmPhase -= 1;
+                    if (v.Wave != WaveformType.Square) width += v.PwmDepth * Math.Sin(2 * Math.PI * v.PwmPhase);
+                }
+                width = Math.Clamp(width + mod.PulseWidth, 0.01, 0.99);
+                sample = Oscillator(v.Wave, t, inc, width, ref v.NoiseClock, ref v.Lfsr, ref v.NoiseOut);
+
+                // The second oscillator, at its own pitch, mixed in
+                if (v.Osc2Wave is { } wave2)
+                {
+                    double ratio = mod.Osc2Semis == 0 ? v.Osc2Ratio : v.Osc2Ratio * Math.Pow(2, mod.Osc2Semis / 12.0);
+                    double inc2 = Math.Min(freq * ratio * dt, 0.5);
+                    double width2 = wave2 == WaveformType.Square ? 0.5 : width;
+                    double s2 = Oscillator(wave2, v.Osc2Phase, inc2, width2, ref v.NoiseClock2, ref v.Lfsr2, ref v.NoiseOut2);
+                    v.Osc2Phase += inc2;
+                    if (v.Osc2Phase >= 1.0) v.Osc2Phase -= 1.0;
+                    double mix = Math.Clamp(v.Osc2Mix + mod.Mix, 0, 1);
+                    sample = sample * (1 - mix) + s2 * mix;
+                }
 
                 if (v.RingSource >= 0 && _voices[v.RingSource].Phase >= 0.5) sample = -sample;
 
@@ -786,7 +893,10 @@ namespace AmosLikeBasic
                 v.Wrapped = v.Phase >= 1.0;
                 if (v.Wrapped) v.Phase -= 1.0;
 
-                sample *= NextEnvelope(v, dt) * v.Gain;
+                sample *= NextEnvelope(v, dt) * v.Gain * mod.Volume;
+                if (v.Filter != FilterMode.Off)
+                    sample = ApplyFilter(v, sample, NextFilterEnvelope(v, dt), mod.Cutoff, mod.Resonance);
+                return sample;
             }
 
             if (v.Filter != FilterMode.Off)
@@ -795,23 +905,17 @@ namespace AmosLikeBasic
             return sample;
         }
 
-        private static double Oscillator(Voice v, double t, double inc, double dt)
+        // One oscillator at phase t; width is the pulse width (for Pulse). The noise state is passed in,
+        // so that each of a voice's two oscillators has its own.
+        private static double Oscillator(WaveformType wave, double t, double inc, double width,
+                                         ref double noiseClock, ref int lfsr, ref double noiseOut)
         {
-            switch (v.Wave)
+            switch (wave)
             {
                 case WaveformType.Square:
                     return PulseWave(t, inc, 0.5);
                 case WaveformType.Pulse:
-                {
-                    double w = v.PulseWidth;
-                    if (v.PwmDepth > 0 && v.PwmRate > 0)
-                    {
-                        v.PwmPhase += v.PwmRate * dt;
-                        if (v.PwmPhase >= 1) v.PwmPhase -= 1;
-                        w += v.PwmDepth * Math.Sin(2 * Math.PI * v.PwmPhase);
-                    }
-                    return PulseWave(t, inc, Math.Clamp(w, 0.01, 0.99));
-                }
+                    return PulseWave(t, inc, width);
                 case WaveformType.Triangle:
                     return t < 0.5 ? 4.0 * t - 1.0 : 3.0 - 4.0 * t;
                 case WaveformType.Sawtooth:
@@ -821,15 +925,15 @@ namespace AmosLikeBasic
                 case WaveformType.Noise:
                 {
                     // 15-bit shift register as on the NES, clocked in step with the pitch
-                    v.NoiseClock += inc * 16;
-                    while (v.NoiseClock >= 1)
+                    noiseClock += inc * 16;
+                    while (noiseClock >= 1)
                     {
-                        v.NoiseClock -= 1;
-                        int bit = (v.Lfsr ^ (v.Lfsr >> 1)) & 1;
-                        v.Lfsr = (v.Lfsr >> 1) | (bit << 14);
-                        v.NoiseOut = (v.Lfsr & 1) != 0 ? 1.0 : -1.0;
+                        noiseClock -= 1;
+                        int bit = (lfsr ^ (lfsr >> 1)) & 1;
+                        lfsr = (lfsr >> 1) | (bit << 14);
+                        noiseOut = (lfsr & 1) != 0 ? 1.0 : -1.0;
                     }
-                    return v.NoiseOut;
+                    return noiseOut;
                 }
                 default:
                     return 0;
@@ -894,12 +998,13 @@ namespace AmosLikeBasic
 
         // State variable filter (TPT), stable even when the cutoff changes all the time.
         // envOffset (Hz) comes from the filter envelope and is not smoothed, so that the attack is fast.
-        private static double ApplyFilter(Voice v, double x, double envOffset)
+        // cutoffFactor and resonanceAdd come from the LFOs
+        private static double ApplyFilter(Voice v, double x, double envOffset, double cutoffFactor = 1, double resonanceAdd = 0)
         {
             v.SmoothCutoff += (v.Cutoff - v.SmoothCutoff) * 0.005;
-            double cutoff = Math.Clamp(v.SmoothCutoff + envOffset, 20, SampleRate * 0.45);
+            double cutoff = Math.Clamp((v.SmoothCutoff + envOffset) * cutoffFactor, 20, SampleRate * 0.45);
             double g = Math.Tan(Math.PI * cutoff / SampleRate);
-            double k = 2.0 - 2.0 * v.Resonance;
+            double k = 2.0 - 2.0 * Math.Clamp(v.Resonance + resonanceAdd, 0, 0.98);
             double a1 = 1.0 / (1.0 + g * (g + k));
             double a2 = g * a1;
             double a3 = g * a2;
