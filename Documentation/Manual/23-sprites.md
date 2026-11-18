@@ -84,6 +84,27 @@ GOTO Loop
 
 `LOOP` means the animation starts again, `ONCE` that it runs once. After `ONCE` you can give the animation that takes over when it has finished, here `"idle"`. `ANIM STOP no` stops the animation.
 
+## The sprite editor
+
+The **SPRITES** button opens the sprite editor, where you draw figures pixel by pixel.
+
+**Pictures in the program** lists every `SPRITE LOAD`, `IMAGE LOAD` and `TILE LOAD` in your program. Choose one and it opens with the frame size the program uses, ready to change. **Save** writes it back to the same file, in the same layout, so the program finds the frames where it expects them.
+
+**Load Spritesheet...** opens any picture. The editor shows it with a grid of frames on top and plays the frames as an animation. It guesses the frame size from the gaps between the figures; change the numbers until the grid and the animation look right.
+
+The tools are on the left:
+
+| Tool | Key | What it does |
+|---|---|---|
+| ✎ Pencil | P | draws dot by dot |
+| ╱ Line | L | a straight line from where you press to where you let go |
+| ▭ Rectangle | R | a box; with **Fill** ticked, a filled one |
+| ◯ Ellipse | E | a circle or an ellipse; also with **Fill** |
+| ▧ Fill | F | fills an area of one colour |
+| ⌖ Picker | I | takes a colour from the picture; a right-click does that with any tool |
+
+**In this sprite** shows the colours the sprite uses most, so you can pick up the exact colours again. **Palette** has the C64's 16 colours and more, and **T** is transparent. **Mirror draw** draws everything mirrored left-right too, which makes faces and ships symmetric. The buttons above the picture flip the frame, move it one pixel (it wraps round) and undo with **Ctrl+Z** (or **Cmd+Z** on a Mac). **Copy Frame** makes a copy of the frame to change into the next step of an animation. `,` and `.` step between the frames.
+
 ## Size, rotation and mirroring
 
 | Command | Does |

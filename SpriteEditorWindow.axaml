@@ -1,7 +1,8 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:AmosLikeBasic"
         x:Class="AmosLikeBasic.SpriteEditorWindow"
-        Width="1000" Height="700"
+        Width="1180" Height="780"
         Title="Sprite Editor">
   <Grid RowDefinitions="Auto,*,Auto" Margin="12">
 
@@ -33,39 +34,34 @@
                 Margin="16,0,0,0"
                 Click="CreateButton_OnClick"/>
 
-        <!-- Palette Row -->
-        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="8" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-          <TextBlock Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" Text="Palette:" VerticalAlignment="Center"/>
-
-          <Button Width="28" Height="28" Background="White" Click="PaletteWhite_OnClick"/>
-          <Button Width="28" Height="28" Background="Black" Click="PaletteBlack_OnClick"/>
-          <Button Width="28" Height="28" Background="Red" Click="PaletteRed_OnClick"/>
-          <Button Width="28" Height="28" Background="Lime" Click="PaletteGreen_OnClick"/>
-          <Button Width="28" Height="28" Background="Blue" Click="PaletteBlue_OnClick"/>
-          <Button Width="28" Height="28" Background="Yellow" Click="PaletteYellow_OnClick"/>
-          <Button Width="28" Height="28" Background="Cyan" Click="PaletteCyan_OnClick"/>
-          <Button Width="28" Height="28" Background="Magenta" Click="PaletteTransparent_OnClick"/>
-
-          <!-- Current Color Indicator - with more separation -->
-          <Border Width="40" Height="28" BorderBrush="{DynamicResource AmosLabelFg}" BorderThickness="3" Margin="16,0,0,0" Background="Black">
-            <Rectangle Name="CurrentColorRect" Fill="White"/>
-          </Border>
-          
-          <Button Content="Pick Color..." Click="PickColorButton_OnClick" Margin="8,0,0,0"/>
-
-
-          <Button Content="Clear" Click="ClearButton_OnClick" Margin="16,0,0,0"/>
-
-          <TextBlock Margin="20,0,0,0" Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" Text="Zoom:" VerticalAlignment="Center"/>
+        <!-- Edit Row -->
+        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="8" Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+          <Button Content="↶ Undo" Click="UndoButton_OnClick" ToolTip.Tip="Undo (Ctrl+Z)"/>
+          <Button Content="↷ Redo" Click="RedoButton_OnClick" ToolTip.Tip="Redo (Ctrl+Y)"/>
+          <Button Content="⇋ Flip" Click="FlipHButton_OnClick" ToolTip.Tip="Mirror the frame left-right"/>
+          <Button Content="⇵ Flip" Click="FlipVButton_OnClick" ToolTip.Tip="Mirror the frame upside down"/>
+          <Button Content="←" Click="ShiftLeft_OnClick" ToolTip.Tip="Move the picture one pixel (it wraps round)"/>
+          <Button Content="→" Click="ShiftRight_OnClick" ToolTip.Tip="Move the picture one pixel (it wraps round)"/>
+          <Button Content="↑" Click="ShiftUp_OnClick" ToolTip.Tip="Move the picture one pixel (it wraps round)"/>
+          <Button Content="↓" Click="ShiftDown_OnClick" ToolTip.Tip="Move the picture one pixel (it wraps round)"/>
+          <Button Content="Clear" Click="ClearButton_OnClick" Margin="10,0,0,0"/>
+          <CheckBox Name="GridCheck" Content="Grid" IsChecked="True" Margin="14,0,0,0" ToolTip.Tip="Lines between the pixels (G)"
+                    IsCheckedChanged="GridCheck_OnChanged"/>
+          <CheckBox Name="MirrorCheck" Content="Mirror draw" ToolTip.Tip="Everything you draw is also drawn mirrored left-right (M)"/>
+          <TextBlock Margin="14,0,0,0" Foreground="{DynamicResource AmosLabelFg}" FontWeight="Bold" Text="Zoom:" VerticalAlignment="Center"/>
           <Slider Name="ZoomSlider"
-                  Minimum="4" Maximum="30" Value="12"
-                  Width="140"
+                  Minimum="2" Maximum="30" Value="12"
+                  Width="120"
                   ValueChanged="ZoomSlider_OnValueChanged"/>
           <TextBlock Name="ZoomText" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center" Text="12x"/>
         </StackPanel>
 
         <!-- File Operations Row -->
         <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="8" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+          <ComboBox Name="ProgramPicturesBox" Width="300" PlaceholderText="Pictures in the program..."
+                    ToolTip.Tip="The sprites and images the BASIC program loads, with its frame sizes"
+                    DropDownOpened="ProgramPicturesBox_OnDropDownOpened"
+                    SelectionChanged="ProgramPicturesBox_OnSelectionChanged"/>
           <Button Content="Load Sprite..." Click="LoadButton_OnClick"/>
           <Button Content="Load Spritesheet..." Click="LoadSpritesheetButton_OnClick"/>
           <Button Content="Save" Click="SaveButton_OnClick"/>
@@ -75,25 +71,88 @@
       </Grid>
     </Border>
 
-    <!-- Canvas -->
-    <Border Grid.Row="1" Margin="0,12,0,0" Background="{DynamicResource AmosCanvasBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10">
-      <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                    VerticalScrollBarVisibility="Auto">
-        <Border Background="Black" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10"
-                HorizontalAlignment="Left" VerticalAlignment="Top">
-          <Image Name="SpriteImage"
-                 Stretch="Fill"
-                 HorizontalAlignment="Left"
-                 VerticalAlignment="Top"
-                 RenderOptions.BitmapInterpolationMode="None"
-                 Focusable="True"
-                 Cursor="Cross"
-                 PointerPressed="SpriteImage_OnPointerPressed"
-                 PointerMoved="SpriteImage_OnPointerMoved"
-                 PointerReleased="SpriteImage_OnPointerReleased"/>
-        </Border>
-      </ScrollViewer>
-    </Border>
+    <Grid Grid.Row="1" Margin="0,12,0,0" ColumnDefinitions="Auto,*,240">
+
+      <!-- Tools -->
+      <Border Grid.Column="0" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="6" Margin="0,0,10,0">
+        <StackPanel Spacing="4" Name="ToolPanel">
+          <ToggleButton Name="PencilTool" Foreground="White" Content="✎" Width="40" Height="36" FontSize="18" ToolTip.Tip="Pencil (P)" Click="Tool_OnClick" IsChecked="True"/>
+          <ToggleButton Name="LineTool" Foreground="White" Content="╱" Width="40" Height="36" FontSize="18" ToolTip.Tip="Line (L)" Click="Tool_OnClick"/>
+          <ToggleButton Name="RectangleTool" Foreground="White" Content="▭" Width="40" Height="36" FontSize="18" ToolTip.Tip="Rectangle (R)" Click="Tool_OnClick"/>
+          <ToggleButton Name="EllipseTool" Foreground="White" Content="◯" Width="40" Height="36" FontSize="18" ToolTip.Tip="Ellipse (E)" Click="Tool_OnClick"/>
+          <ToggleButton Name="FillTool" Foreground="White" Content="▧" Width="40" Height="36" FontSize="18" ToolTip.Tip="Fill an area (F)" Click="Tool_OnClick"/>
+          <ToggleButton Name="PickerTool" Foreground="White" Content="⌖" Width="40" Height="36" FontSize="18" ToolTip.Tip="Take a colour from the picture (I) - or right-click with any tool" Click="Tool_OnClick"/>
+          <CheckBox Name="FilledCheck" Content="Fill" Margin="0,8,0,0" ToolTip.Tip="Draw rectangles and ellipses filled"/>
+        </StackPanel>
+      </Border>
+
+      <!-- Canvas -->
+      <Border Grid.Column="1" Background="{DynamicResource AmosCanvasBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10">
+        <Grid RowDefinitions="*,Auto">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Auto">
+            <Border Background="Black" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10"
+                    HorizontalAlignment="Left" VerticalAlignment="Top">
+              <Panel>
+                <Image Name="SpriteImage"
+                       Stretch="Fill"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Top"
+                       RenderOptions.BitmapInterpolationMode="None"
+                       Focusable="True"
+                       Cursor="Cross"
+                       PointerPressed="SpriteImage_OnPointerPressed"
+                       PointerMoved="SpriteImage_OnPointerMoved"
+                       PointerReleased="SpriteImage_OnPointerReleased"
+                       PointerExited="SpriteImage_OnPointerExited"/>
+                <local:PixelGridOverlay Name="GridOverlay" IsHitTestVisible="False"
+                                        HorizontalAlignment="Left" VerticalAlignment="Top"/>
+              </Panel>
+            </Border>
+          </ScrollViewer>
+          <TextBlock Grid.Row="1" Name="StatusText" Foreground="{DynamicResource AmosLabelFg}" Margin="0,6,0,0" Text=" "/>
+        </Grid>
+      </Border>
+
+      <!-- Colours and animation -->
+      <Border Grid.Column="2" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10" Margin="10,0,0,0">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Border Width="44" Height="32" BorderBrush="{DynamicResource AmosLabelFg}" BorderThickness="2" Background="Black">
+                <Rectangle Name="CurrentColorRect" Fill="White"/>
+              </Border>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Name="ColorHexText" Foreground="{DynamicResource AmosLabelFg}" Text="#FFFFFF"/>
+                <Button Content="Pick Color..." Click="PickColorButton_OnClick" Padding="6,2"/>
+              </StackPanel>
+            </StackPanel>
+
+            <TextBlock Text="In this sprite" FontWeight="Bold" Foreground="{DynamicResource AmosLabelFg}"/>
+            <WrapPanel Name="SpriteColoursPanel"/>
+
+            <TextBlock Text="Palette" FontWeight="Bold" Foreground="{DynamicResource AmosLabelFg}"/>
+            <WrapPanel Name="PalettePanel"/>
+
+            <TextBlock Text="Recent" FontWeight="Bold" Foreground="{DynamicResource AmosLabelFg}"/>
+            <WrapPanel Name="RecentPanel"/>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,0">
+              <TextBlock Text="Animation" FontWeight="Bold" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center"/>
+              <CheckBox Name="PlayCheck" Content="Play" IsChecked="True"/>
+            </StackPanel>
+            <Border Background="Black" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="1" Height="130">
+              <Image Name="AnimImage" Stretch="Uniform" Margin="6" RenderOptions.BitmapInterpolationMode="None"/>
+            </Border>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="Speed" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center"/>
+              <Slider Name="AnimSpeedSlider" Minimum="1" Maximum="30" Value="8" Width="120"/>
+              <TextBlock Name="AnimSpeedText" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center" Text="8 fps"/>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Grid>
 
     <!-- Frame Navigation -->
     <Border Grid.Row="2" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="2" Padding="10" Margin="0,12,0,0"
@@ -125,6 +184,7 @@
         <!-- Add/Delete Frame -->
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
           <Button Content="+ Add Frame" Click="AddFrameButton_OnClick"/>
+          <Button Content="⧉ Copy Frame" Click="CopyFrameButton_OnClick" ToolTip.Tip="Add a copy of this frame after it"/>
           <Button Content="− Delete Frame" Click="DeleteFrameButton_OnClick"/>
         </StackPanel>
 

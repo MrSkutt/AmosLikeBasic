@@ -2960,6 +2960,7 @@ public sealed class AmosGraphics
 
     // ---------------- Tiles ----------------
     public int GetTilesInWidth() => _tilesInWidth; // NEW: Getter
+    public (int width, int height) GetTileSize() => (_tileWidth, _tileHeight);
 
     public void LoadTileBank(string f, int tw, int th)
     {

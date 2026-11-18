@@ -941,13 +941,13 @@ public partial class MainWindow : Window
 
     private void SpritesButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        var win = new SpriteEditorWindow(_gfx);
+        var win = new SpriteEditorWindow(_gfx, () => Editor.Text ?? "");
         win.Show();
     }
 
     private void MapButton_OnClick(object? sender, RoutedEventArgs e)
     {
-        var win = new MapEditorWindow(_gfx);
+        var win = new MapEditorWindow(_gfx, () => Editor.Text ?? "");
         win.Show();
     }
 

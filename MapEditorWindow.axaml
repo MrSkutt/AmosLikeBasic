@@ -1,77 +1,88 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:AmosLikeBasic"
         x:Class="AmosLikeBasic.MapEditorWindow"
-        Title="Map Editor" Width="1100" Height="800"
+        Title="Map Editor" Width="1200" Height="820"
         Background="{DynamicResource AmosCanvasBg}">
-    <Grid ColumnDefinitions="250, *"> <!-- Wider side panel -->
+    <Grid ColumnDefinitions="300, *">
         <!-- Left panel -->
         <Border Grid.Column="0" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="0,0,2,0">
             <ScrollViewer>
-                <StackPanel Margin="15" Spacing="15">
-                    <TextBlock Text="MAP SIZE" Classes="amos-title" HorizontalAlignment="Center"/>
-                    
-                    <Grid ColumnDefinitions="Auto, *" RowDefinitions="Auto, Auto">
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Width:" VerticalAlignment="Center" Foreground="{DynamicResource AmosLabelFg}" Margin="0,0,10,10"/>
-                        <NumericUpDown Grid.Row="0" Grid.Column="1" Name="MapWidthUpDown" 
-                                       Value="20" Minimum="1" Maximum="1000" Increment="1" FormatString="0"
-                                       Margin="0,0,0,10"/>
-                        
-                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Height:" VerticalAlignment="Center" Foreground="{DynamicResource AmosLabelFg}" Margin="0,0,10,0"/>
-                        <NumericUpDown Grid.Row="1" Grid.Column="1" Name="MapHeightUpDown" 
-                                       Value="15" Minimum="1" Maximum="1000" Increment="1" FormatString="0"
-                                       />
-                    </Grid>
-                    
-                    <Button Content="Resize Map" Click="ResizeMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
-                    
-                    <Separator Background="{DynamicResource AmosPanelBorder}" Height="2" Margin="0,10"/>
-                    
-                    <TextBlock Text="FILE" Classes="amos-title" HorizontalAlignment="Center"/>
-                    <Button Content="Save Map..." Click="SaveMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
-                    <Button Content="Load Map..." Click="LoadMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
-                    <Button Content="Clear Map" Click="OnClearMapClick" Background="DarkRed" Foreground="White" />
-                    
-                    <TextBlock Text="TILES" Classes="amos-title" HorizontalAlignment="Center"/>
+                <StackPanel Margin="15" Spacing="10">
+                    <TextBlock Text="FROM THE PROGRAM" Classes="amos-title" HorizontalAlignment="Center"/>
+                    <ComboBox Name="ProgramFilesBox" HorizontalAlignment="Stretch" PlaceholderText="Tiles and maps in the program..."
+                              ToolTip.Tip="The tile sets and maps the BASIC program loads, with its tile sizes"
+                              DropDownOpened="ProgramFilesBox_OnDropDownOpened"
+                              SelectionChanged="ProgramFilesBox_OnSelectionChanged"/>
+
+                    <TextBlock Text="TOOLS" Classes="amos-title" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                    <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                        <ToggleButton Name="PencilTool" Foreground="White" Content="✎" Width="40" Height="36" FontSize="18" ToolTip.Tip="Draw tiles (P)" Click="Tool_OnClick" IsChecked="True"/>
+                        <ToggleButton Name="LineTool" Foreground="White" Content="╱" Width="40" Height="36" FontSize="18" ToolTip.Tip="Line (L)" Click="Tool_OnClick"/>
+                        <ToggleButton Name="RectangleTool" Foreground="White" Content="▭" Width="40" Height="36" FontSize="18" ToolTip.Tip="Rectangle (R)" Click="Tool_OnClick"/>
+                        <ToggleButton Name="FillTool" Foreground="White" Content="▧" Width="40" Height="36" FontSize="18" ToolTip.Tip="Fill an area (F)" Click="Tool_OnClick"/>
+                        <ToggleButton Name="PickerTool" Foreground="White" Content="⌖" Width="40" Height="36" FontSize="18" ToolTip.Tip="Take a tile from the map (I)" Click="Tool_OnClick"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center">
+                        <CheckBox Name="FilledCheck" Content="Fill" IsChecked="True" ToolTip.Tip="Draw rectangles filled"/>
+                        <CheckBox Name="GridCheck" Content="Grid" IsChecked="True" IsCheckedChanged="View_OnChanged"/>
+                    </StackPanel>
+                    <TextBlock Foreground="{DynamicResource AmosLabelFg}" TextWrapping="Wrap" FontSize="11"
+                               Text="Right button erases. Ctrl+Z undoes."/>
+                    <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                        <Button Content="↶ Undo" Click="Undo_OnClick"/>
+                        <Button Content="↷ Redo" Click="Redo_OnClick"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="Zoom" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center"/>
+                        <Slider Name="ZoomSlider" Minimum="0.5" Maximum="3" Value="1" Width="160" TickFrequency="0.25" IsSnapToTickEnabled="True"
+                                ValueChanged="Zoom_OnChanged"/>
+                        <TextBlock Name="ZoomText" Text="1x" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <TextBlock Text="TILES" Classes="amos-title" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border Width="40" Height="40" Background="Black" BorderBrush="{DynamicResource AmosTitleFg}" BorderThickness="2">
+                            <Image Name="SelectedTileImage" RenderOptions.BitmapInterpolationMode="None"/>
+                        </Border>
+                        <TextBlock Name="SelectedTileText" Foreground="{DynamicResource AmosLabelFg}" VerticalAlignment="Center" Text="No tiles loaded"/>
+                    </StackPanel>
+                    <Border Background="Black" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="1" MaxHeight="320">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                            <local:TilePaletteView Name="Palette" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+                        </ScrollViewer>
+                    </Border>
                     <Button Content="Load Tileset..." Click="LoadTiles_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
-                    <Button Content="Show Palette" Click="ShowPalette_OnClick" Classes="amos-button" HorizontalAlignment="Stretch" Margin="0,5,0,0"/>
-                    
-                    
+
+                    <TextBlock Text="MAP" Classes="amos-title" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                    <Grid ColumnDefinitions="Auto, *, Auto, *">
+                        <TextBlock Text="W" VerticalAlignment="Center" Foreground="{DynamicResource AmosLabelFg}" Margin="0,0,6,0"/>
+                        <NumericUpDown Grid.Column="1" Name="MapWidthUpDown" Value="20" Minimum="1" Maximum="1000" Increment="1" FormatString="0"/>
+                        <TextBlock Grid.Column="2" Text="H" VerticalAlignment="Center" Foreground="{DynamicResource AmosLabelFg}" Margin="8,0,6,0"/>
+                        <NumericUpDown Grid.Column="3" Name="MapHeightUpDown" Value="15" Minimum="1" Maximum="1000" Increment="1" FormatString="0"/>
+                    </Grid>
+                    <Button Content="Resize Map" Click="ResizeMap_OnClick" Classes="amos-button" HorizontalAlignment="Stretch"/>
+                    <TextBlock Name="MapFileText" Foreground="{DynamicResource AmosLabelFg}" Text="(no file)" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Button Content="Save" Click="SaveMap_OnClick" Classes="amos-button"/>
+                        <Button Content="Save As..." Click="SaveMapAs_OnClick" Classes="amos-button"/>
+                        <Button Content="Load..." Click="LoadMap_OnClick" Classes="amos-button"/>
+                    </StackPanel>
+                    <Button Content="Clear Map" Click="OnClearMapClick" Background="DarkRed" Foreground="White" HorizontalAlignment="Stretch"/>
                 </StackPanel>
             </ScrollViewer>
         </Border>
 
         <!-- Right panel: the map -->
-        <ScrollViewer Grid.Column="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-            <Border Background="Black" HorizontalAlignment="Left" VerticalAlignment="Top">
-                <Canvas Name="MapCanvas" Width="2000" Height="2000"
-                        PointerPressed="MapCanvas_OnPointerPressed"
-                        PointerMoved="MapCanvas_OnPointerMoved">
-                    <!-- The safest way to make a grid in Avalonia: a DrawingBrush -->
-                    <Canvas.Background>
-                        <DrawingBrush TileMode="Tile" SourceRect="0,0,32,32" DestinationRect="0,0,32,32">
-                            <DrawingBrush.Drawing>
-                                <DrawingGroup>
-                                    <!-- The cell itself (black background) -->
-                                    <GeometryDrawing Brush="Black">
-                                        <GeometryDrawing.Geometry>
-                                            <RectangleGeometry Rect="0,0,32,32" />
-                                        </GeometryDrawing.Geometry>
-                                    </GeometryDrawing>
-                                    <!-- The lines (light blue) -->
-                                    <GeometryDrawing>
-                                        <GeometryDrawing.Pen>
-                                            <Pen Brush="#447FB2FF" Thickness="1" />
-                                        </GeometryDrawing.Pen>
-                                        <GeometryDrawing.Geometry>
-                                            <PathGeometry Figures="M 0,32 L 0,0 L 32,0" />
-                                        </GeometryDrawing.Geometry>
-                                    </GeometryDrawing>
-                                </DrawingGroup>
-                            </DrawingBrush.Drawing>
-                        </DrawingBrush>
-                    </Canvas.Background>
-                </Canvas>
-            </Border>
-        </ScrollViewer>
+        <Grid Grid.Column="1" RowDefinitions="*,Auto">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <local:MapView Name="Map" HorizontalAlignment="Left" VerticalAlignment="Top" Cursor="Cross"
+                               PointerPressed="Map_OnPointerPressed"
+                               PointerMoved="Map_OnPointerMoved"
+                               PointerReleased="Map_OnPointerReleased"
+                               PointerExited="Map_OnPointerExited"/>
+            </ScrollViewer>
+            <TextBlock Grid.Row="1" Name="StatusText" Foreground="{DynamicResource AmosLabelFg}" Margin="10,4" Text=" "/>
+        </Grid>
     </Grid>
 </Window>

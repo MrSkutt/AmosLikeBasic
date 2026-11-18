@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Linq; 
+using System.IO;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Media; 
+using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 
@@ -13,234 +14,517 @@ namespace AmosLikeBasic;
 public partial class MapEditorWindow : Window
 {
     private readonly AmosGraphics _gfx;
-    private int _selectedTileIndex = 0;
-    private TilePaletteWindow? _paletteWin;
+    private readonly Func<string>? _programText;
+    private int _selectedTileIndex;
+    private DrawTool _tool = DrawTool.Pencil;
+    private string? _mapFile;
 
-    public MapEditorWindow(AmosGraphics gfx)
+    // A stroke works on a copy of the map (x + y * width), drawn afresh for shapes
+    private int[]? _before, _work;
+    private (int x, int y) _start, _last;
+    private bool _erasing;
+    private readonly Stack<(int w, int h, int[] cells)> _undo = new(), _redo = new();
+
+    public MapEditorWindow() : this(new AmosGraphics()) { }
+
+    public MapEditorWindow(AmosGraphics gfx, Func<string>? programText = null)
     {
         _gfx = gfx;
+        _programText = programText;
         InitializeComponent();
-        
+
+        Map.Gfx = _gfx;
+        Palette.Gfx = _gfx;
+        Palette.TileSelected += SelectTile;
+        KeyDown += OnEditorKeyDown;
+
         // Sync the UI with the engine's actual data straight away at start
         MapWidthUpDown.Value = _gfx.GetMapWidth();
         MapHeightUpDown.Value = _gfx.GetMapHeight();
-        
-        RefreshTileList();
-        RedrawMap();
+        RefreshTiles();
+        RefreshMap();
     }
 
-    private void ShowPalette_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void RefreshTiles()
+    {
+        Palette.Refresh();
+        SelectTile(Math.Min(_selectedTileIndex, Math.Max(0, _gfx.GetTileBitmaps().Count - 1)));
+    }
+
+    private void RefreshMap()
+    {
+        Map.ShowGrid = GridCheck.IsChecked == true;
+        Map.Zoom = ZoomSlider.Value;
+        Map.Refresh();
+    }
+
+    private void SelectTile(int index)
     {
         var tiles = _gfx.GetTileBitmaps();
-        if (tiles.Count == 0) return;
-
-        if (_paletteWin != null) _paletteWin.Close();
-            
-        _paletteWin = new TilePaletteWindow(tiles, _gfx.GetTilesInWidth());
-        _paletteWin.TileSelected += (idx) => {
-            _selectedTileIndex = idx;
-        };
-        _paletteWin.Show(this);
+        _selectedTileIndex = index;
+        Palette.Selected = index;
+        Palette.InvalidateVisual();
+        bool has = index >= 0 && index < tiles.Count;
+        SelectedTileImage.Source = has ? tiles[index] : null;
+        var (tw, th) = _gfx.GetTileSize();
+        SelectedTileText.Text = tiles.Count == 0 ? "No tiles loaded" : $"Tile {index}   ({tiles.Count} tiles, {tw}×{th})";
     }
 
-    private async void LoadTiles_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        var sp = StorageProvider;
-        var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions 
-        { 
-            Title = "Select Tileset PNG", 
-            FileTypeFilter = [FilePickerFileTypes.ImageAll] 
-        });
+    // ══════════════════════════════════════════════════════════════
+    //  DRAWING
+    // ══════════════════════════════════════════════════════════════
 
-        if (files.Count > 0)
+    private void Tool_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (sender == LineTool) SelectTool(DrawTool.Line);
+        else if (sender == RectangleTool) SelectTool(DrawTool.Rectangle);
+        else if (sender == FillTool) SelectTool(DrawTool.Fill);
+        else if (sender == PickerTool) SelectTool(DrawTool.Picker);
+        else SelectTool(DrawTool.Pencil);
+    }
+
+    private void SelectTool(DrawTool tool)
+    {
+        _tool = tool;
+        PencilTool.IsChecked = tool == DrawTool.Pencil;
+        LineTool.IsChecked = tool == DrawTool.Line;
+        RectangleTool.IsChecked = tool == DrawTool.Rectangle;
+        FillTool.IsChecked = tool == DrawTool.Fill;
+        PickerTool.IsChecked = tool == DrawTool.Picker;
+    }
+
+    private int[] ReadMap()
+    {
+        int w = _gfx.GetMapWidth(), h = _gfx.GetMapHeight();
+        var cells = new int[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                cells[y * w + x] = _gfx.GetMapTile(x, y);
+        return cells;
+    }
+
+    private void WriteMap(int[] cells)
+    {
+        int w = _gfx.GetMapWidth(), h = _gfx.GetMapHeight();
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                _gfx.SetMapTile(x, y, cells[y * w + x]);
+    }
+
+    private (int x, int y) CellAt(PointerEventArgs e)
+    {
+        var pos = e.GetPosition(Map);
+        var (tw, th) = _gfx.GetTileSize();
+        return ((int)Math.Floor(pos.X / (tw * Map.Zoom)), (int)Math.Floor(pos.Y / (th * Map.Zoom)));
+    }
+
+    private void Map_OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        var cell = CellAt(e);
+        var props = e.GetCurrentPoint(Map).Properties;
+        _erasing = props.IsRightButtonPressed;
+
+        if (_tool == DrawTool.Picker && !_erasing)
         {
-            using var stream = await files[0].OpenReadAsync();
-            _gfx.LoadTileBank(stream, 32, 32); 
-                
-            // Open the palette automatically after loading
-            ShowPalette_OnClick(null, new Avalonia.Interactivity.RoutedEventArgs());
+            int tile = _gfx.GetMapTile(cell.x, cell.y);
+            if (tile >= 0) SelectTile(tile);
+            SelectTool(DrawTool.Pencil);
+            return;
         }
+
+        e.Pointer.Capture(Map);
+        _before = ReadMap();
+        _work = (int[])_before.Clone();
+        _start = _last = cell;
+        if (_tool == DrawTool.Fill)
+        {
+            GridTools.Fill(_work, _gfx.GetMapWidth(), _gfx.GetMapHeight(), cell.x, cell.y, _erasing ? -1 : _selectedTileIndex);
+            WriteMap(_work);
+            EndStroke();
+        }
+        else
+            Stroke(cell);
+        e.Handled = true;
     }
 
-    private void RefreshTileList()
+    private void Map_OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        // To make the ListBox understand that it must redraw, we clear it first
-        //TileList.ItemsSource = null;
-        var tiles = _gfx.GetTileBitmaps();
-        
-        // Make a copy of the list so that Avalonia sees it as "new"
-        //TileList.ItemsSource = new List<WriteableBitmap>(tiles);
+        var cell = CellAt(e);
+        Map.Hover = cell;
+        Map.InvalidateVisual();
+        int w = _gfx.GetMapWidth(), h = _gfx.GetMapHeight();
+        if (cell.x >= 0 && cell.y >= 0 && cell.x < w && cell.y < h)
+        {
+            int tile = _gfx.GetMapTile(cell.x, cell.y);
+            string size = _work != null && _tool is DrawTool.Rectangle or DrawTool.Line
+                ? $"   size {Math.Abs(cell.x - _start.x) + 1} × {Math.Abs(cell.y - _start.y) + 1}" : "";
+            StatusText.Text = $"x {cell.x}, y {cell.y}   tile {(tile < 0 ? "empty" : tile.ToString())}{size}";
+        }
+        else StatusText.Text = " ";
+
+        if (_work != null) Stroke(cell);
     }
 
-    private void MapCanvas_OnPointerPressed(object? sender, PointerPressedEventArgs e) => PaintTile(e);
-    private void MapCanvas_OnPointerMoved(object? sender, PointerEventArgs e) 
+    private void Map_OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        if (e.GetCurrentPoint(MapCanvas).Properties.IsLeftButtonPressed) PaintTile(e);
-        if (e.GetCurrentPoint(MapCanvas).Properties.IsRightButtonPressed) RemoveTile(e); 
+        if (e.Pointer.Captured == Map) e.Pointer.Capture(null);
+        if (_work != null) EndStroke();
     }
 
-    
+    private void Map_OnPointerExited(object? sender, PointerEventArgs e)
+    {
+        Map.Hover = (-1, -1);
+        Map.InvalidateVisual();
+        StatusText.Text = " ";
+    }
+
+    private void Stroke((int x, int y) cell)
+    {
+        if (_work == null || _before == null) return;
+        int w = _gfx.GetMapWidth(), h = _gfx.GetMapHeight();
+        int tile = _erasing ? -1 : _selectedTileIndex;
+        var work = _work;
+        void Plot(int x, int y)
+        {
+            if (x >= 0 && y >= 0 && x < w && y < h) work[y * w + x] = tile;
+        }
+
+        if (_tool == DrawTool.Pencil)
+            GridTools.Line(_last.x, _last.y, cell.x, cell.y, Plot);
+        else
+        {
+            Array.Copy(_before, work, work.Length);
+            if (_tool == DrawTool.Line) GridTools.Line(_start.x, _start.y, cell.x, cell.y, Plot);
+            else GridTools.Rectangle(_start.x, _start.y, cell.x, cell.y, FilledCheck.IsChecked == true, Plot);
+        }
+        _last = cell;
+        WriteMap(work);
+        Map.InvalidateVisual();
+    }
+
+    private void EndStroke()
+    {
+        if (_before != null && _work != null && !_before.AsSpan().SequenceEqual(_work))
+        {
+            _undo.Push((_gfx.GetMapWidth(), _gfx.GetMapHeight(), _before));
+            _redo.Clear();
+        }
+        _before = _work = null;
+        Map.InvalidateVisual();
+    }
+
+    private void Undo_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => UndoRedo(_undo, _redo);
+    private void Redo_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => UndoRedo(_redo, _undo);
+
+    // Undo also brings back the map size from before a resize
+    private void UndoRedo(Stack<(int w, int h, int[] cells)> from, Stack<(int w, int h, int[] cells)> to)
+    {
+        if (from.Count == 0) return;
+        var (w, h, cells) = from.Pop();
+        to.Push((_gfx.GetMapWidth(), _gfx.GetMapHeight(), ReadMap()));
+        if (w != _gfx.GetMapWidth() || h != _gfx.GetMapHeight()) _gfx.SetMapSize(w, h);
+        WriteMap(cells);
+        MapWidthUpDown.Value = w;
+        MapHeightUpDown.Value = h;
+        RefreshMap();
+    }
+
+    private void SaveForUndo()
+    {
+        _undo.Push((_gfx.GetMapWidth(), _gfx.GetMapHeight(), ReadMap()));
+        _redo.Clear();
+    }
+
+    private void OnEditorKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Source is TextBox) return;
+        bool cmd = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        switch (e.Key)
+        {
+            case Key.Z when cmd && shift:
+            case Key.Y when cmd: UndoRedo(_redo, _undo); break;
+            case Key.Z when cmd: UndoRedo(_undo, _redo); break;
+            case Key.P when !cmd: SelectTool(DrawTool.Pencil); break;
+            case Key.L when !cmd: SelectTool(DrawTool.Line); break;
+            case Key.R when !cmd: SelectTool(DrawTool.Rectangle); break;
+            case Key.F when !cmd: SelectTool(DrawTool.Fill); break;
+            case Key.I when !cmd: SelectTool(DrawTool.Picker); break;
+            case Key.G when !cmd: GridCheck.IsChecked = GridCheck.IsChecked != true; break;
+            default: return;
+        }
+        e.Handled = true;
+    }
+
+    private void View_OnChanged(object? sender, Avalonia.Interactivity.RoutedEventArgs e) => RefreshMap();
+
+    private void Zoom_OnChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        ZoomText.Text = $"{e.NewValue:0.##}x";
+        RefreshMap();
+    }
+
     private void ResizeMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        int w = (int)(MapWidthUpDown.Value ?? 20);
-        int h = (int)(MapHeightUpDown.Value ?? 15);
-        _gfx.SetMapSize(w, h);
-        
-        // Update the size of the canvas (32 pixels per tile)
-        MapCanvas.Width = w * 32;
-        MapCanvas.Height = h * 32;
-        
-        RedrawMap();
-    }
-    
-    private void PaintTile(PointerEventArgs e)
-    {
-        if (e.GetCurrentPoint(MapCanvas).Properties.IsLeftButtonPressed)
-        {
-            var pos = e.GetPosition(MapCanvas);
-            int tx = (int)(pos.X / 32);
-            int ty = (int)(pos.Y / 32);
-            
-            if (_selectedTileIndex >= 0 && tx >= 0 && tx < _gfx.GetMapWidth() && ty >= 0 && ty < _gfx.GetMapHeight())
-            {
-                if (_gfx.GetMapTile(tx, ty) != _selectedTileIndex)
-                {
-                    _gfx.SetMapTile(tx, ty, _selectedTileIndex);
-                    // Instead of redrawing the whole map, only draw the new tile, for speed
-                    UpdateSingleTileOnCanvas(tx, ty, _selectedTileIndex);
-                }
-            }
-        }
-    }
-
-    private void RemoveTile(PointerEventArgs e)
-    {
-        var pos = e.GetPosition(MapCanvas);
-        int tx = (int)(pos.X / 32);
-        int ty = (int)(pos.Y / 32);
-        
-        _selectedTileIndex = -1;
-        
-        if (tx >= 0 && tx < _gfx.GetMapWidth() && ty >= 0 && ty < _gfx.GetMapHeight())
-        {
-            if (_gfx.GetMapTile(tx, ty) != _selectedTileIndex)
-            {
-                _gfx.SetMapTile(tx, ty, _selectedTileIndex);
-                // Instead of redrawing the whole map, only draw the new tile, for speed
-                RemoveSingleTileOnCanvas(tx, ty, _selectedTileIndex);
-            }
-        }
-    }
-    
-    private void RedrawMap()
-    {
-        MapCanvas.Children.Clear();
-        int mw = _gfx.GetMapWidth();
-        int mh = _gfx.GetMapHeight();
-        
-        // Update the size of the Canvas so the scrollbar is right
-        MapCanvas.Width = mw * 32;
-        MapCanvas.Height = mh * 32;
-
-        for (int y = 0; y < mh; y++)
-        {
-            for (int x = 0; x < mw; x++)
-            {
-                int tid = _gfx.GetMapTile(x, y);
-                if (tid >= 0) UpdateSingleTileOnCanvas(x, y, tid);
-            }
-        }
-    }
-
-    private void UpdateSingleTileOnCanvas(int x, int y, int tid)
-    {
-        var tiles = _gfx.GetTileBitmaps();
-        if (tid < 0 || tid >= tiles.Count) return;
-
-        // If there is already an image at this place, remove it first
-        // (Simple optimisation: we look for the object at the right position)
-        var existing = MapCanvas.Children
-            .FirstOrDefault(c => Canvas.GetLeft(c) == x * 32 && Canvas.GetTop(c) == y * 32);
-        if (existing != null) MapCanvas.Children.Remove(existing);
-
-        var img = new Image {
-            Source = tiles[tid],
-            Width = 32,
-            Height = 32
-        };
-        Canvas.SetLeft(img, x * 32);
-        Canvas.SetTop(img, y * 32);
-        RenderOptions.SetBitmapInterpolationMode(img, BitmapInterpolationMode.None);
-        MapCanvas.Children.Add(img);
-    }
-
-    private void RemoveSingleTileOnCanvas(int x, int y, int tid)
-    {
-        var tiles = _gfx.GetTileBitmaps();
-        if (tid >= tiles.Count) return;
-        
-        var existing = MapCanvas.Children
-            .FirstOrDefault(c => Canvas.GetLeft(c) == x * 32 && Canvas.GetTop(c) == y * 32);
-        if (existing != null) MapCanvas.Children.Remove(existing);
-    }
-
-    private async void SaveMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        var sp = StorageProvider;
-        var file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = "Save AMOS Map",
-            SuggestedFileName = "level.amosmap",
-            FileTypeChoices = [new FilePickerFileType("AMOS Map") { Patterns = ["*.amosmap"] }]
-        });
-
-        if (file != null)
-        {
-            var mapData = new List<int>();
-            int mw = _gfx.GetMapWidth();
-            int mh = _gfx.GetMapHeight();
-            for (int y = 0; y < mh; y++)
-                for (int x = 0; x < mw; x++)
-                    mapData.Add(_gfx.GetMapTile(x, y));
-
-            var dto = new { Width = mw, Height = mh, Data = mapData };
-            using var stream = await file.OpenWriteAsync();
-            await System.Text.Json.JsonSerializer.SerializeAsync(stream, dto);
-        }
-    }
-
-    private async void LoadMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
-    {
-        var sp = StorageProvider;
-        var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions 
-        { 
-            Title = "Load AMOS Map", 
-            FileTypeFilter = [new FilePickerFileType("AMOS Map") { Patterns = ["*.amosmap"] }] 
-        });
-
-        if (files.Count > 0)
-        {
-            using var stream = await files[0].OpenReadAsync();
-            var dto = await System.Text.Json.JsonSerializer.DeserializeAsync<MapDto>(stream);
-            if (dto != null)
-            {
-                _gfx.SetMapSize(dto.Width, dto.Height);
-                int idx = 0;
-                for (int y = 0; y < dto.Height; y++)
-                    for (int x = 0; x < dto.Width; x++)
-                        _gfx.SetMapTile(x, y, dto.Data[idx++]);
-                
-                RedrawMap();
-            }
-        }
+        SaveForUndo();
+        _gfx.SetMapSize((int)(MapWidthUpDown.Value ?? 20), (int)(MapHeightUpDown.Value ?? 15));
+        RefreshMap();
     }
 
     private void OnClearMapClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
+        SaveForUndo();
         _gfx.ClearMap();
-        RedrawMap();
+        RefreshMap();
     }
-    
-    // A small helper class for loading
+
+    // ══════════════════════════════════════════════════════════════
+    //  TILES, MAPS AND THE PROGRAM
+    // ══════════════════════════════════════════════════════════════
+
+    private void ProgramFilesBox_OnDropDownOpened(object? sender, EventArgs e)
+    {
+        var assets = ProgramAssets.Find(_programText?.Invoke() ?? "").Where(a => a.Kind is "TILE" or "MAP").ToList();
+        ProgramFilesBox.ItemsSource = assets.Count > 0
+            ? assets.ConvertAll(a => new ComboBoxItem { Content = a.Label, Tag = a })
+            : new List<ComboBoxItem> { new() { Content = "(the program loads no tiles or maps)", IsEnabled = false } };
+        ProgramFilesBox.SelectedIndex = -1;
+    }
+
+    private async void ProgramFilesBox_OnSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (ProgramFilesBox.SelectedItem is not ComboBoxItem { Tag: ProgramAssets.Asset asset }) return;
+        string path;
+        try { path = ResourceLoader.GetPath(asset.File); }
+        catch (FileNotFoundException) { path = asset.File; }
+        if (!File.Exists(path))
+        {
+            StatusText.Text = $"Cannot find {asset.File}";
+            return;
+        }
+        try
+        {
+            if (asset.Kind == "TILE")
+            {
+                _gfx.LoadTileBank(path, asset.FrameWidth ?? 32, asset.FrameHeight ?? 32);
+                RefreshTiles();
+                RefreshMap();
+            }
+            else
+            {
+                await using var stream = File.OpenRead(path);
+                LoadMapFrom(await System.Text.Json.JsonSerializer.DeserializeAsync<MapDto>(stream), path);
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Failed to load {asset.File}: {ex.Message}";
+        }
+    }
+
+    private async void LoadTiles_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Select Tileset PNG",
+            FileTypeFilter = [FilePickerFileTypes.ImageAll]
+        });
+        if (files.Count == 0) return;
+
+        // The same dialog as for sprite sheets shows the tile grid on the picture
+        Bitmap bitmap;
+        await using (var s = await files[0].OpenReadAsync())
+            bitmap = new Bitmap(s);
+        var (tw, th) = _gfx.GetTileSize();
+        SpritesheetConfig? suggested = ProgramAssets.FromFileName(files[0].Name) is { } n
+            ? new SpritesheetConfig { FrameWidth = n.w ?? tw, FrameHeight = n.h ?? th, FrameCount = n.frames ?? 1 } : null;
+        var config = await new SpritesheetConfigDialog(bitmap, suggested, $"Tile size for {files[0].Name}")
+            .ShowDialog<SpritesheetConfig?>(this);
+        bitmap.Dispose();
+        if (config == null) return;
+
+        await using var stream = await files[0].OpenReadAsync();
+        _gfx.LoadTileBank(stream, config.FrameWidth, config.FrameHeight);
+        RefreshTiles();
+        RefreshMap();
+    }
+
+    private void LoadMapFrom(MapDto? dto, string? path)
+    {
+        if (dto == null) return;
+        SaveForUndo();
+        _gfx.SetMapSize(dto.Width, dto.Height);
+        int idx = 0;
+        for (int y = 0; y < dto.Height; y++)
+            for (int x = 0; x < dto.Width; x++)
+                _gfx.SetMapTile(x, y, idx < dto.Data.Count ? dto.Data[idx++] : -1);
+        MapWidthUpDown.Value = dto.Width;
+        MapHeightUpDown.Value = dto.Height;
+        SetMapFile(path);
+        RefreshMap();
+    }
+
+    private void SetMapFile(string? path)
+    {
+        _mapFile = path;
+        MapFileText.Text = path == null ? "(no file)" : Path.GetFileName(path);
+    }
+
+    // Save writes back to the map's own file, so a map from the program is updated where it lies
+    private async void SaveMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_mapFile == null) { SaveMapAs_OnClick(sender, e); return; }
+        await using var stream = File.Create(_mapFile);
+        await WriteMapTo(stream);
+        StatusText.Text = $"Saved {Path.GetFileName(_mapFile)}";
+    }
+
+    private async void SaveMapAs_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save AMOS Map",
+            SuggestedFileName = _mapFile != null ? Path.GetFileName(_mapFile) : "level.amosmap",
+            FileTypeChoices = [new FilePickerFileType("AMOS Map") { Patterns = ["*.amosmap"] }]
+        });
+        if (file == null) return;
+        await using (var stream = await file.OpenWriteAsync())
+        {
+            stream.SetLength(0);
+            await WriteMapTo(stream);
+        }
+        SetMapFile(file.Path.LocalPath);
+    }
+
+    private async System.Threading.Tasks.Task WriteMapTo(Stream stream)
+    {
+        var dto = new MapDto(_gfx.GetMapWidth(), _gfx.GetMapHeight(), ReadMap().ToList());
+        await System.Text.Json.JsonSerializer.SerializeAsync(stream, dto);
+    }
+
+    private async void LoadMap_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Load AMOS Map",
+            FileTypeFilter = [new FilePickerFileType("AMOS Map") { Patterns = ["*.amosmap"] }]
+        });
+        if (files.Count == 0) return;
+        await using var stream = await files[0].OpenReadAsync();
+        LoadMapFrom(await System.Text.Json.JsonSerializer.DeserializeAsync<MapDto>(stream), files[0].Path.LocalPath);
+    }
+
+    // The map file format, the same as MAP LOAD reads
     private record MapDto(int Width, int Height, List<int> Data);
+}
+
+// The map, drawn tile by tile, with a grid and the cell under the pointer marked
+public class MapView : Control
+{
+    public AmosGraphics? Gfx { get; set; }
+    public double Zoom { get; set; } = 1;
+    public bool ShowGrid { get; set; } = true;
+    public (int x, int y) Hover { get; set; } = (-1, -1);
+
+    public void Refresh()
+    {
+        InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    private (double w, double h) Cell()
+    {
+        var (tw, th) = Gfx?.GetTileSize() ?? (32, 32);
+        return (tw * Zoom, th * Zoom);
+    }
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        if (Gfx == null) return default;
+        var (cw, ch) = Cell();
+        return new Size(Gfx.GetMapWidth() * cw, Gfx.GetMapHeight() * ch);
+    }
+
+    public override void Render(DrawingContext context)
+    {
+        if (Gfx == null) return;
+        var (cw, ch) = Cell();
+        int mw = Gfx.GetMapWidth(), mh = Gfx.GetMapHeight();
+        var tiles = Gfx.GetTileBitmaps();
+        context.FillRectangle(Brushes.Black, new Rect(0, 0, mw * cw, mh * ch));
+
+        using (context.PushRenderOptions(new RenderOptions { BitmapInterpolationMode = BitmapInterpolationMode.None }))
+            for (int y = 0; y < mh; y++)
+                for (int x = 0; x < mw; x++)
+                {
+                    int t = Gfx.GetMapTile(x, y);
+                    if (t >= 0 && t < tiles.Count)
+                        context.DrawImage(tiles[t], new Rect(x * cw, y * ch, cw, ch));
+                }
+
+        if (ShowGrid)
+        {
+            var pen = new Pen(new SolidColorBrush(Color.FromArgb(0x44, 0x7F, 0xB2, 0xFF)), 1);
+            for (int x = 0; x <= mw; x++) context.DrawLine(pen, new Point(x * cw + 0.5, 0), new Point(x * cw + 0.5, mh * ch));
+            for (int y = 0; y <= mh; y++) context.DrawLine(pen, new Point(0, y * ch + 0.5), new Point(mw * cw, y * ch + 0.5));
+        }
+
+        if (Hover.x >= 0 && Hover.y >= 0 && Hover.x < mw && Hover.y < mh)
+            context.DrawRectangle(new Pen(new SolidColorBrush(Color.FromRgb(255, 212, 0)), 2),
+                new Rect(Hover.x * cw + 1, Hover.y * ch + 1, cw - 2, ch - 2));
+    }
+}
+
+// The tile bank laid out as in its picture; a click picks a tile
+public class TilePaletteView : Control
+{
+    public AmosGraphics? Gfx { get; set; }
+    public int Selected { get; set; }
+    public event Action<int>? TileSelected;
+
+    private (int cols, double cw, double ch) Layout()
+    {
+        var (tw, th) = Gfx?.GetTileSize() ?? (32, 32);
+        int cols = Math.Max(1, Gfx?.GetTilesInWidth() ?? 1);
+        // Small tiles are shown bigger, big ones smaller, so they are easy to click
+        double scale = Math.Clamp(32.0 / Math.Max(tw, th), 0.5, 2);
+        return (cols, tw * scale, th * scale);
+    }
+
+    public void Refresh()
+    {
+        InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        int count = Gfx?.GetTileBitmaps().Count ?? 0;
+        if (count == 0) return default;
+        var (cols, cw, ch) = Layout();
+        return new Size(Math.Min(cols, count) * cw, Math.Ceiling(count / (double)cols) * ch);
+    }
+
+    public override void Render(DrawingContext context)
+    {
+        var tiles = Gfx?.GetTileBitmaps();
+        if (tiles == null || tiles.Count == 0) return;
+        var (cols, cw, ch) = Layout();
+        using (context.PushRenderOptions(new RenderOptions { BitmapInterpolationMode = BitmapInterpolationMode.None }))
+            for (int i = 0; i < tiles.Count; i++)
+                context.DrawImage(tiles[i], new Rect(i % cols * cw, i / cols * ch, cw, ch));
+        if (Selected >= 0 && Selected < tiles.Count)
+            context.DrawRectangle(new Pen(new SolidColorBrush(Color.FromRgb(255, 212, 0)), 2),
+                new Rect(Selected % cols * cw + 1, Selected / cols * ch + 1, cw - 2, ch - 2));
+    }
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        int count = Gfx?.GetTileBitmaps().Count ?? 0;
+        var (cols, cw, ch) = Layout();
+        var p = e.GetPosition(this);
+        int i = (int)(p.Y / ch) * cols + (int)(p.X / cw);
+        if (p.X < cols * cw && i >= 0 && i < count) TileSelected?.Invoke(i);
+    }
 }

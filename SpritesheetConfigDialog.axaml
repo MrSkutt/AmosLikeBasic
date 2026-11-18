@@ -1,41 +1,49 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:AmosLikeBasic"
         x:Class="AmosLikeBasic.SpritesheetConfigDialog"
-        Title="Spritesheet Configuration"
-        Width="350" Height="250"
-        WindowStartupLocation="CenterOwner"
-        CanResize="False">
-    <Grid Margin="20" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
-    
-        <TextBlock Grid.Row="0" Text="Configure Spritesheet Import" 
-                   FontSize="16" FontWeight="Bold" Foreground="{DynamicResource AmosTitleFg}" Margin="0,0,0,20"/>
+        Title="Spritesheet"
+        Width="820" Height="560" MinWidth="560" MinHeight="400"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="16" RowDefinitions="Auto,*,Auto" ColumnDefinitions="*,230">
 
-        <!-- Frame Width -->
-        <Grid Grid.Row="1" ColumnDefinitions="120,*" Margin="0,0,0,10">
-            <TextBlock Grid.Column="0" Text="Frame Width:" VerticalAlignment="Center"/>
-            <NumericUpDown Grid.Column="1" Name="FrameWidthUpDown" 
-                           Minimum="1" Maximum="512" Value="32" Increment="1"/>
-        </Grid>
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Name="TitleText" Text="Split the picture into frames"
+                   FontSize="16" FontWeight="Bold" Foreground="{DynamicResource AmosTitleFg}" Margin="0,0,0,12"/>
 
-        <!-- Frame Height -->
-        <Grid Grid.Row="2" ColumnDefinitions="120,*" Margin="0,0,0,10">
-            <TextBlock Grid.Column="0" Text="Frame Height:" VerticalAlignment="Center"/>
-            <NumericUpDown Grid.Column="1" Name="FrameHeightUpDown" 
-                           Minimum="1" Maximum="512" Value="32" Increment="1"/>
-        </Grid>
+        <!-- The whole sheet with the frame grid on top -->
+        <Border Grid.Row="1" Grid.Column="0" Background="{DynamicResource AmosCanvasBg}"
+                BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="1" Margin="0,0,12,0">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <local:SheetPreview Name="Preview" Margin="8" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+            </ScrollViewer>
+        </Border>
 
-        <!-- Frame Count -->
-        <Grid Grid.Row="3" ColumnDefinitions="120,*" Margin="0,0,0,10">
-            <TextBlock Grid.Column="0" Text="Frame Count:" VerticalAlignment="Center"/>
-            <NumericUpDown Grid.Column="1" Name="FrameCountUpDown" 
-                           Minimum="1" Maximum="256" Value="8" Increment="1"/>
-        </Grid>
+        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="8">
+            <Grid ColumnDefinitions="100,*">
+                <TextBlock Text="Frame width:" VerticalAlignment="Center"/>
+                <NumericUpDown Grid.Column="1" Name="FrameWidthUpDown" Minimum="1" Maximum="4096" Value="32" Increment="1" FormatString="0"/>
+            </Grid>
+            <Grid ColumnDefinitions="100,*">
+                <TextBlock Text="Frame height:" VerticalAlignment="Center"/>
+                <NumericUpDown Grid.Column="1" Name="FrameHeightUpDown" Minimum="1" Maximum="4096" Value="32" Increment="1" FormatString="0"/>
+            </Grid>
+            <Grid ColumnDefinitions="100,*">
+                <TextBlock Text="Frames:" VerticalAlignment="Center"/>
+                <NumericUpDown Grid.Column="1" Name="FrameCountUpDown" Minimum="1" Maximum="4096" Value="1" Increment="1" FormatString="0"/>
+            </Grid>
+            <Button Content="Guess from the picture" Click="GuessButton_OnClick" HorizontalAlignment="Stretch"/>
+            <TextBlock Name="InfoText" Foreground="{DynamicResource AmosLabelFg}" TextWrapping="Wrap"/>
 
-        <!-- Buttons -->
-        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
-            <Button Content="OK" Width="80" Click="OkButton_OnClick" IsDefault="True"/>
-            <Button Content="Cancel" Width="80" Click="CancelButton_OnClick"/>
+            <TextBlock Text="Animation" Foreground="{DynamicResource AmosLabelFg}" Margin="0,8,0,0"/>
+            <Border Background="{DynamicResource AmosCanvasBg}" BorderBrush="{DynamicResource AmosPanelBorder}"
+                    BorderThickness="1" Height="170">
+                <Image Name="AnimImage" Stretch="Uniform" Margin="6" RenderOptions.BitmapInterpolationMode="None"/>
+            </Border>
         </StackPanel>
 
+        <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10" Margin="0,12,0,0">
+            <Button Content="OK" Width="80" Click="OkButton_OnClick" IsDefault="True"/>
+            <Button Content="Cancel" Width="80" Click="CancelButton_OnClick" IsCancel="True"/>
+        </StackPanel>
     </Grid>
 </Window>

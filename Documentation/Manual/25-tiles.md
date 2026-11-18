@@ -49,7 +49,11 @@ IF TILE(1, PLAYER_X + 16, PLAYER_Y + 32) >= 0 THEN ON_GROUND = 1
 
 ## The map editor
 
-The **MAP** button in the editor opens the map editor, where you draw the level with the mouse instead of with `TILE SET`. Load a tileset with **Load Tileset...**, choose tiles in the palette and click them onto the map. Save with **Save Map...**. The level is then loaded in your program with `MAP LOAD`:
+The **MAP** button in the editor opens the map editor, where you draw the level with the mouse instead of with `TILE SET`.
+
+**From the program** lists the `TILE LOAD` and `MAP LOAD` lines in your program: choose the tileset and then the map, and you edit the level just as the game shows it. **Save** writes the map back to its file. **Load Tileset...** opens another picture and shows the tile grid on it, so you can check the tile size.
+
+Choose a tile in the palette and draw with it. Besides the pencil there are **line**, **rectangle** (filled or not) and **fill**, and the **picker** takes a tile from the map. The right button erases, and **Ctrl+Z** undoes. The level is then loaded in your program with `MAP LOAD`:
 
 ```basic nocheck
 SCREEN SELECT 1
