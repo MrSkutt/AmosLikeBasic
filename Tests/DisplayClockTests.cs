@@ -94,11 +94,15 @@ public class DisplayClockTests : IDisposable
     {
         DisplayClock.StartRun();
         DisplayClock.Tick();
+        var sinceTick = System.Diagnostics.Stopwatch.StartNew();
         await DisplayClock.WaitFrameAsync(CancellationToken.None);   // the first frame uses the latest refresh
 
         var wait = DisplayClock.WaitFrameAsync(CancellationToken.None);
         await Task.Delay(30);
-        Assert.False(wait.IsCompleted);                              // no new refresh yet
+        // No new refresh yet, so it waits. (After 100 ms without refreshes it rightly goes over to
+        // the timer, so on a slow machine that stalled for that long the check says nothing.)
+        if (sinceTick.ElapsedMilliseconds < 90)
+            Assert.False(wait.IsCompleted);
         DisplayClock.Tick();
         await wait.WaitAsync(TimeSpan.FromSeconds(2));
     }
