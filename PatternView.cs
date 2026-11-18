@@ -324,17 +324,7 @@ public class PatternView : Control
 
         if (p.Y < HeaderH)
         {
-            // Left click: mute the channel. Right click: play only that channel (solo).
-            if (props.IsRightButtonPressed)
-            {
-                // If the channel is already alone, all are heard again
-                bool alreadySolo = !Muted[channel] && CountUnmuted() == 1;
-                for (int c = 0; c < Muted.Length; c++) Muted[c] = !alreadySolo && c != channel;
-            }
-            else
-                Muted[channel] = !Muted[channel];
-            MuteChanged?.Invoke();
-            InvalidateVisual();
+            ToggleMute(channel, solo: props.IsRightButtonPressed);
             return;
         }
 
@@ -347,6 +337,23 @@ public class PatternView : Control
         }
         _dragging = true;
         e.Pointer.Capture(this);
+    }
+
+    // Mute: turns the channel off and on. Solo: plays only that channel; when it already is alone,
+    // all are heard again. (Clicking a channel's heading, or its oscilloscope.)
+    public void ToggleMute(int channel, bool solo)
+    {
+        if (channel < 0 || channel >= Muted.Length) return;
+        if (solo)
+        {
+            bool alreadySolo = !Muted[channel] && CountUnmuted() == 1;
+            for (int c = 0; c < Muted.Length; c++) Muted[c] = !alreadySolo && c != channel;
+        }
+        else
+            Muted[channel] = !Muted[channel];
+        MuteChanged?.Invoke();
+        InvalidateVisual();
+        ChannelsMoved?.Invoke();   // the scopes show it too
     }
 
     private int CountUnmuted()

@@ -100,4 +100,26 @@ public class InstrumentLibraryTests : IDisposable
         Assert.True(peak < 0.95, $"{name} peaks at {peak:0.00}");
         Assert.InRange(Math.Sqrt(sum / count), 0.1, 0.3);
     }
+
+    [Fact]
+    public void A_song_is_saved_as_a_wav_file()
+    {
+        var song = TrackerSong.Load(Repo.PathOf("Sound/Tracker/pixel_rush.amostrk"));
+        var samples = S.RenderSong(song);
+        // 51.2 s of song and a short ringing out, the silence after it trimmed
+        Assert.InRange(samples.Length / (double)S.SampleRate, 51.2, 54.5);
+        Assert.True(samples.Max(x => Math.Abs(x)) > 0.3);
+
+        string file = Path.Combine(Path.GetTempPath(), "amos-song-" + Guid.NewGuid().ToString("N") + ".wav");
+        try
+        {
+            S.WriteWav(file, samples);
+            var bytes = File.ReadAllBytes(file);
+            Assert.Equal("RIFF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
+            Assert.Equal("WAVE", System.Text.Encoding.ASCII.GetString(bytes, 8, 4));
+            Assert.Equal(S.SampleRate, BitConverter.ToInt32(bytes, 24));
+            Assert.Equal(44 + samples.Length * 2, bytes.Length);
+        }
+        finally { File.Delete(file); }
+    }
 }

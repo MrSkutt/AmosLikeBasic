@@ -183,6 +183,12 @@ namespace AmosLikeBasic
         public double Osc2Detune { get; set; }             // cent
         public double Osc2Mix { get; set; } = 50;          // procent of oscillator 2 in the sound
 
+        // Echo: the sound comes back after a while, a little quieter each time. Mix 0 is off.
+        public double EchoTime { get; set; } = 300;        // ms, at most 2000
+        public int EchoSyncRows { get; set; }              // > 0: the time is this many rows of the song
+        public double EchoFeedback { get; set; } = 40;     // procent of each echo that comes back again
+        public double EchoMix { get; set; }                // procent: how loud the echo is
+
         // Two LFOs that each move one setting up and down while the note sounds
         public TrackerLfo Lfo1 { get; set; } = new();
         public TrackerLfo Lfo2 { get; set; } = new();

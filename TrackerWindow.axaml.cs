@@ -287,7 +287,15 @@ public partial class TrackerWindow : Window
             Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap
         });
 
-        var cards = new WrapPanel { Orientation = Orientation.Horizontal };
+        // The sound as it is right now, on the channel the piano keys play
+        panel.Children.Add(new InstrumentScope
+        {
+            Channel = () => ChiptuneSynth.ChannelWithInstrument(Pattern.Instrument, Pattern.CursorChannel + 1),
+            Instrument = () => CurrentInstrument == null ? "" : $"{Pattern.Instrument:X2} {CurrentInstrument.Name}".ToUpperInvariant(),
+            Margin = new Thickness(0, 0, 10, 0)
+        });
+
+        var cards = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         panel.Children.Add(cards);
 
         // Enter in a box (Esc in the table, where Enter makes a new line) goes back to playing notes.
@@ -302,64 +310,80 @@ public partial class TrackerWindow : Window
             }
         }, RoutingStrategies.Bubble, handledEventsToo: true);
 
-        // ── The sound ──
-        var sound = Card(cards, "SOUND");
-        AddGraph(sound, new WaveGraph());
+        // The sections follow the sound: the oscillators make it, the filter shapes it, the amp
+        // envelope gives it its volume over time, the effects come last, and the modulation moves things
+        // ── OSCILLATORS ──
+        var osc = Card(cards, "OSCILLATORS", 400);
         var name = new TextBox();
         name.TextChanged += (_, _) =>
         {
             if ((name.Text ?? "") != (CurrentInstrument?.Name ?? ""))
                 EditInstrument("name", i => i.Name = name.Text ?? "", refreshList: true);
         };
-        AddRow(sound, "Name", name);
+        AddRow(osc, "Name", name);
         _instrumentRefresh.Add(() => name.Text = CurrentInstrument?.Name ?? "");
-        AddCombo(sound, "Wave", new[] { "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
-            i => i.Wave, (i, v) => i.Wave = v);
-        AddNumber(sound, "Volume", 0, 1, 0.01, "0.00", i => i.Volume, (i, v) => i.Volume = v);
-        AddNumber(sound, "Pulse width %", 1, 99, 1, "0", i => i.PulseWidth, (i, v) => i.PulseWidth = v);
-        AddNumber(sound, "PWM depth %", 0, 49, 1, "0", i => i.PwmDepth, (i, v) => i.PwmDepth = v);
-        AddNumber(sound, "PWM rate Hz", 0, 20, 0.1, "0.0", i => i.PwmRate, (i, v) => i.PwmRate = v);
+        AddGraph(osc, new WaveGraph { Mixed = true });
+        AddSubHeading(osc, "OSC 1");
+        AddChoice(osc, new[] { "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
+            new[] { "PULSE", "SQUARE", "TRI", "SAW", "SINE", "NOISE" }, i => i.Wave, (i, v) => i.Wave = v, "wave");
+        var o1 = KnobRow(osc);
+        AddKnob(o1, "VOLUME", 0, 1, i => i.Volume, (i, v) => i.Volume = v, "volume", "0.00", step: 0.01);
+        AddKnob(o1, "WIDTH", 1, 99, i => i.PulseWidth, (i, v) => i.PulseWidth = v, "width", unit: "%", step: 1);
+        AddKnob(o1, "PWM", 0, 49, i => i.PwmDepth, (i, v) => i.PwmDepth = v, "pwm", unit: "%", step: 1);
+        AddKnob(o1, "PWM RATE", 0, 20, i => i.PwmRate, (i, v) => i.PwmRate = v, "pwm rate", "0.0", "Hz", step: 0.1);
+        AddSubHeading(osc, "OSC 2");
+        AddChoice(osc, new[] { "Off", "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
+            new[] { "OFF", "PULSE", "SQUARE", "TRI", "SAW", "SINE", "NOISE" }, i => i.Osc2Wave ?? "Off", (i, v) => i.Osc2Wave = v, "osc2 wave");
+        var o2 = KnobRow(osc);
+        AddKnob(o2, "SEMI", -24, 24, i => i.Osc2Semitones, (i, v) => i.Osc2Semitones = v, "osc2 semi", "+0;-0;0", bipolar: true, step: 1);
+        AddKnob(o2, "DETUNE", -100, 100, i => i.Osc2Detune, (i, v) => i.Osc2Detune = v, "osc2 detune", "+0;-0;0", "c", bipolar: true, step: 1);
+        AddKnob(o2, "MIX", 0, 100, i => i.Osc2Mix, (i, v) => i.Osc2Mix = v, "osc2 mix", unit: "%", step: 1);
 
-        // ── The second oscillator ──
-        var osc2 = Card(cards, "OSCILLATOR 2");
-        AddGraph(osc2, new WaveGraph { Mixed = true });
-        AddCombo(osc2, "Wave", new[] { "Off", "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
-            i => i.Osc2Wave ?? "Off", (i, v) => i.Osc2Wave = v, "osc2 wave");
-        AddNumber(osc2, "Semitones", -24, 24, 1, "0", i => i.Osc2Semitones, (i, v) => i.Osc2Semitones = v);
-        AddNumber(osc2, "Detune cents", -100, 100, 1, "0", i => i.Osc2Detune, (i, v) => i.Osc2Detune = v);
-        AddNumber(osc2, "Mix %", 0, 100, 5, "0", i => i.Osc2Mix, (i, v) => i.Osc2Mix = v);
-
-        // ── The envelope ──
-        var env = Card(cards, "ENVELOPE");
-        AddGraph(env, new EnvelopeGraph());
-        AddNumber(env, "Attack ms", 0, 5000, 5, "0", i => i.Attack, (i, v) => i.Attack = v);
-        AddNumber(env, "Decay ms", 0, 5000, 10, "0", i => i.Decay, (i, v) => i.Decay = v);
-        AddNumber(env, "Sustain %", 0, 100, 5, "0", i => i.Sustain, (i, v) => i.Sustain = v);
-        AddNumber(env, "Release ms", 0, 5000, 10, "0", i => i.Release, (i, v) => i.Release = v);
-
-        // ── The filter ──
-        var filter = Card(cards, "FILTER");
+        // ── FILTER ──
+        var filter = Card(cards, "FILTER", 400);
         AddGraph(filter, new FilterGraph());
-        AddCombo(filter, "Type", new[] { "Off", "Low", "High", "Band" }, i => i.Filter, (i, v) => i.Filter = v);
-        AddNumber(filter, "Cutoff Hz", 20, 18000, 50, "0", i => i.Cutoff, (i, v) => i.Cutoff = v);
-        AddNumber(filter, "Resonance %", 0, 100, 5, "0", i => i.Resonance, (i, v) => i.Resonance = v);
-        AddNumber(filter, "Env depth Hz", -18000, 18000, 100, "0", i => i.FilterEnvDepth, (i, v) => i.FilterEnvDepth = v);
-        AddNumber(filter, "Env attack ms", 0, 5000, 5, "0", i => i.FilterEnvAttack, (i, v) => i.FilterEnvAttack = v);
-        AddNumber(filter, "Env decay ms", 1, 5000, 10, "0", i => i.FilterEnvDecay, (i, v) => i.FilterEnvDecay = v);
+        AddChoice(filter, new[] { "Off", "Low", "High", "Band" }, new[] { "OFF", "LOW PASS", "HIGH PASS", "BAND" },
+            i => i.Filter, (i, v) => i.Filter = v, "filter");
+        var f1 = KnobRow(filter);
+        AddKnob(f1, "CUTOFF", 20, 18000, i => i.Cutoff, (i, v) => i.Cutoff = v, "cutoff", "0", "Hz", log: true);
+        AddKnob(f1, "RESO", 0, 100, i => i.Resonance, (i, v) => i.Resonance = v, "resonance", unit: "%", step: 1);
+        AddSubHeading(filter, "FILTER ENVELOPE");
+        var f2 = KnobRow(filter);
+        AddKnob(f2, "DEPTH", -18000, 18000, i => i.FilterEnvDepth, (i, v) => i.FilterEnvDepth = v, "fenv depth", "0", "Hz", bipolar: true, step: 10);
+        AddKnob(f2, "ATTACK", 1, 5000, i => i.FilterEnvAttack, (i, v) => i.FilterEnvAttack = v, "fenv attack", "0", "ms", log: true);
+        AddKnob(f2, "DECAY", 1, 5000, i => i.FilterEnvDecay, (i, v) => i.FilterEnvDecay = v, "fenv decay", "0", "ms", log: true);
 
-        // ── Pitch ──
-        var pitch = Card(cards, "PITCH");
-        AddNumber(pitch, "Vibrato cents", 0, 1200, 5, "0", i => i.Vibrato, (i, v) => i.Vibrato = v);
-        AddNumber(pitch, "Vibrato Hz", 0, 30, 0.5, "0.0", i => i.VibratoRate, (i, v) => i.VibratoRate = v);
-        AddNumber(pitch, "Ring mod ch", 0, 8, 1, "0", i => i.Ring, (i, v) => i.Ring = (int)v);
-        AddNumber(pitch, "Sync ch", 0, 8, 1, "0", i => i.Sync, (i, v) => i.Sync = (int)v);
+        // ── AMP ──
+        var amp = Card(cards, "AMP ENVELOPE", 300);
+        AddGraph(amp, new EnvelopeGraph());
+        var adsr = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
+        amp.Children.Add(adsr);
+        AddVSlider(adsr, "A", 1, 5000, true, i => i.Attack, (i, v) => i.Attack = v, "attack", "0", "ms");
+        AddVSlider(adsr, "D", 1, 5000, true, i => i.Decay, (i, v) => i.Decay = v, "decay", "0", "ms");
+        AddVSlider(adsr, "S", 0, 100, false, i => i.Sustain, (i, v) => i.Sustain = v, "sustain", "0", "%");
+        AddVSlider(adsr, "R", 1, 5000, true, i => i.Release, (i, v) => i.Release = v, "release", "0", "ms");
 
-        // ── The LFOs ──
+        // ── EFFECTS ──
+        var fx = Card(cards, "EFFECTS", 300);
+        AddSubHeading(fx, "ECHO");
+        var e1 = KnobRow(fx);
+        AddKnob(e1, "MIX", 0, 100, i => i.EchoMix, (i, v) => i.EchoMix = v, "echo mix", unit: "%", step: 1);
+        AddKnob(e1, "TIME", 10, 2000, i => i.EchoTime, (i, v) => i.EchoTime = v, "echo time", "0", "ms", log: true);
+        AddKnob(e1, "FEEDBACK", 0, 90, i => i.EchoFeedback, (i, v) => i.EchoFeedback = v, "echo feedback", unit: "%", step: 1);
+        AddKnob(e1, "ROWS", 0, 16, i => i.EchoSyncRows, (i, v) => i.EchoSyncRows = (int)v, "echo rows", step: 1);
+        AddSubHeading(fx, "PITCH");
+        var p1 = KnobRow(fx);
+        AddKnob(p1, "VIBRATO", 0, 200, i => i.Vibrato, (i, v) => i.Vibrato = v, "vibrato", "0", "c", step: 1);
+        AddKnob(p1, "RATE", 0, 30, i => i.VibratoRate, (i, v) => i.VibratoRate = v, "vibrato rate", "0.0", "Hz", step: 0.1);
+        AddNumber(fx, "Ring mod ch", 0, 8, 1, "0", i => i.Ring, (i, v) => i.Ring = (int)v);
+        AddNumber(fx, "Sync ch", 0, 8, 1, "0", i => i.Sync, (i, v) => i.Sync = (int)v);
+
+        // ── MODULATION ──
         AddLfoCard(cards, "LFO 1", i => i.Lfo1 ??= new TrackerLfo());
         AddLfoCard(cards, "LFO 2", i => i.Lfo2 ??= new TrackerLfo());
 
         // ── The table ──
-        var tableCard = Card(cards, "TABLE (one step per tick)");
+        var tableCard = Card(cards, "TABLE (one step per tick)", 300);
         var table = new TextBox
         {
             AcceptsReturn = true,
@@ -385,19 +409,118 @@ public partial class TrackerWindow : Window
     // An LFO: what it moves, its wave, speed (in Hz or in rows of the song) and depth
     private void AddLfoCard(WrapPanel cards, string title, Func<TrackerInstrument, TrackerLfo> lfo)
     {
-        var card = Card(cards, title);
+        var card = Card(cards, title, 340);
         AddGraph(card, new LfoGraph { Lfo = lfo });
         AddCombo(card, "Moves", TrackerLfo.Targets, i => lfo(i).Target, (i, v) => lfo(i).Target = v, title + " Moves");
         AddCombo(card, "Wave", TrackerLfo.Shapes, i => lfo(i).Shape, (i, v) => lfo(i).Shape = v, title + " Wave");
-        AddNumber(card, "Depth", -1200, 1200, 5, "0", i => lfo(i).Depth, (i, v) => lfo(i).Depth = v, title + " Depth");
-        AddNumber(card, "Rate Hz", 0, 50, 0.1, "0.0", i => lfo(i).Rate, (i, v) => lfo(i).Rate = v, title + " Rate Hz");
-        AddNumber(card, "Sync rows", 0, 64, 1, "0", i => lfo(i).SyncRows, (i, v) => lfo(i).SyncRows = (int)v, title + " Sync rows");
-        AddNumber(card, "Delay ms", 0, 5000, 50, "0", i => lfo(i).Delay, (i, v) => lfo(i).Delay = v, title + " Delay ms");
+        var row = KnobRow(card);
+        AddKnob(row, "DEPTH", -1200, 1200, i => lfo(i).Depth, (i, v) => lfo(i).Depth = v, title + " Depth", "+0;-0;0", bipolar: true, step: 1);
+        AddKnob(row, "RATE", 0.05, 50, i => lfo(i).Rate, (i, v) => lfo(i).Rate = v, title + " Rate", "0.0#", "Hz", log: true);
+        AddKnob(row, "ROWS", 0, 64, i => lfo(i).SyncRows, (i, v) => lfo(i).SyncRows = (int)v, title + " Rows", step: 1);
+        AddKnob(row, "DELAY", 0, 5000, i => lfo(i).Delay, (i, v) => lfo(i).Delay = v, title + " Delay", "0", "ms", step: 10);
         AddCheck(card, "Restart on note", i => lfo(i).Retrigger, (i, v) => lfo(i).Retrigger = v, title + " retrigger");
         card.Children.Add(new TextBlock
         {
-            Text = "Depth: cents for pitch, semitones for cutoff, % otherwise. Sync rows above 0 ties the speed to the song.",
+            Text = "Depth: cents for pitch, semitones for cutoff, % otherwise. ROWS above 0 ties the speed to the song.",
             Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, FontSize = 11
+        });
+    }
+
+    private static StackPanel KnobRow(StackPanel panel)
+    {
+        var row = new WrapPanel { Orientation = Orientation.Horizontal };
+        var holder = new StackPanel();
+        holder.Children.Add(row);
+        panel.Children.Add(holder);
+        return holder;
+    }
+
+    private static void AddSubHeading(StackPanel panel, string text) =>
+        panel.Children.Add(new TextBlock { Text = text, Classes = { "amos-label" }, FontWeight = FontWeight.Bold, Margin = new Thickness(0, 6, 0, 0) });
+
+    // A knob for one setting; key is what undo groups its changes by
+    private void AddKnob(StackPanel row, string label, double min, double max, Func<TrackerInstrument, double> get,
+        Action<TrackerInstrument, double> set, string key, string format = "0", string unit = "",
+        bool log = false, bool bipolar = false, double step = 0)
+    {
+        var knob = new Knob
+        {
+            Label = label, Minimum = min, Maximum = max, Logarithmic = log, Bipolar = bipolar, Step = step,
+            Format = format, Unit = unit, Margin = new Thickness(0, 2, 4, 2)
+        };
+        knob.ValueChanged += v => EditInstrument(key, i => set(i, v));
+        ((WrapPanel)row.Children[0]).Children.Add(knob);
+        _instrumentRefresh.Add(() =>
+        {
+            var inst = CurrentInstrument;
+            knob.IsEnabled = inst != null;
+            if (inst != null) knob.Value = get(inst);
+        });
+    }
+
+    // A vertical slider (the amp envelope); logarithmic ones move evenly through short and long times
+    private void AddVSlider(StackPanel row, string label, double min, double max, bool log,
+        Func<TrackerInstrument, double> get, Action<TrackerInstrument, double> set, string key, string format, string unit)
+    {
+        double ToPos(double v) => log ? Math.Log(Math.Clamp(v, min, max) / min) / Math.Log(max / min) : (Math.Clamp(v, min, max) - min) / (max - min);
+        double ToValue(double p) => Math.Round(log ? min * Math.Pow(max / min, p) : min + p * (max - min));
+        var slider = new Slider
+        {
+            Orientation = Orientation.Vertical, Minimum = 0, Maximum = 1, Height = 120, Focusable = false,
+            HorizontalAlignment = HorizontalAlignment.Center
+        };
+        var value = new TextBlock { Classes = { "amos-label" }, FontSize = 10, HorizontalAlignment = HorizontalAlignment.Center };
+        slider.ValueChanged += (_, _) =>
+        {
+            double v = ToValue(slider.Value);
+            value.Text = v.ToString(format, System.Globalization.CultureInfo.InvariantCulture) + " " + unit;
+            EditInstrument(key, i => set(i, v));
+        };
+        var column = new StackPanel { Width = 62, Spacing = 2 };
+        column.Children.Add(new TextBlock { Text = label, Classes = { "amos-title" }, HorizontalAlignment = HorizontalAlignment.Center });
+        column.Children.Add(slider);
+        column.Children.Add(value);
+        row.Children.Add(column);
+        _instrumentRefresh.Add(() =>
+        {
+            var inst = CurrentInstrument;
+            slider.IsEnabled = inst != null;
+            if (inst == null) return;
+            slider.Value = ToPos(get(inst));
+            value.Text = get(inst).ToString(format, System.Globalization.CultureInfo.InvariantCulture) + " " + unit;
+        });
+    }
+
+    // A row of buttons for a choice (waves, filter type); they do not take the keyboard from the piano
+    private void AddChoice(StackPanel panel, string[] values, string[] labels, Func<TrackerInstrument, string> get,
+        Action<TrackerInstrument, string> set, string key)
+    {
+        var row = new WrapPanel { Margin = new Thickness(0, 2, 0, 2) };
+        var buttons = new Avalonia.Controls.Primitives.ToggleButton[values.Length];
+        for (int k = 0; k < values.Length; k++)
+        {
+            string v = values[k];
+            var b = new Avalonia.Controls.Primitives.ToggleButton { Content = labels[k], Focusable = false, FontSize = 11, Padding = new Thickness(7, 3), Margin = new Thickness(0, 0, 3, 3) };
+            b[!ForegroundProperty] = new Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension("AmosLabelFg");
+            b.Click += (_, _) =>
+            {
+                EditInstrument(key, i => set(i, v));
+                for (int j = 0; j < buttons.Length; j++) buttons[j].IsChecked = buttons[j] == b;
+            };
+            buttons[k] = b;
+            row.Children.Add(b);
+        }
+        panel.Children.Add(row);
+        _instrumentRefresh.Add(() =>
+        {
+            var inst = CurrentInstrument;
+            string current = inst == null ? "" : get(inst) ?? "";
+            if (current.Equals("Saw", StringComparison.OrdinalIgnoreCase)) current = "Sawtooth";
+            for (int j = 0; j < buttons.Length; j++)
+            {
+                buttons[j].IsEnabled = inst != null;
+                buttons[j].IsChecked = values[j].Equals(current, StringComparison.OrdinalIgnoreCase);
+            }
         });
     }
 
@@ -416,13 +539,13 @@ public partial class TrackerWindow : Window
     }
 
     // A card on the instrument page; returns the panel its rows go in
-    private static StackPanel Card(WrapPanel cards, string title)
+    private static StackPanel Card(WrapPanel cards, string title, double width = 340)
     {
         var stack = new StackPanel { Spacing = 4 };
         stack.Children.Add(new TextBlock { Text = title, Classes = { "amos-title" }, Margin = new Thickness(0, 0, 0, 2) });
         var border = new Border
         {
-            Width = 340,
+            Width = width,
             Margin = new Thickness(0, 0, 10, 10),
             Padding = new Thickness(10),
             BorderThickness = new Thickness(2),
@@ -998,6 +1121,43 @@ public partial class TrackerWindow : Window
         catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
         {
             SetStatus("Could not load: " + ex.Message);
+        }
+    }
+
+    // The song as a WAV file, rendered faster than it plays; muted channels are left out
+    private async void ExportWav_OnClick(object? sender, RoutedEventArgs e)
+    {
+        string name = string.IsNullOrWhiteSpace(_song.Title) ? "song" : _song.Title;
+        if (_path != null) name = Path.GetFileNameWithoutExtension(_path);
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save the song as WAV",
+            SuggestedFileName = name + ".wav",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound),
+            FileTypeChoices = new[] { new FilePickerFileType("WAV sound") { Patterns = new[] { "*.wav" } } }
+        });
+        if (file?.TryGetLocalPath() is not { } path) return;
+
+        Stop();
+        ReleasePageNotes();
+        ApplyMutes();
+        ExportWavButton.IsEnabled = false;
+        var song = TrackerSong.FromJson(_song.ToJson());   // a copy, so editing on does not change it half way
+        try
+        {
+            var samples = await Task.Run(() => ChiptuneSynth.RenderSong(song, progress: s =>
+                Dispatcher.UIThread.Post(() => SetStatus($"Making the WAV file... {s:0} s"))));
+            await Task.Run(() => ChiptuneSynth.WriteWav(path, samples));
+            SetStatus($"Saved {Path.GetFileName(path)} ({samples.Length / (double)ChiptuneSynth.SampleRate:0.0} s)");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetStatus("Could not save the WAV file: " + ex.Message);
+        }
+        finally
+        {
+            ExportWavButton.IsEnabled = true;
+            ApplyMutes();
         }
     }
 

@@ -327,7 +327,9 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **Instruments and effects.** With the arrow keys the cursor goes to the instrument and effect columns. There you type digits and letters directly: `0`–`9` and `A`–`F` for hex digits, and in the first column of the effect also `G`, `H` and `I`. `Delete` or `Backspace` clears whatever the cursor is on.
 
-**Playing.** `F5` plays the song from the place selected in the order list. `F6` plays the pattern over and over, `F7` plays the pattern from the cursor row and `Esc` stops. With **Follow** the pattern follows along while the song plays. Click a channel heading to mute the channel, and right-click to hear only that channel.
+**Playing.** `F5` plays the song from the place selected in the order list. `F6` plays the pattern over and over, `F7` plays the pattern from the cursor row and `Esc` stops. With **Follow** the pattern follows along while the song plays. Click a channel's oscilloscope (or its heading) to mute the channel, and right-click to hear only that channel (solo); right-click it again and all are heard. A muted channel's oscilloscope says MUTE, and the one heard alone says SOLO.
+
+**Saving as a sound file.** **WAV** in the toolbar saves the song as a WAV file, to use the music in a video, send it to a friend or play it anywhere. It is made much faster than the song plays, and it is the song as you hear it: muted channels are left out, so you can also save the drums or the melody on their own.
 
 **Edit.** `Space` turns edit mode on and off. When it is off you can play on the piano keys without anything being written in the pattern, for example to try out an instrument. The cursor row is red while edit is on. If the song is playing, `Space` stops it instead.
 
@@ -337,13 +339,18 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **Choosing an instrument.** Click an instrument in the list to give new notes that instrument. The keyboard stays in the pattern, so you can go on typing notes straight away.
 
-**The instrument page.** **INSTRUMENT** above the pattern (or `F4`, or a double-click in the list) shows the settings of the selected instrument, and **PATTERN** (or `F3`) goes back. The settings are in cards, and three of them have a picture of what the settings do:
+**The instrument page.** **INSTRUMENT** above the pattern (or `F4`, or a double-click in the list) shows the selected instrument like a software synth, and **PATTERN** (or `F3`) goes back. At the top an **oscilloscope** shows the sound of the instrument chosen, as it is right now: play a note on the piano keys and turn a knob, and you see what it does. While the song plays it follows a channel where that instrument sounds, so choosing another instrument in the list shows that one. Below it the sections follow the way the sound is made:
 
-- **SOUND** shows the waveform. For a pulse wave with PWM, dashed lines show how far the pulse width swings.
-- **ENVELOPE** shows how the volume rises (A), falls to the sustain level (D, S) while the key is held, and fades away (R) when the note is let go.
-- **FILTER** shows which frequencies come through, from deep on the left to bright on the right. The dotted line is the cutoff. With a filter envelope a dashed curve shows where the envelope takes the filter.
+- **OSCILLATORS**: the name, a picture of the wave (both oscillators mixed), and the buttons and knobs for oscillator 1 and 2.
+- **FILTER**: the type (off, low pass, high pass, band), a picture of which frequencies come through, cutoff and resonance, and the filter envelope.
+- **AMP ENVELOPE**: a picture of how the volume rises and falls, and four sliders for attack, decay, sustain and release.
+- **EFFECTS**: echo and vibrato, ring modulation and sync.
+- **LFO 1** and **LFO 2**: what they move, their wave and knobs, with a picture.
+- **TABLE**: the steps of the instrument's table.
 
-Everything you change is heard straight away, even while the song plays, and the pictures change with it. On the instrument page the piano keys play the instrument without writing anything in the pattern. When you have typed a value in a box, press `Enter` to go back to playing (`Esc` in the table, where `Enter` makes a new line), or click on an empty part of the page. The table is written with one step per line, and the box turns red if a step is wrong. A new song has six ready-made instruments to start with: lead, bass, chord, kick, snare and hi-hat.
+**Knobs.** Drag a knob up or down to turn it, hold `Shift` for small steps, or turn the mouse wheel. Double-click a knob to type the exact value and press `Enter`. The cutoff and the times turn evenly through short and long values; knobs that go both ways (detune, filter envelope depth, LFO depth) have 0 at the top. The knobs and buttons never take the keyboard, so the piano keys go on playing while you turn them.
+
+Everything you change is heard straight away, even while the song plays, and the pictures change with it. When you have typed a value in a box, press `Enter` to go back to playing (`Esc` in the table, where `Enter` makes a new line), or click on an empty part of the page. The table is written with one step per line, and the box turns red if a step is wrong. A new song has six ready-made instruments to start with: lead, bass, chord, kick, snare and hi-hat.
 
 **Saving.** **SAVE** saves the song as an `.amostrk` file, ideally in `Sound/Tracker` in the project folder. The status bar then shows the line that loads the song, for example `TRACK LOAD "Sound/Tracker/mysong.amostrk"`. If you export the game the file comes along, since its name is in quotation marks in the program.
 
@@ -412,6 +419,10 @@ That table is a kick drum: a short click of square wave and then a triangle wave
 #### Oscillator 2
 
 A tracker instrument can have a **second oscillator** that is mixed with the first. Choose its **Wave** (Off turns it off), how many **Semitones** above or below the note it plays, a **Detune** in cents and how much of it is heard (**Mix**). Two sawtooth waves a few cents apart (Detune 5 – 12) give the fat, swirling sound of a classic synth lead; +7 or +12 semitones gives a fifth or an octave on top of every note. In the file it is `"Osc2Wave": "Sawtooth", "Osc2Semitones": 0, "Osc2Detune": 8, "Osc2Mix": 50`.
+
+#### Echo
+
+**ECHO** makes the sound come back after a while, a little quieter each time, like a voice in a cave or the classic tape echo. **Mix** is how loud the echo is (0 is off), **Time** how long it takes to come back (up to 2000 ms), and **Feedback** how much of each echo comes back again: 0 gives one echo, 70 a long trail. **Sync rows** above 0 sets the time in rows of the song instead, so the echo falls on the beat: 3 rows gives the dotted rhythm that so much synth music uses. The echo goes on after the note has ended. In the file it is `"EchoMix": 35, "EchoTime": 300, "EchoFeedback": 45, "EchoSyncRows": 3`.
 
 #### LFO 1 and LFO 2
 

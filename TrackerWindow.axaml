@@ -18,7 +18,9 @@
                 <Button Content="NEW" Classes="amos-button" Click="New_OnClick" Focusable="False" Margin="0,0,4,0"/>
                 <Button Content="LOAD" Classes="amos-button" Click="Load_OnClick" Focusable="False" Margin="0,0,4,0"/>
                 <Button Content="SAVE" Classes="amos-button" Click="Save_OnClick" Focusable="False" Margin="0,0,4,0"/>
-                <Button Content="SAVE AS" Classes="amos-button" Click="SaveAs_OnClick" Focusable="False" Margin="0,0,14,0"/>
+                <Button Content="SAVE AS" Classes="amos-button" Click="SaveAs_OnClick" Focusable="False"/>
+                <Button Name="ExportWavButton" Content="WAV" Classes="amos-button" Click="ExportWav_OnClick" Focusable="False" Margin="0,0,14,0"
+                        ToolTip.Tip="Save the song as a sound file (WAV), as you hear it: muted channels are left out"/>
                 <Button Content="PLAY SONG" Classes="amos-button" Click="PlaySong_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F5"/>
                 <Button Content="PLAY PATTERN" Classes="amos-button" Click="PlayPattern_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F6"/>
                 <Button Content="STOP" Classes="amos-button" Click="Stop_OnClick" Focusable="False" Margin="0,0,14,0" ToolTip.Tip="Esc"/>

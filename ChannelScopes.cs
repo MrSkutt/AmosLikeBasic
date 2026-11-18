@@ -39,6 +39,8 @@ public sealed class ChannelScopes : Control
     {
         Height = 70;
         ClipToBounds = true;
+        Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
+        ToolTip.SetTip(this, "Click a channel to mute it, right-click to hear it alone (solo)");
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, (_, _) => Tick());
         ResourcesChanged += (_, _) => InvalidateVisual();
     }
@@ -83,6 +85,35 @@ public sealed class ChannelScopes : Control
 
     private IBrush Res(string key, IBrush fallback) =>
         this.TryFindResource(key, ActualThemeVariant, out var o) && o is IBrush b ? b : fallback;
+
+    // The only channel heard when all the others are muted, otherwise -1
+    private int SoloChannel()
+    {
+        if (Pattern == null) return -1;
+        int heard = -1;
+        for (int c = 0; c < Pattern.ChannelCount; c++)
+        {
+            if (Pattern.Muted[c]) continue;
+            if (heard >= 0) return -1;
+            heard = c;
+        }
+        return heard;
+    }
+
+    // Click: mute that channel, right click: solo
+    protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        if (Pattern == null) return;
+        double x = e.GetPosition(this).X;
+        for (int c = 0; c < Pattern.ChannelCount; c++)
+            if (x >= Pattern.ChannelLeft(c) && x < Pattern.ChannelLeft(c) + Pattern.ChannelSpan)
+            {
+                Pattern.ToggleMute(c, solo: e.GetCurrentPoint(this).Properties.IsRightButtonPressed);
+                e.Handled = true;
+                return;
+            }
+    }
 
     public override void Render(DrawingContext ctx)
     {
@@ -130,6 +161,17 @@ public sealed class ChannelScopes : Control
             }
             using (ctx.PushClip(scopeRect))
                 ctx.DrawGeometry(null, muted ? dimPen : wavePen, geo);
+            bool solo = !muted && Pattern.ChannelCount > 1 && SoloChannel() == c;
+            if (muted || solo)
+            {
+                var text = new FormattedText(muted ? "MUTE" : "SOLO", System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+                    new Typeface("Menlo, Consolas, Courier New, monospace", FontStyle.Normal, FontWeight.Bold), 13,
+                    muted ? Brushes.OrangeRed : Brushes.LimeGreen);
+                // SOLO sits in the corner, so the wave stays in view
+                var at = muted ? new Point(scopeRect.Center.X - text.Width / 2, scopeRect.Center.Y - text.Height / 2)
+                               : new Point(scopeRect.Right - text.Width - 4, scopeRect.Top + 2);
+                ctx.DrawText(text, at);
+            }
 
             // The meter: green, yellow at the top, red at the very top; a line where the peak was
             ctx.FillRectangle(screen, meterRect);

@@ -44,6 +44,8 @@ namespace AmosLikeBasic
             public WaveformType? Osc2Wave;
             public double Osc2Ratio = 1, Osc2Mix = 0.5;
             public LfoSettings?[] Lfos = NoLfos;
+            public double EchoTime = 0.3, EchoFeedback = 0.4, EchoMix;
+            public int EchoSyncRows;
             public TableStep[] Table = Array.Empty<TableStep>();
             public int TableLoop = -1;
         }
@@ -332,6 +334,18 @@ namespace AmosLikeBasic
         public static int TrackPosition => Volatile.Read(ref _trackPosOrder);
         public static int TrackRow => Volatile.Read(ref _trackPosRow);
 
+        // A channel (1 – 8) that sounds with the tracker instrument (from 1) right now, preferring
+        // the given one; 0 when none does. Read while the audio thread plays: fine for a picture.
+        public static int ChannelWithInstrument(int instrument, int preferred = 0)
+        {
+            bool Sounds(int c) => _trackChannels[c].Active && _trackChannels[c].InstNumber == instrument
+                                  && _voices[c].Stage != EnvStage.Idle;
+            if (preferred >= 1 && preferred <= TrackerSong.MaxChannels && Sounds(preferred - 1)) return preferred;
+            for (int c = 0; c < TrackerSong.MaxChannels; c++)
+                if (Sounds(c)) return c + 1;
+            return 0;
+        }
+
         public static void SetTrackVolume(double volume) => _trackVolume = Math.Clamp(volume, 0, 1);
 
         public static void SetTrackMute(int channel, bool mute)
@@ -414,6 +428,10 @@ namespace AmosLikeBasic
                 Osc2Ratio = Math.Pow(2, (Math.Clamp(src.Osc2Semitones, -48, 48) + Math.Clamp(src.Osc2Detune, -1200, 1200) / 100.0) / 12.0),
                 Osc2Mix = Math.Clamp(src.Osc2Mix / 100.0, 0, 1),
                 Lfos = new[] { CompileLfo(src.Lfo1), CompileLfo(src.Lfo2) },
+                EchoTime = Math.Clamp(src.EchoTime, 1, MaxEchoSeconds * 1000) / 1000.0,
+                EchoSyncRows = Math.Clamp(src.EchoSyncRows, 0, 64),
+                EchoFeedback = Math.Clamp(src.EchoFeedback / 100.0, 0, 0.9),
+                EchoMix = Math.Clamp(src.EchoMix / 100.0, 0, 1),
                 Table = steps.ToArray(),
                 TableLoop = src.TableLoop < steps.Count ? src.TableLoop : -1
             };
@@ -799,6 +817,12 @@ namespace AmosLikeBasic
             v.Osc2Ratio = inst.Osc2Ratio;
             v.Osc2Mix = inst.Osc2Mix;
             v.Lfos = inst.Lfos;
+            // An echo that starts is empty, so that an old one does not come back
+            if (v.EchoMix <= 0 && inst.EchoMix > 0) Array.Clear(v.EchoBuffer);
+            v.EchoTime = inst.EchoTime;
+            v.EchoSyncRows = inst.EchoSyncRows;
+            v.EchoFeedback = inst.EchoFeedback;
+            v.EchoMix = inst.EchoMix;
             v.LfoTime = 0;   // the LFOs' delay starts again with every note
             for (int k = 0; k < inst.Lfos.Length; k++)
                 if (inst.Lfos[k] is { Retrigger: true })

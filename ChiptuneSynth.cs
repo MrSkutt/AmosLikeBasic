@@ -91,6 +91,10 @@ namespace AmosLikeBasic
             public double Osc2Ratio = 1, Osc2Mix = 0.5;
             // Two LFOs (null = off); the settings are shared and never changed, the state is below
             public LfoSettings?[] Lfos = NoLfos;
+            // Echo: the sound comes back after EchoTime seconds (or EchoSyncRows rows of the song),
+            // each time EchoFeedback as loud; EchoMix is how loud the echo is (0 = off)
+            public double EchoTime = 0.3, EchoFeedback = 0.4, EchoMix;
+            public int EchoSyncRows;
 
             // Slides from {SWEEP} and {FADE}: change per sample and number of samples left
             public double CutoffSlide, VolumeSlide;
@@ -116,6 +120,8 @@ namespace AmosLikeBasic
             public int Lfsr2 = 1;
             public readonly double[] LfoPhases = new double[2], LfoRandom = new double[2];
             public double LfoTime;   // seconds since the note started, for the LFOs' delay
+            public readonly float[] EchoBuffer = new float[MaxEchoSamples];
+            public int EchoPos;
             public int ArpIndex;
             public double ArpCounter;
             public float[]? Drum;
@@ -141,6 +147,7 @@ namespace AmosLikeBasic
                 Gate = s.Gate;
                 Osc2Wave = s.Osc2Wave; Osc2Ratio = s.Osc2Ratio; Osc2Mix = s.Osc2Mix;
                 Lfos = s.Lfos;
+                EchoTime = s.EchoTime; EchoFeedback = s.EchoFeedback; EchoMix = s.EchoMix; EchoSyncRows = s.EchoSyncRows;
             }
 
             public void ResetSettings()
@@ -159,6 +166,7 @@ namespace AmosLikeBasic
                 CutoffSlideLeft = 0; VolumeSlideLeft = 0;
                 Osc2Wave = null; Osc2Ratio = 1; Osc2Mix = 0.5;
                 Lfos = NoLfos;
+                EchoTime = 0.3; EchoFeedback = 0.4; EchoMix = 0; EchoSyncRows = 0;
             }
         }
 
@@ -245,6 +253,9 @@ namespace AmosLikeBasic
         private static readonly SfxSlot[] _sfx = { new(), new(), new(), new() };
         private static int _nextSfx;
         private static double _bpm = 120;
+
+        public const double MaxEchoSeconds = 2.0;
+        private const int MaxEchoSamples = (int)(MaxEchoSeconds * SampleRate) + 1;
 
         private static Voice[] CreateVoices()
         {
@@ -800,7 +811,25 @@ namespace AmosLikeBasic
             return Math.Sign(x) * (0.75 + 0.25 * Math.Tanh((a - 0.75) / 0.25));
         }
 
+        // The voice, and its echo after it: the echo goes on sounding after the note has ended
         private static double RenderVoice(Voice v)
+        {
+            double dry = RenderDry(v);
+            if (v.EchoMix <= 0) return dry;
+            var buffer = v.EchoBuffer;
+            double seconds = v.EchoSyncRows > 0
+                ? v.EchoSyncRows * Math.Max(1, _trackSpeed > 0 ? _trackSpeed : 6) / (Math.Max(1, _trackTempo > 0 ? _trackTempo : 125) * 0.4)
+                : v.EchoTime;
+            int delay = Math.Clamp((int)(seconds * SampleRate), 1, buffer.Length - 1);
+            int read = v.EchoPos - delay;
+            if (read < 0) read += buffer.Length;
+            double wet = buffer[read];
+            buffer[v.EchoPos] = (float)(dry + wet * v.EchoFeedback);
+            if (++v.EchoPos >= buffer.Length) v.EchoPos = 0;
+            return dry + wet * v.EchoMix;
+        }
+
+        private static double RenderDry(Voice v)
         {
             StepSequencer(v);
 

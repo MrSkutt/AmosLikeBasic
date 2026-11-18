@@ -147,3 +147,29 @@ public class TrackerViewTests : IDisposable
         w.Close();
     }
 }
+
+// The knobs of the instrument page
+public class KnobTests
+{
+    [Avalonia.Headless.XUnit.AvaloniaFact]
+    public void A_knob_keeps_to_its_range_and_steps()
+    {
+        var k = new Knob { Minimum = 0, Maximum = 90, Step = 1 };
+        k.Value = 42.6;
+        Assert.Equal(43, k.Value);
+        k.Value = 500;
+        Assert.Equal(90, k.Value);
+        k.Value = -3;
+        Assert.Equal(0, k.Value);
+    }
+
+    [Avalonia.Headless.XUnit.AvaloniaFact]
+    public void Setting_the_value_from_code_is_not_a_change_by_the_user()
+    {
+        var k = new Knob { Minimum = 20, Maximum = 18000, Logarithmic = true };
+        bool changed = false;
+        k.ValueChanged += _ => changed = true;
+        k.Value = 1000;
+        Assert.False(changed);
+    }
+}

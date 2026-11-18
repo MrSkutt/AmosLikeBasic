@@ -298,4 +298,42 @@ public class SynthTests : IDisposable
         var b = Render(0.1);
         Assert.InRange(Semitones(Pitch(b, 0.005, 0.03), 440), -0.1, 0.15);
     }
+
+    [Fact]
+    public void EchoComesBackAfterItsTimeAndDiesAway()
+    {
+        // A short click of a note, an echo after 200 ms at half the loudness, feedback 50 %
+        S.TrackPlay(SongWith("\"Decay\":30,\"Sustain\":0,\"Release\":10,\"EchoMix\":50,\"EchoTime\":200,\"EchoFeedback\":50",
+            "A-4 01 ...", "=== .. ...", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.7);
+        double first = Loudness(b, 0.0, 0.04), gap = Loudness(b, 0.1, 0.18);
+        double echo1 = Loudness(b, 0.2, 0.24), echo2 = Loudness(b, 0.4, 0.44);
+        Assert.True(gap < first * 0.05, $"gap {gap:0.000}");
+        Assert.InRange(echo1 / first, 0.4, 0.6);
+        Assert.InRange(echo2 / echo1, 0.4, 0.6);
+    }
+
+    [Fact]
+    public void EchoInStepWithTheSongFollowsTheRows()
+    {
+        // Two rows at speed 6, tempo 125 is 0.24 s
+        S.TrackPlay(SongWith("\"Decay\":30,\"Sustain\":0,\"Release\":10,\"EchoMix\":50,\"EchoSyncRows\":2,\"EchoFeedback\":0",
+            "A-4 01 ...", "=== .. ...", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.4);
+        Assert.True(Loudness(b, 0.24, 0.27) > Loudness(b, 0.15, 0.2) * 10);
+    }
+
+    [Fact]
+    public void TheChannelThatPlaysAnInstrumentIsFound()
+    {
+        // Instrument 1 on channel 1, instrument 2 on channel 3
+        var song = TrackerSong.FromJson("{\"Speed\":6,\"Tempo\":125,\"Instruments\":[{\"Wave\":\"Sine\",\"Sustain\":100}," +
+            "{\"Wave\":\"Square\",\"Sustain\":100}],\"Order\":[0],\"Patterns\":[[\"A-4 01 ...|--- .. ...|C-4 02 ...|--- .. ...\"," +
+            "\"--- .. ...|--- .. ...|--- .. ...|--- .. ...\"]]}");
+        S.TrackPlay(song, loop: true);
+        Render(0.05);
+        Assert.Equal(1, S.ChannelWithInstrument(1));
+        Assert.Equal(3, S.ChannelWithInstrument(2));
+        Assert.Equal(0, S.ChannelWithInstrument(5));
+    }
 }
