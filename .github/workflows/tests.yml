@@ -23,7 +23,10 @@ jobs:
         run: dotnet build Tests/AmosLikeBasic.Tests.csproj -c Release
 
       - name: Test
-        run: dotnet test Tests/AmosLikeBasic.Tests.csproj -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=results.trx" --results-directory TestResults
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test Tests/AmosLikeBasic.Tests.csproj -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=results.trx" --results-directory TestResults 2>&1 | tee test-output.txt
 
       # The failed tests as annotations, which show on the run's page (and can be read without the full log)
       - name: Report failed tests
@@ -38,3 +41,11 @@ jobs:
                       msg = r.findtext(".//t:Message", default="", namespaces=ns)
                       msg = " ".join(msg.split())[:900].replace("%", "%25")
                       print(f"::error title={r.get('testName')[:200]}::{msg}")
+          # No failed test in the report (the run crashed or was stopped): the end of the output instead
+          import os
+          if not any(r.get("outcome") == "Failed"
+                     for p in glob.glob("TestResults/**/*.trx", recursive=True)
+                     for r in ET.parse(p).getroot().iterfind(".//t:UnitTestResult", ns)) and os.path.exists("test-output.txt"):
+              tail = open("test-output.txt", encoding="utf-8", errors="replace").read().splitlines()[-60:]
+              text = "%0A".join(l.replace("%", "%25").replace("\r", "") for l in tail)
+              print(f"::error title=The end of the test output::{text}")
