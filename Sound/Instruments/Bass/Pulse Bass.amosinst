@@ -1,0 +1,13 @@
+{
+  "Name": "Pulse Bass",
+  "Wave": "Pulse",
+  "Volume": 0.24,
+  "PulseWidth": 22,
+  "Attack": 1,
+  "Decay": 200,
+  "Sustain": 70,
+  "Release": 50,
+  "Filter": "Low",
+  "Cutoff": 1400,
+  "Resonance": 20
+}

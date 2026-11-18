@@ -1,0 +1,20 @@
+{
+  "Name": "Flute",
+  "Wave": "Triangle",
+  "Volume": 0.28,
+  "Attack": 80,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 150,
+  "Osc2Wave": "Noise",
+  "Osc2Mix": 6,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 10,
+    "Rate": 5,
+    "SyncRows": 0,
+    "Delay": 300,
+    "Retrigger": true
+  }
+}

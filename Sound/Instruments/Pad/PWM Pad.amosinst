@@ -1,0 +1,21 @@
+{
+  "Name": "PWM Pad",
+  "Wave": "Pulse",
+  "Volume": 0.14,
+  "PulseWidth": 50,
+  "Attack": 700,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 1200,
+  "Filter": "Low",
+  "Cutoff": 2500,
+  "Lfo1": {
+    "Target": "Pulse width",
+    "Shape": "Triangle",
+    "Depth": 35,
+    "Rate": 0.6,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

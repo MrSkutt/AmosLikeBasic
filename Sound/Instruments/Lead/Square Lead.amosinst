@@ -1,0 +1,22 @@
+{
+  "Name": "Square Lead",
+  "Wave": "Square",
+  "Volume": 0.18,
+  "Attack": 3,
+  "Decay": 100,
+  "Sustain": 80,
+  "Release": 120,
+  "Osc2Wave": "Square",
+  "Osc2Semitones": 12,
+  "Osc2Detune": 4,
+  "Osc2Mix": 30,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 12,
+    "Rate": 5,
+    "SyncRows": 0,
+    "Delay": 300,
+    "Retrigger": true
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "Name": "Glass Pad",
+  "Wave": "Triangle",
+  "Volume": 0.16,
+  "Attack": 600,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 1500,
+  "Osc2Wave": "Sine",
+  "Osc2Semitones": 12,
+  "Osc2Detune": 5,
+  "Osc2Mix": 40,
+  "Lfo1": {
+    "Target": "Osc 2 mix",
+    "Shape": "Sine",
+    "Depth": 30,
+    "Rate": 0.4,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

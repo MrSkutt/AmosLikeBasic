@@ -1,0 +1,10 @@
+{
+  "Name": "NES Square",
+  "Wave": "Pulse",
+  "Volume": 0.18,
+  "PulseWidth": 25,
+  "Attack": 0,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 30
+}

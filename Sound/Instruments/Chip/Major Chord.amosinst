@@ -1,0 +1,16 @@
+{
+  "Name": "Major Chord",
+  "Wave": "Pulse",
+  "Volume": 0.12,
+  "PulseWidth": 30,
+  "Attack": 5,
+  "Decay": 400,
+  "Sustain": 40,
+  "Release": 200,
+  "Table": [
+    "0",
+    "+4",
+    "+7"
+  ],
+  "TableLoop": 0
+}

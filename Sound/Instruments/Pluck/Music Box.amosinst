@@ -1,0 +1,13 @@
+{
+  "Name": "Music Box",
+  "Wave": "Sine",
+  "Volume": 0.3,
+  "Attack": 0,
+  "Decay": 1000,
+  "Sustain": 0,
+  "Release": 600,
+  "Osc2Wave": "Triangle",
+  "Osc2Semitones": 24,
+  "Osc2Detune": 6,
+  "Osc2Mix": 35
+}

@@ -1,0 +1,25 @@
+{
+  "Name": "Choir Pad",
+  "Wave": "Pulse",
+  "Volume": 0.2,
+  "PulseWidth": 35,
+  "Attack": 500,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 1000,
+  "Filter": "Band",
+  "Cutoff": 900,
+  "Resonance": 40,
+  "Osc2Wave": "Pulse",
+  "Osc2Detune": 10,
+  "Osc2Mix": 50,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 8,
+    "Rate": 4.5,
+    "SyncRows": 0,
+    "Delay": 400,
+    "Retrigger": true
+  }
+}

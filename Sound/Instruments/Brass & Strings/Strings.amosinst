@@ -1,0 +1,23 @@
+{
+  "Name": "Strings",
+  "Wave": "Sawtooth",
+  "Volume": 0.2,
+  "Attack": 400,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 700,
+  "Filter": "Low",
+  "Cutoff": 2500,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Detune": 11,
+  "Osc2Mix": 50,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 7,
+    "Rate": 5,
+    "SyncRows": 0,
+    "Delay": 500,
+    "Retrigger": true
+  }
+}

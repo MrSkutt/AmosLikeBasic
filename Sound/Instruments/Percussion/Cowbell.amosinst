@@ -1,0 +1,16 @@
+{
+  "Name": "Cowbell",
+  "Wave": "Square",
+  "Volume": 0.15,
+  "Attack": 0,
+  "Decay": 250,
+  "Sustain": 0,
+  "Release": 60,
+  "Osc2Wave": "Square",
+  "Osc2Semitones": 7,
+  "Osc2Detune": 30,
+  "Osc2Mix": 50,
+  "Filter": "Band",
+  "Cutoff": 1200,
+  "Resonance": 40
+}

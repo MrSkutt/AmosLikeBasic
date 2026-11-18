@@ -1,0 +1,12 @@
+{
+  "Name": "Harp",
+  "Wave": "Triangle",
+  "Volume": 0.32,
+  "Attack": 0,
+  "Decay": 700,
+  "Sustain": 0,
+  "Release": 400,
+  "Osc2Wave": "Sine",
+  "Osc2Semitones": 12,
+  "Osc2Mix": 20
+}

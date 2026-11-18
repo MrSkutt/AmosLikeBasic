@@ -1,0 +1,30 @@
+{
+  "Name": "Wind",
+  "Wave": "Noise",
+  "Volume": 0.15,
+  "Attack": 600,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 1200,
+  "Filter": "Band",
+  "Cutoff": 800,
+  "Resonance": 60,
+  "Lfo1": {
+    "Target": "Cutoff",
+    "Shape": "Sine",
+    "Depth": 18,
+    "Rate": 0.2,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  },
+  "Lfo2": {
+    "Target": "Volume",
+    "Shape": "Sine",
+    "Depth": 40,
+    "Rate": 0.35,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

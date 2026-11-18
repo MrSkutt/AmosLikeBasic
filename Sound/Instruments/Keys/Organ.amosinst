@@ -1,0 +1,21 @@
+{
+  "Name": "Organ",
+  "Wave": "Sine",
+  "Volume": 0.24,
+  "Attack": 5,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 60,
+  "Osc2Wave": "Sine",
+  "Osc2Semitones": 12,
+  "Osc2Mix": 40,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 6,
+    "Rate": 6.5,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  }
+}

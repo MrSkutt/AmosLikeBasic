@@ -1,0 +1,23 @@
+{
+  "Name": "Rock Organ",
+  "Wave": "Square",
+  "Volume": 0.16,
+  "Attack": 3,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 60,
+  "Osc2Wave": "Square",
+  "Osc2Semitones": 19,
+  "Osc2Mix": 30,
+  "Filter": "Low",
+  "Cutoff": 3000,
+  "Lfo1": {
+    "Target": "Volume",
+    "Shape": "Sine",
+    "Depth": 25,
+    "Rate": 6,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  }
+}

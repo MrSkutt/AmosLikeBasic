@@ -301,8 +301,11 @@ More songs in C64 style are in `Sound/Tracker` and are used by the example proje
 | `snake.amostrk` | `snake` | bouncy game music with short, choppy notes |
 | `frog_hop.amostrk` | `froghop` | cheerful game music for Frog Hop |
 | `neon_horizon.amostrk` | `oldschool_demo` | eight channels: a lead with a C64 echo, filter bass, arpeggios, two pad voices and drums; open it in the tracker and watch the oscilloscopes |
+| `acid_sunrise.amostrk` | `synth_jukebox` | acid techno: an acid bass whose filter opens part by part, a supersaw lead (two detuned saws) with vibrato that grows in, a wobble bass in the breakdown and 808 drums |
+| `deep_space.amostrk` | `synth_jukebox` | slow and spacey: a drone whose filter drifts with two LFOs, a glass pad, a music box and UFO sounds |
+| `pixel_rush.amostrk` | `synth_jukebox` | fast chip music: a C64 lead whose pulse width moves, chord arpeggios, an NES bass and trills made with a square LFO |
 
-Open them in the tracker to see how the sounds and effects are made.
+Open them in the tracker to see how the sounds and effects are made. The last three are made only with instruments from the library, and are written by `Tools/build_songs.py`.
 
 A game often changes music depending on what happens. Forest Hop has four songs in `Sound/Tracker`: calm music on the title screen, Forest Song while you play, and two short jingles when you win or lose. The jingles play once with `TRACK LOOP 0`:
 
@@ -399,6 +402,12 @@ An instrument can also have a **table** that moves one step per tick from the mo
 ```
 
 That table is a kick drum: a short click of square wave and then a triangle wave that quickly drops in pitch. `TableLoop` is the step the table starts again from when it reaches the end. Without it the table stays on the last step. A major chord as an arpeggio is `["0", "+4", "+7"]` with `"TableLoop": 0`.
+
+#### The instrument library
+
+**LIBRARY...** under the instrument list opens over sixty ready-made instruments, sorted like on a synth: **Bass, Lead, Pad, Keys, Pluck, Brass & Strings, Chip, Drums, Percussion** and **FX**. Choose one and you hear it straight away (on the channel the cursor is in, in the octave chosen). **Add to song** makes it a new instrument in the song (double-clicking does the same), and **Replace current** puts it in place of the instrument chosen in the tracker, so the notes already written get the new sound. Then you can change it on the instrument page like any other.
+
+**Save current...** puts the tracker's current instrument in the library, in a category you choose or a new one you type. **Load file...** and **Save file...** read and write single instrument files (`.amosinst`) anywhere, for sharing a sound with a friend. The library is the folder `Sound/Instruments`, one folder per category, so you can also tidy it in Finder or Explorer.
 
 #### Oscillator 2
 

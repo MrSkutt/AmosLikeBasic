@@ -1,0 +1,11 @@
+{
+  "Name": "Shaker",
+  "Wave": "Noise",
+  "Volume": 0.18,
+  "Attack": 15,
+  "Decay": 80,
+  "Sustain": 0,
+  "Release": 40,
+  "Filter": "High",
+  "Cutoff": 8000
+}

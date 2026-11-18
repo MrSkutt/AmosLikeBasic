@@ -1,0 +1,11 @@
+{
+  "Name": "Open Hihat",
+  "Wave": "Noise",
+  "Volume": 0.14,
+  "Attack": 0,
+  "Decay": 300,
+  "Sustain": 0,
+  "Release": 150,
+  "Filter": "High",
+  "Cutoff": 6000
+}

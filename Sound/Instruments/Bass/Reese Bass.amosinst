@@ -1,0 +1,24 @@
+{
+  "Name": "Reese Bass",
+  "Wave": "Sawtooth",
+  "Volume": 0.23,
+  "Attack": 10,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 120,
+  "Filter": "Low",
+  "Cutoff": 900,
+  "Resonance": 15,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Detune": 14,
+  "Osc2Mix": 50,
+  "Lfo1": {
+    "Target": "Osc 2 pitch",
+    "Shape": "Sine",
+    "Depth": 10,
+    "Rate": 0.3,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

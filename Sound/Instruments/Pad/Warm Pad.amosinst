@@ -1,0 +1,24 @@
+{
+  "Name": "Warm Pad",
+  "Wave": "Sawtooth",
+  "Volume": 0.2,
+  "Attack": 800,
+  "Decay": 600,
+  "Sustain": 80,
+  "Release": 1200,
+  "Filter": "Low",
+  "Cutoff": 1200,
+  "Resonance": 15,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Detune": 9,
+  "Osc2Mix": 50,
+  "Lfo1": {
+    "Target": "Cutoff",
+    "Shape": "Sine",
+    "Depth": 8,
+    "Rate": 0.25,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

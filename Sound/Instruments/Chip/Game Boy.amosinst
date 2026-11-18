@@ -1,0 +1,10 @@
+{
+  "Name": "Game Boy",
+  "Wave": "Pulse",
+  "Volume": 0.18,
+  "PulseWidth": 12,
+  "Attack": 0,
+  "Decay": 250,
+  "Sustain": 50,
+  "Release": 50
+}

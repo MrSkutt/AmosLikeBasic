@@ -1,0 +1,13 @@
+{
+  "Name": "Clavinet",
+  "Wave": "Pulse",
+  "Volume": 0.2,
+  "PulseWidth": 12,
+  "Attack": 0,
+  "Decay": 350,
+  "Sustain": 10,
+  "Release": 80,
+  "Filter": "High",
+  "Cutoff": 300,
+  "Resonance": 20
+}

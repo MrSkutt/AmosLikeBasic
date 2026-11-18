@@ -1,0 +1,18 @@
+{
+  "Name": "Trill",
+  "Wave": "Square",
+  "Volume": 0.16,
+  "Attack": 0,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 60,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Square",
+    "Depth": 200,
+    "Rate": 4,
+    "SyncRows": 1,
+    "Delay": 0,
+    "Retrigger": true
+  }
+}

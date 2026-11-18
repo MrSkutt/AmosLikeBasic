@@ -1,0 +1,17 @@
+{
+  "Name": "Guitar Pick",
+  "Wave": "Pulse",
+  "Volume": 0.22,
+  "PulseWidth": 25,
+  "Attack": 0,
+  "Decay": 600,
+  "Sustain": 10,
+  "Release": 150,
+  "Filter": "Low",
+  "Cutoff": 1200,
+  "FilterEnvDepth": 2500,
+  "FilterEnvDecay": 150,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Detune": 4,
+  "Osc2Mix": 30
+}

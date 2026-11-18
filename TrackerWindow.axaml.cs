@@ -873,6 +873,49 @@ public partial class TrackerWindow : Window
     }
 
     // Removes the instrument and renumbers the ones after it in all patterns
+    private InstrumentLibraryWindow? _library;
+
+    // LIBRARY: one window at a time, which adds to or replaces in the song open here
+    private void InstLibrary_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_library != null) { _library.Activate(); return; }
+        _library = new InstrumentLibraryWindow(() => CurrentInstrument, AddInstrument, ReplaceInstrument, PreviewInstrument);
+        _library.Closed += (_, _) => { _library = null; ChiptuneSynth.TrackPreviewStop(); };
+        _library.Show(this);
+    }
+
+    private void ReplaceInstrument(TrackerInstrument inst)
+    {
+        int n = Pattern.Instrument;
+        if (n < 1 || n > _song.Instruments.Count) { AddInstrument(inst); return; }
+        PushUndo();
+        _song.Instruments[n - 1] = inst;
+        RefreshInstrumentList();
+        RefreshInstrumentPanel();
+        SongChanged();
+    }
+
+    private DispatcherTimer? _previewRelease;
+
+    // Plays a note (C in the octave chosen) with an instrument that need not be in the song, on the
+    // cursor's channel, and lets go of it after a while
+    private void PreviewInstrument(TrackerInstrument inst)
+    {
+        var song = new TrackerSong { Channels = _song.Channels, Speed = _song.Speed, Tempo = _song.Tempo };
+        song.Instruments.Add(inst);
+        int channel = Pattern.CursorChannel + 1;
+        int note = (Pattern.Octave + 1) * 12;
+        TryEngine(() => ChiptuneSynth.TrackPreview(song, 1, note, channel));
+        _previewRelease?.Stop();
+        _previewRelease = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Math.Clamp(inst.Attack + 600, 600, 2500)) };
+        _previewRelease.Tick += (_, _) =>
+        {
+            _previewRelease?.Stop();
+            ChiptuneSynth.TrackPreviewRelease(channel);
+        };
+        _previewRelease.Start();
+    }
+
     private void InstDelete_OnClick(object? sender, RoutedEventArgs e)
     {
         int n = Pattern.Instrument;

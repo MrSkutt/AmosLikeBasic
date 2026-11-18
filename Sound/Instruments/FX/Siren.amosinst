@@ -1,0 +1,18 @@
+{
+  "Name": "Siren",
+  "Wave": "Triangle",
+  "Volume": 0.3,
+  "Attack": 50,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 300,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Triangle",
+    "Depth": 700,
+    "Rate": 0.8,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "Name": "Acid Bass",
+  "Wave": "Sawtooth",
+  "Volume": 0.26,
+  "Attack": 1,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 40,
+  "Filter": "Low",
+  "Cutoff": 260,
+  "Resonance": 78,
+  "FilterEnvDepth": 2600,
+  "FilterEnvAttack": 1,
+  "FilterEnvDecay": 180
+}

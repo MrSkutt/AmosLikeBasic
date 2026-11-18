@@ -1,0 +1,21 @@
+{
+  "Name": "Chip Lead",
+  "Wave": "Pulse",
+  "Volume": 0.2,
+  "PulseWidth": 30,
+  "PwmDepth": 12,
+  "PwmRate": 1.5,
+  "Attack": 5,
+  "Decay": 150,
+  "Sustain": 60,
+  "Release": 120,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 18,
+    "Rate": 6,
+    "SyncRows": 0,
+    "Delay": 250,
+    "Retrigger": true
+  }
+}

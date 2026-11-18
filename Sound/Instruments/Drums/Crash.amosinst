@@ -1,0 +1,12 @@
+{
+  "Name": "Crash",
+  "Wave": "Noise",
+  "Volume": 0.15,
+  "Attack": 0,
+  "Decay": 1200,
+  "Sustain": 0,
+  "Release": 600,
+  "Filter": "High",
+  "Cutoff": 3500,
+  "Resonance": 20
+}

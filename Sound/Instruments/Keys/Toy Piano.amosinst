@@ -1,0 +1,13 @@
+{
+  "Name": "Toy Piano",
+  "Wave": "Triangle",
+  "Volume": 0.3,
+  "Attack": 0,
+  "Decay": 500,
+  "Sustain": 0,
+  "Release": 200,
+  "Osc2Wave": "Sine",
+  "Osc2Semitones": 24,
+  "Osc2Detune": 10,
+  "Osc2Mix": 30
+}

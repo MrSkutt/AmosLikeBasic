@@ -1,0 +1,19 @@
+{
+  "Name": "Fat Saw Bass",
+  "Wave": "Sawtooth",
+  "Volume": 0.24,
+  "Attack": 2,
+  "Decay": 300,
+  "Sustain": 80,
+  "Release": 60,
+  "Filter": "Low",
+  "Cutoff": 700,
+  "Resonance": 30,
+  "FilterEnvDepth": 1200,
+  "FilterEnvAttack": 2,
+  "FilterEnvDecay": 250,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Semitones": -12,
+  "Osc2Detune": 6,
+  "Osc2Mix": 45
+}

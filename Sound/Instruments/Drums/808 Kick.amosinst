@@ -1,0 +1,18 @@
+{
+  "Name": "808 Kick",
+  "Wave": "Sine",
+  "Volume": 0.5,
+  "Attack": 0,
+  "Decay": 600,
+  "Sustain": 0,
+  "Release": 80,
+  "Table": [
+    "+24",
+    "+14",
+    "+8",
+    "+4",
+    "+2",
+    "+1",
+    "0"
+  ]
+}

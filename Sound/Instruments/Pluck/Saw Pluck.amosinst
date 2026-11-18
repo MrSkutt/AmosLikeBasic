@@ -1,0 +1,15 @@
+{
+  "Name": "Saw Pluck",
+  "Wave": "Sawtooth",
+  "Volume": 0.22,
+  "Attack": 0,
+  "Decay": 300,
+  "Sustain": 0,
+  "Release": 200,
+  "Filter": "Low",
+  "Cutoff": 600,
+  "Resonance": 35,
+  "FilterEnvDepth": 4000,
+  "FilterEnvAttack": 0,
+  "FilterEnvDecay": 120
+}

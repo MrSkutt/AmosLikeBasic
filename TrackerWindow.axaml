@@ -83,6 +83,9 @@
                         <Button Margin="2,0" Content="CLONE" Classes="amos-button" Click="InstClone_OnClick" Focusable="False" Padding="2,4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                         <Button Margin="2,0" Content="DEL" Classes="amos-button" Click="InstDelete_OnClick" Focusable="False" Padding="2,4" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"/>
                     </UniformGrid>
+                    <Button Margin="2,0" Content="LIBRARY..." Classes="amos-button" Click="InstLibrary_OnClick" Focusable="False" Padding="2,4"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            ToolTip.Tip="Ready-made instruments by category: bass, lead, pad, drums ..."/>
                 </StackPanel>
                 <Button DockPanel.Dock="Bottom" Content="EDIT INSTRUMENT" Classes="amos-button" Click="InstrumentTab_OnClick" Focusable="False"
                         Margin="0,8,0,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" ToolTip.Tip="F4, or double-click an instrument"/>

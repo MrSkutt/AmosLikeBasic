@@ -1,0 +1,11 @@
+{
+  "Name": "Closed Hihat",
+  "Wave": "Noise",
+  "Volume": 0.16,
+  "Attack": 0,
+  "Decay": 40,
+  "Sustain": 0,
+  "Release": 20,
+  "Filter": "High",
+  "Cutoff": 7000
+}

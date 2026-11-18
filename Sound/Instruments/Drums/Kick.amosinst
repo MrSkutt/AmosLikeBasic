@@ -1,0 +1,20 @@
+{
+  "Name": "Kick",
+  "Wave": "Triangle",
+  "Volume": 0.45,
+  "Attack": 0,
+  "Decay": 180,
+  "Sustain": 0,
+  "Release": 30,
+  "Table": [
+    "SQUARE +24",
+    "TRIANGLE +12",
+    "+6",
+    "+2",
+    "-2",
+    "-5",
+    "-8",
+    "-10",
+    "-12"
+  ]
+}

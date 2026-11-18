@@ -45,6 +45,7 @@ public static class Examples
         new Group("Sound and music", new[]
         {
             new Example("trackerdemo", "Tracker Demo", "Plays a song made in the tracker"),
+            new Example("synth_jukebox", "Synth Jukebox", "Three songs made with the instrument library: two oscillators and LFOs"),
             new Example("forestsong", "Forest Song with PLAY", "The Forest Hop song written with PLAY commands"),
             new Example("synthdemo", "Synth Demo", "Four channels in C64 style: pulse width, vibrato and filters"),
             new Example("synth_song", "Synth Song", "A song for the four synth channels"),

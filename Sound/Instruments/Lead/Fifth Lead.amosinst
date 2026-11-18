@@ -1,0 +1,15 @@
+{
+  "Name": "Fifth Lead",
+  "Wave": "Sawtooth",
+  "Volume": 0.18,
+  "Attack": 5,
+  "Decay": 200,
+  "Sustain": 75,
+  "Release": 150,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Semitones": 7,
+  "Osc2Detune": 3,
+  "Osc2Mix": 45,
+  "Filter": "Low",
+  "Cutoff": 4000
+}

@@ -1,0 +1,12 @@
+{
+  "Name": "C64 Bass",
+  "Wave": "Pulse",
+  "Volume": 0.24,
+  "PulseWidth": 40,
+  "PwmDepth": 20,
+  "PwmRate": 3,
+  "Attack": 1,
+  "Decay": 120,
+  "Sustain": 60,
+  "Release": 40
+}

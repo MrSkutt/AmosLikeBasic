@@ -1,0 +1,20 @@
+{
+  "Name": "Clap",
+  "Wave": "Noise",
+  "Volume": 0.28,
+  "Attack": 0,
+  "Decay": 200,
+  "Sustain": 0,
+  "Release": 60,
+  "Filter": "Band",
+  "Cutoff": 1500,
+  "Resonance": 30,
+  "Table": [
+    "NOISE +20",
+    "+20",
+    "+20",
+    "+20",
+    "+20",
+    "+20"
+  ]
+}

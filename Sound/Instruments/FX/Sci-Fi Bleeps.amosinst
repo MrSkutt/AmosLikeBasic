@@ -1,0 +1,18 @@
+{
+  "Name": "Sci-Fi Bleeps",
+  "Wave": "Square",
+  "Volume": 0.14,
+  "Attack": 0,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 100,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Random",
+    "Depth": 1200,
+    "Rate": 10,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  }
+}

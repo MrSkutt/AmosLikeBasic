@@ -1,0 +1,24 @@
+{
+  "Name": "Supersaw Lead",
+  "Wave": "Sawtooth",
+  "Volume": 0.2,
+  "Attack": 5,
+  "Decay": 200,
+  "Sustain": 80,
+  "Release": 180,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Detune": 12,
+  "Osc2Mix": 50,
+  "Filter": "Low",
+  "Cutoff": 5000,
+  "Resonance": 10,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 14,
+    "Rate": 5.5,
+    "SyncRows": 0,
+    "Delay": 350,
+    "Retrigger": true
+  }
+}

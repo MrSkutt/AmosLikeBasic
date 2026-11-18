@@ -1,0 +1,12 @@
+{
+  "Name": "Wood Block",
+  "Wave": "Sine",
+  "Volume": 0.5,
+  "Attack": 0,
+  "Decay": 70,
+  "Sustain": 0,
+  "Release": 20,
+  "Osc2Wave": "Triangle",
+  "Osc2Semitones": 17,
+  "Osc2Mix": 30
+}

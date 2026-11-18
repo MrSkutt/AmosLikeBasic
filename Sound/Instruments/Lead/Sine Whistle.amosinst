@@ -1,0 +1,18 @@
+{
+  "Name": "Sine Whistle",
+  "Wave": "Sine",
+  "Volume": 0.3,
+  "Attack": 40,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 200,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 20,
+    "Rate": 5,
+    "SyncRows": 0,
+    "Delay": 200,
+    "Retrigger": true
+  }
+}

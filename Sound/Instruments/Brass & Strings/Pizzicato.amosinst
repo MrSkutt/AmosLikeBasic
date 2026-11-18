@@ -1,0 +1,14 @@
+{
+  "Name": "Pizzicato",
+  "Wave": "Sawtooth",
+  "Volume": 0.32,
+  "Attack": 0,
+  "Decay": 180,
+  "Sustain": 0,
+  "Release": 80,
+  "Filter": "Low",
+  "Cutoff": 1800,
+  "Osc2Wave": "Triangle",
+  "Osc2Semitones": 12,
+  "Osc2Mix": 25
+}

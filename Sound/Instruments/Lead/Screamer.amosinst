@@ -1,0 +1,31 @@
+{
+  "Name": "Screamer",
+  "Wave": "Pulse",
+  "Volume": 0.18,
+  "PulseWidth": 15,
+  "Attack": 2,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 100,
+  "Filter": "Band",
+  "Cutoff": 1800,
+  "Resonance": 75,
+  "Lfo1": {
+    "Target": "Cutoff",
+    "Shape": "Triangle",
+    "Depth": 18,
+    "Rate": 3,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  },
+  "Lfo2": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 25,
+    "Rate": 6.5,
+    "SyncRows": 0,
+    "Delay": 150,
+    "Retrigger": true
+  }
+}

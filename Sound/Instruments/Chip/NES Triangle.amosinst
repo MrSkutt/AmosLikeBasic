@@ -1,0 +1,9 @@
+{
+  "Name": "NES Triangle",
+  "Wave": "Triangle",
+  "Volume": 0.34,
+  "Attack": 0,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 20
+}

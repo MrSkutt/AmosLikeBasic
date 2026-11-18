@@ -1,0 +1,17 @@
+{
+  "Name": "Chip Arp",
+  "Wave": "Pulse",
+  "Volume": 0.16,
+  "PulseWidth": 25,
+  "Attack": 0,
+  "Decay": 400,
+  "Sustain": 30,
+  "Release": 150,
+  "Table": [
+    "0",
+    "+4",
+    "+7",
+    "+12"
+  ],
+  "TableLoop": 0
+}

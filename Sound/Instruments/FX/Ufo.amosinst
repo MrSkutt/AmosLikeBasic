@@ -1,0 +1,30 @@
+{
+  "Name": "Ufo",
+  "Wave": "Sine",
+  "Volume": 0.3,
+  "Attack": 100,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 400,
+  "Osc2Wave": "Sine",
+  "Osc2Semitones": 7,
+  "Osc2Mix": 40,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 300,
+    "Rate": 7,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  },
+  "Lfo2": {
+    "Target": "Osc 2 pitch",
+    "Shape": "Sine",
+    "Depth": 100,
+    "Rate": 0.5,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  }
+}

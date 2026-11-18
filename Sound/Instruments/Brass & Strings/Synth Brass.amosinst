@@ -1,0 +1,18 @@
+{
+  "Name": "Synth Brass",
+  "Wave": "Sawtooth",
+  "Volume": 0.2,
+  "Attack": 60,
+  "Decay": 300,
+  "Sustain": 80,
+  "Release": 150,
+  "Filter": "Low",
+  "Cutoff": 600,
+  "Resonance": 20,
+  "FilterEnvDepth": 2500,
+  "FilterEnvAttack": 80,
+  "FilterEnvDecay": 400,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Detune": 7,
+  "Osc2Mix": 45
+}

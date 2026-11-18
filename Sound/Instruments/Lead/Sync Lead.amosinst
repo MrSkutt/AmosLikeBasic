@@ -1,0 +1,33 @@
+{
+  "Name": "Sync Lead",
+  "Wave": "Sawtooth",
+  "Volume": 0.2,
+  "Attack": 2,
+  "Decay": 250,
+  "Sustain": 70,
+  "Release": 150,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Semitones": 7,
+  "Osc2Mix": 40,
+  "Filter": "Low",
+  "Cutoff": 3000,
+  "Resonance": 35,
+  "Lfo1": {
+    "Target": "Osc 2 pitch",
+    "Shape": "Triangle",
+    "Depth": 700,
+    "Rate": 0.8,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  },
+  "Lfo2": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 10,
+    "Rate": 6,
+    "SyncRows": 0,
+    "Delay": 300,
+    "Retrigger": true
+  }
+}

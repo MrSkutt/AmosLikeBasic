@@ -1,0 +1,28 @@
+{
+  "Name": "C64 Lead",
+  "Wave": "Pulse",
+  "Volume": 0.2,
+  "PulseWidth": 20,
+  "Attack": 2,
+  "Decay": 200,
+  "Sustain": 70,
+  "Release": 150,
+  "Lfo1": {
+    "Target": "Pulse width",
+    "Shape": "Triangle",
+    "Depth": 18,
+    "Rate": 2,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  },
+  "Lfo2": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 20,
+    "Rate": 6,
+    "SyncRows": 0,
+    "Delay": 200,
+    "Retrigger": true
+  }
+}

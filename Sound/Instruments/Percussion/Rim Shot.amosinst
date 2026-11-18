@@ -1,0 +1,16 @@
+{
+  "Name": "Rim Shot",
+  "Wave": "Pulse",
+  "Volume": 0.32,
+  "PulseWidth": 10,
+  "Attack": 0,
+  "Decay": 40,
+  "Sustain": 0,
+  "Release": 20,
+  "Filter": "High",
+  "Cutoff": 1500,
+  "Table": [
+    "NOISE +24",
+    "PULSE +12"
+  ]
+}

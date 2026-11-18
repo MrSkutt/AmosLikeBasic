@@ -1,0 +1,21 @@
+{
+  "Name": "E-Piano",
+  "Wave": "Sine",
+  "Volume": 0.3,
+  "Attack": 1,
+  "Decay": 900,
+  "Sustain": 20,
+  "Release": 300,
+  "Osc2Wave": "Triangle",
+  "Osc2Semitones": 12,
+  "Osc2Mix": 25,
+  "Lfo1": {
+    "Target": "Volume",
+    "Shape": "Sine",
+    "Depth": 15,
+    "Rate": 4.5,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": true
+  }
+}

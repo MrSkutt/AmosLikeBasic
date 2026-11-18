@@ -1,0 +1,15 @@
+{
+  "Name": "Pluck Bass",
+  "Wave": "Triangle",
+  "Volume": 0.5,
+  "Attack": 0,
+  "Decay": 220,
+  "Sustain": 0,
+  "Release": 60,
+  "Osc2Wave": "Square",
+  "Osc2Mix": 25,
+  "Filter": "Low",
+  "Cutoff": 900,
+  "FilterEnvDepth": 2200,
+  "FilterEnvDecay": 90
+}

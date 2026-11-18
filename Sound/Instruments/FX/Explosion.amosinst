@@ -1,0 +1,21 @@
+{
+  "Name": "Explosion",
+  "Wave": "Noise",
+  "Volume": 0.4,
+  "Attack": 0,
+  "Decay": 1200,
+  "Sustain": 0,
+  "Release": 400,
+  "Filter": "Low",
+  "Cutoff": 300,
+  "Resonance": 20,
+  "FilterEnvDepth": 5000,
+  "FilterEnvDecay": 300,
+  "Table": [
+    "NOISE +12",
+    "+6",
+    "0",
+    "-6",
+    "-12"
+  ]
+}

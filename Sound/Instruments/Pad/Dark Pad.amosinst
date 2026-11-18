@@ -1,0 +1,25 @@
+{
+  "Name": "Dark Pad",
+  "Wave": "Sawtooth",
+  "Volume": 0.13,
+  "Attack": 1200,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 2000,
+  "Filter": "Low",
+  "Cutoff": 500,
+  "Resonance": 30,
+  "Osc2Wave": "Square",
+  "Osc2Semitones": -12,
+  "Osc2Detune": 7,
+  "Osc2Mix": 40,
+  "Lfo1": {
+    "Target": "Cutoff",
+    "Shape": "Triangle",
+    "Depth": 12,
+    "Rate": 4,
+    "SyncRows": 16,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

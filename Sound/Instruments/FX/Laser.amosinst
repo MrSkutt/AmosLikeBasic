@@ -1,0 +1,20 @@
+{
+  "Name": "Laser",
+  "Wave": "Sawtooth",
+  "Volume": 0.2,
+  "Attack": 0,
+  "Decay": 300,
+  "Sustain": 0,
+  "Release": 50,
+  "Table": [
+    "+36",
+    "+30",
+    "+24",
+    "+18",
+    "+12",
+    "+6",
+    "0",
+    "-6",
+    "-12"
+  ]
+}

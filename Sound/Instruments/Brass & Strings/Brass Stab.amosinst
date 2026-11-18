@@ -1,0 +1,18 @@
+{
+  "Name": "Brass Stab",
+  "Wave": "Sawtooth",
+  "Volume": 0.32,
+  "Attack": 10,
+  "Decay": 250,
+  "Sustain": 0,
+  "Release": 100,
+  "Filter": "Low",
+  "Cutoff": 800,
+  "FilterEnvDepth": 3500,
+  "FilterEnvAttack": 10,
+  "FilterEnvDecay": 200,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Semitones": 12,
+  "Osc2Detune": 5,
+  "Osc2Mix": 35
+}

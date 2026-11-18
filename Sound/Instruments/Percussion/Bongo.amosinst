@@ -1,0 +1,16 @@
+{
+  "Name": "Bongo",
+  "Wave": "Sine",
+  "Volume": 0.4,
+  "Attack": 0,
+  "Decay": 160,
+  "Sustain": 0,
+  "Release": 40,
+  "Table": [
+    "+7",
+    "+4",
+    "+2",
+    "+1",
+    "0"
+  ]
+}

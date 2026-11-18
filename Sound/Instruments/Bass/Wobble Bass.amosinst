@@ -1,0 +1,24 @@
+{
+  "Name": "Wobble Bass",
+  "Wave": "Sawtooth",
+  "Volume": 0.25,
+  "Attack": 2,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 60,
+  "Filter": "Low",
+  "Cutoff": 500,
+  "Resonance": 65,
+  "Osc2Wave": "Square",
+  "Osc2Semitones": -12,
+  "Osc2Mix": 40,
+  "Lfo1": {
+    "Target": "Cutoff",
+    "Shape": "Sine",
+    "Depth": 30,
+    "Rate": 4,
+    "SyncRows": 2,
+    "Delay": 0,
+    "Retrigger": true
+  }
+}

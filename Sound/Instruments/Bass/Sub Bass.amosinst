@@ -1,0 +1,12 @@
+{
+  "Name": "Sub Bass",
+  "Wave": "Sine",
+  "Volume": 0.38,
+  "Attack": 4,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 80,
+  "Osc2Wave": "Triangle",
+  "Osc2Semitones": 12,
+  "Osc2Mix": 20
+}

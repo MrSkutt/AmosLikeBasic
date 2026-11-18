@@ -1,0 +1,20 @@
+{
+  "Name": "Tom",
+  "Wave": "Triangle",
+  "Volume": 0.4,
+  "Attack": 0,
+  "Decay": 300,
+  "Sustain": 0,
+  "Release": 60,
+  "Table": [
+    "NOISE +12",
+    "TRIANGLE +7",
+    "+5",
+    "+3",
+    "+2",
+    "+1",
+    "0",
+    "-1",
+    "-2"
+  ]
+}
