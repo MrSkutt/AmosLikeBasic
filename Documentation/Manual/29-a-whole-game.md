@@ -49,20 +49,14 @@ IF CX>550 THEN Cloud CX-640,CY,CS
 
 The level is 120 cells wide and 15 high, and it is a map made for the map editor, `Graphics/ForestHop/level.amosmap`. `LoadLevel` loads it with `MAP LOAD`.
 
-Gems, beetles, the start and the flag are not tiles but sprites. In the map they are **marker tiles**, tiles 12 to 15 in `tiles.png` with a dashed yellow frame. `LoadLevel` looks at every cell with `TILE(...)`, keeps the places of the gems and beetles in arrays, which then become sprites, and takes the markers off the map so that they are never drawn:
+Gems, beetles, the start and the flag are not tiles but sprites. In the map they are **marker tiles**, tiles 12 to 15 in `tiles.png` with a dashed yellow frame. `MAP OBJECTS` finds the places of each kind and takes the markers off the map, so that they are never drawn; the gems and beetles end up in arrays, which then become sprites:
 
 ```basic nocheck
 MAP LOAD "Graphics/ForestHop/level.amosmap"
-FOR R=0 TO LH-1
-  FOR C=0 TO LW-1
-    TI=TILE(4,C*32,R*32)
-    IF TI=GEMTILE THEN GX(NG)=C*32+6 : GY(NG)=R*32+6 : GA(NG)=1 : NG=NG+1
-    IF TI=BUGTILE THEN EX(NE)=C*32 : EY(NE)=R*32 : ED(NE)=-1 : EA(NE)=1 : NE=NE+1
-    IF TI=STARTTILE THEN STARTX=C*32 : STARTY=R*32
-    IF TI=FLAGTILE THEN FLAGX=C*32 : FLAGY=R*32
-    IF TI>=GEMTILE THEN TILE SET C,R,-1
-  NEXT C
-NEXT R
+MAP OBJECTS GEMTILE, GX(), GY(), NG
+MAP OBJECTS BUGTILE, EX(), EY(), NE
+MAP OBJECTS STARTTILE, MX(), MY()
+STARTX=MX(0) : STARTY=MY(0)
 ```
 
 All sprites, Pinecone too, are in layer 4 together with the level, in the level's coordinates. When the layer scrolls they follow along by themselves.

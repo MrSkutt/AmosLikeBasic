@@ -71,6 +71,10 @@ public sealed class GpuLayer
 // image on the GPU, which is then scaled up to the window just once. That way shaders and
 // raster bars cost the same whatever the window size (before, they ran for every pixel in the window,
 // which made full screen on large screens very slow).
+// The PRINT console as it looks on screen (text in a grid of Cols x Rows, INK and PAPER), for drawing it
+// into the game picture when the CRT filter is on, so that the text gets the picture tube look too
+public sealed record ConsoleOverlay(string Text, Color Ink, Color Paper, int Cols, int Rows);
+
 public sealed class ScreenDrawOperation : ICustomDrawOperation
 {
     private static readonly SKSamplingOptions Nearest = new(SKFilterMode.Nearest, SKMipmapMode.None);
@@ -89,6 +93,7 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
     public Rect Bounds { get; }
 
     public long Frame { get; init; }   // the WAIT VBL frame this draws (for FrameLog)
+    public ConsoleOverlay? Console { get; init; }   // the PRINT text, when it is drawn into the picture
 
     public void Dispose()
     {
@@ -114,9 +119,11 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
         {
             // 1. All layers at the game's resolution
             using var screen = CreateSurface(gr, w, h);
-            screen.Canvas.Clear(SKColors.Transparent);
+            var paper = Console?.Paper ?? Colors.Transparent;
+            screen.Canvas.Clear(new SKColor(paper.R, paper.G, paper.B, paper.A));
             foreach (var layer in _layers)
                 layer.DrawTo(screen.Canvas, gr);
+            if (Console != null) DrawConsole(screen.Canvas, Console, w, h);
             using var image = screen.Snapshot();
 
             // 2. Scale up to the window. First by whole pixels to the largest integer factor
@@ -152,6 +159,30 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
         }
     }
 
+    // The console text on top of the layers, placed as the text box places it (the same font size,
+    // the font's own character width and line spacing), so the text does not move when CRT is turned on
+    private static void DrawConsole(SKCanvas canvas, ConsoleOverlay console, int w, int h)
+    {
+        if (string.IsNullOrEmpty(console.Text) || console.Ink.A == 0) return;
+        float cw = (float)w / console.Cols, ch = (float)h / console.Rows;
+        var typeface = AmosGraphics.BundledFont(ConsoleFont) ?? SKTypeface.FromFamilyName(ConsoleFont) ?? SKTypeface.Default;
+        using var font = new SKFont(typeface, Math.Min(cw * 1.8f, ch * 0.9f)) { Edging = SKFontEdging.Alias };
+        using var paint = new SKPaint { Color = new SKColor(console.Ink.R, console.Ink.G, console.Ink.B, console.Ink.A) };
+        float advance = font.MeasureText("M");
+        float lineHeight = font.Spacing;
+        float baseline = -font.Metrics.Ascent;
+        var lines = console.Text.Replace("\r\n", "\n").Split('\n');
+        for (int r = 0; r < lines.Length && r * lineHeight < h; r++)
+        {
+            var line = lines[r];
+            for (int c = 0; c < line.Length && c * advance < w; c++)
+                if (line[c] != ' ')
+                    canvas.DrawText(line[c].ToString(), c * advance, r * lineHeight + baseline, font, paint);
+        }
+    }
+
+    public const string ConsoleFont = "Topaz a600a1200a400";
+
     // ── CRT-filter ───────────────────────────────────────────────────
     // A shader that draws the game picture to the window like a picture tube screen. It runs in
     // the game's coordinates (the canvas is already scaled up), so the scanlines follow the game's rows
@@ -161,6 +192,10 @@ uniform shader image;
 uniform float2 res;         // the game's resolution
 uniform float scanlines;    // 0-1
 uniform float curvature;    // 0-1
+uniform float mask;         // 0-1, the phosphor stripes
+uniform float vignette;     // 0-1, darker edges
+uniform float brightness;   // 1 = as the picture is
+uniform float softness;     // 0 = sharp pixels, 1 = soft as on a TV
 uniform float pixelScale;   // screen pixels per game pixel
 
 half4 main(float2 p) {
@@ -173,7 +208,8 @@ half4 main(float2 p) {
         return half4(0.0, 0.0, 0.0, 1.0);
 
     float2 sp = uv * res;
-    half4 col = image.eval(sp);
+    // Soft: the picture is sampled smoothly between its pixels; sharp: at the middle of each pixel
+    half4 col = mix(image.eval(floor(sp) + 0.5), image.eval(sp), half(softness));
 
     // Scanlines: brightest in the middle of each row of the game picture, darker between the rows
     float fy = fract(sp.y) - 0.5;
@@ -181,14 +217,15 @@ half4 main(float2 p) {
 
     // A faint colour mask in red, green and blue, like the phosphor stripes of a picture tube
     float m = mod(floor(p.x * pixelScale), 3.0);
-    float3 mask = m < 1.0 ? float3(1.0, 0.82, 0.82) : (m < 2.0 ? float3(0.82, 1.0, 0.82) : float3(0.82, 0.82, 1.0));
+    float d = 1.0 - mask * 0.36;
+    float3 stripes = m < 1.0 ? float3(1.0, d, d) : (m < 2.0 ? float3(d, 1.0, d) : float3(d, d, 1.0));
 
     // Vignette: darker towards the edges and corners
-    float vig = pow(clamp(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.0, 1.0), 0.18);
+    float vig = pow(clamp(16.0 * uv.x * uv.y * (1.0 - uv.x) * (1.0 - uv.y), 0.0, 1.0), vignette * 0.36);
 
     // A little brighter overall, so that the scanlines and mask do not make the picture too dark.
     // The colours are premultiplied by alpha, so they must not become larger than alpha.
-    float3 rgb = clamp(float3(col.rgb) * line * mask * vig * 1.22, 0.0, float(col.a));
+    float3 rgb = clamp(float3(col.rgb) * line * stripes * vig * brightness, 0.0, float(col.a));
     return half4(half3(rgb), col.a);
 }";
 
@@ -217,6 +254,10 @@ half4 main(float2 p) {
             { "res", new[] { (float)w, (float)h } },
             { "scanlines", Math.Clamp(_graphics.CrtScanlines, 0f, 1f) },
             { "curvature", Math.Clamp(_graphics.CrtCurvature, 0f, 1f) },
+            { "mask", Math.Clamp(_graphics.CrtMask, 0f, 1f) },
+            { "vignette", Math.Clamp(_graphics.CrtVignette, 0f, 1f) },
+            { "brightness", Math.Clamp(_graphics.CrtBrightness, 0.3f, 2f) },
+            { "softness", Math.Clamp(_graphics.CrtSoftness, 0f, 1f) },
             { "pixelScale", Math.Max(1f, scale) }
         };
         using var shader = _crtEffect.ToShader(uniforms, children);
@@ -525,6 +566,11 @@ public sealed class AmosGpuView : Control
 {
     public AmosGraphics Graphics { get; set; } = null!;
 
+    // The PRINT console in the window above this view; with the CRT filter on it is drawn into the
+    // picture instead (and the window hides its text box), so the text gets the effect too
+    public Func<ConsoleOverlay?>? ConsoleSource { get; set; }
+    public event Action<bool>? ConsoleDrawnInPicture;
+
     // The views on screen; the latest one reports the screen refreshes to DisplayClock (WAIT VBL)
     private static readonly List<AmosGpuView> Shown = new();
     private TopLevel? _topLevel;
@@ -601,7 +647,13 @@ public sealed class AmosGpuView : Control
                 if (layersCopy[i].ShownVisible ?? layersCopy[i].PresentedVisible ?? layersCopy[i].Visible) mask |= 1 << i;
             FrameLog.Write("paint", frame, mask);
         }
-        ctx.Custom(new ScreenDrawOperation(screenRect, Graphics, layers) { Frame = frame });
+        bool consoleInPicture = Graphics.CrtEnabled && ConsoleSource != null;
+        ConsoleDrawnInPicture?.Invoke(consoleInPicture);
+        ctx.Custom(new ScreenDrawOperation(screenRect, Graphics, layers)
+        {
+            Frame = frame,
+            Console = consoleInPicture ? ConsoleSource!() : null
+        });
     }
 }
 
@@ -623,6 +675,26 @@ public sealed class AmosGraphics
     public bool CrtEnabled { get; set; }
     public float CrtScanlines { get; set; } = 0.55f;
     public float CrtCurvature { get; set; } = 0.5f;
+    public float CrtMask { get; set; } = 0.5f;
+    public float CrtVignette { get; set; } = 0.5f;
+    public float CrtBrightness { get; set; } = 1.22f;   // a little brighter, so the lines and mask do not darken it
+    public float CrtSoftness { get; set; } = 1f;
+
+    // The CRT settings as percentages, in the order SCREEN CRT takes them
+    public float[] CrtPercentages() => new[]
+    {
+        CrtScanlines * 100, CrtCurvature * 100, CrtMask * 100, CrtVignette * 100, CrtBrightness * 100, CrtSoftness * 100
+    };
+
+    public void SetCrtPercentages(params float[] p)
+    {
+        if (p.Length > 0) CrtScanlines = Math.Clamp(p[0] / 100f, 0f, 1f);
+        if (p.Length > 1) CrtCurvature = Math.Clamp(p[1] / 100f, 0f, 1f);
+        if (p.Length > 2) CrtMask = Math.Clamp(p[2] / 100f, 0f, 1f);
+        if (p.Length > 3) CrtVignette = Math.Clamp(p[3] / 100f, 0f, 1f);
+        if (p.Length > 4) CrtBrightness = Math.Clamp(p[4] / 100f, 0.3f, 2f);
+        if (p.Length > 5) CrtSoftness = Math.Clamp(p[5] / 100f, 0f, 1f);
+    }
     public readonly object LockObject = new(); // The correct name for the lock
     private int _currentScreen = 0;
     private readonly System.Diagnostics.Stopwatch _refreshTimer = new();

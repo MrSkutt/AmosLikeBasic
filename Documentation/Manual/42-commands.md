@@ -387,6 +387,14 @@ MAP LOAD "file.amosmap"
 
 Loads a map made in the map editor. Then draw it with `TILE DRAW`.
 
+### MAP OBJECTS
+
+```text
+MAP OBJECTS tile, X(), Y() [, count [, KEEP]]
+```
+
+Finds every cell of the map that holds `tile` and puts their places, in dots (the top left corner of the cell), in the arrays `X()` and `Y()`, and how many there are in `count`. The arrays are made, or made bigger, when they cannot hold them all. The cells are then emptied, so that a tile used to mark where a figure starts is not drawn; with `KEEP` they stay. See *Figures on the map* in the tiles chapter.
+
 ### MUSIC
 
 ```text
@@ -646,7 +654,7 @@ SCREEN ON layer
 SCREEN OFF layer
 SCREEN ALPHA layer, value
 SCREEN FADE layer, target, frames
-SCREEN CRT on [, lines [, curve]]
+SCREEN CRT on [, lines [, curve [, mask [, vignette [, brightness [, softness]]]]]]
 ```
 
 | Command | Does |
@@ -656,7 +664,7 @@ SCREEN CRT on [, lines [, curve]]
 | `SCREEN ON` / `OFF` | shows or hides a layer |
 | `SCREEN ALPHA` | the layer's transparency, 0 (invisible) – 255 |
 | `SCREEN FADE` | fades smoothly to the target value over that many frames |
-| `SCREEN CRT` | 1 = CRT effect, 0 = off; lines and curve 0 – 100 |
+| `SCREEN CRT` | 1 = CRT effect, 0 = off; lines, curve, mask, vignette and softness 0 – 100, brightness in percent (122 is the standard) |
 
 ### SCROLL
 

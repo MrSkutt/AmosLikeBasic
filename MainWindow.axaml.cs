@@ -63,8 +63,6 @@ public partial class MainWindow : Window
 
         BuildExamplesMenu();
         
-        string userDir = Workspace.Projects;
-        
         configService = new ConfigService("AmosProject");
         configService.Load();
         ChangeTheme(configService.Config.DefaultTheme);
@@ -878,6 +876,23 @@ public partial class MainWindow : Window
 
     private void ToggleCrt_OnClick(object? sender, RoutedEventArgs e) => ToggleCrt();
 
+    private async void Folders_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (await new FoldersWindow().ShowDialog<bool>(this))
+            Log($"Folders: projects {Workspace.Projects}, graphics {Workspace.Graphics}, sound {Workspace.Sound}, export {Workspace.Export}" + Environment.NewLine);
+    }
+
+    private CrtSettingsWindow? _crtSettings;
+
+    // One settings window at a time; it changes the game window while it is open
+    private void CrtSettings_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_crtSettings != null) { _crtSettings.Activate(); return; }
+        _crtSettings = new CrtSettingsWindow(_gfx, () => _screenWindow?.ScreenControl.InvalidateVisual());
+        _crtSettings.Closed += (_, _) => _crtSettings = null;
+        _crtSettings.Show(this);
+    }
+
     // Turns the CRT filter (picture tube look) on and off in the game window
     private void ToggleCrt()
     {
@@ -1111,7 +1126,8 @@ public partial class MainWindow : Window
         file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save AMOS Project",
-            SuggestedFileName = "project.amosproj",
+            SuggestedFileName = _currentProjectFile?.Name ?? "project.amosproj",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(sp, WorkspaceFolder.Projects),
             FileTypeChoices = [new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }]
         });
         //}
@@ -1142,6 +1158,7 @@ public partial class MainWindow : Window
             {
                 Title = "Save AMOS Project",
                 SuggestedFileName = "project.amosproj",
+                SuggestedStartLocation = await Workspace.StartFolderAsync(sp, WorkspaceFolder.Projects),
                 FileTypeChoices = [new FilePickerFileType("AMOS Project") { Patterns = ["*.amosproj"] }]
             });
         }
@@ -1169,16 +1186,13 @@ public partial class MainWindow : Window
         var sp = StorageProvider;
         if (sp is null) return;
 
-        // PREPARE THE START FOLDER
-        string userProjectsPath = Workspace.Projects;
-            
-        // Try to get an IStorageFolder reference to the folder
-        var startLocation = await sp.TryGetFolderFromPathAsync(userProjectsPath);
-
+        // Always start in the Projects folder (without it the system opens the folder used last,
+        // which could be the tracker's songs)
         var files = await sp.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open AMOS-like Project",
             AllowMultiple = false,
+            SuggestedStartLocation = await Workspace.StartFolderAsync(sp, WorkspaceFolder.Projects),
             FileTypeFilter =
             [
                 new FilePickerFileType("AMOS Project")
@@ -1220,7 +1234,8 @@ public partial class MainWindow : Window
 
     private async Task OpenExampleAsync(Examples.Example example)
     {
-        string path = Path.Combine(Workspace.Projects, example.File + ".amosproj");
+        // The examples stay in the working folder's Projects, also when your own Projects folder is moved
+        string path = Path.Combine(Workspace.DefaultOf(WorkspaceFolder.Projects), example.File + ".amosproj");
         await OpenProjectFromPathAsync(path);
         string? opened = _currentProjectFile?.Path.LocalPath;
         if (opened == null || !string.Equals(Path.GetFullPath(opened), Path.GetFullPath(path),
@@ -1398,10 +1413,10 @@ public partial class MainWindow : Window
         LogLine($"EXPORT: Building '{options.Name}' ({options.Platform}), this takes a minute...");
         try
         {
-            int exitCode = await AppExporter.RunAsync(sourceRoot, projectFile, options.Name, options.Platform, LogLine);
+            var exportDir = Workspace.Export;
+            int exitCode = await AppExporter.RunAsync(sourceRoot, projectFile, options.Name, options.Platform, LogLine, exportDir);
             if (exitCode == 0)
             {
-                var exportDir = Path.Combine(sourceRoot, "Export");
                 LogLine($"EXPORT: Done. The app is in {exportDir}");
                 AppExporter.OpenFolder(exportDir);
             }

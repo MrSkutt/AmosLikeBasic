@@ -327,6 +327,7 @@ public partial class MapEditorWindow : Window
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Select Tileset PNG",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Graphics),
             FileTypeFilter = [FilePickerFileTypes.ImageAll]
         });
         if (files.Count == 0) return;
@@ -384,6 +385,7 @@ public partial class MapEditorWindow : Window
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save AMOS Map",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Graphics),
             SuggestedFileName = _mapFile != null ? Path.GetFileName(_mapFile) : "level.amosmap",
             FileTypeChoices = [new FilePickerFileType("AMOS Map") { Patterns = ["*.amosmap"] }]
         });
@@ -407,6 +409,7 @@ public partial class MapEditorWindow : Window
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Load AMOS Map",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Graphics),
             FileTypeFilter = [new FilePickerFileType("AMOS Map") { Patterns = ["*.amosmap"] }]
         });
         if (files.Count == 0) return;

@@ -61,7 +61,7 @@ public class ConfigService
     }
 
     // Cross-platform config folder
-    private static string GetConfigFolder(string appName)
+    public static string GetConfigFolder(string appName)
     {
         if (OperatingSystem.IsWindows())
         {

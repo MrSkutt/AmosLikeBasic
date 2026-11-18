@@ -22,8 +22,13 @@
                 ? Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory 
                 : AppContext.BaseDirectory;
 
-            // 3. List of possible places to look
-            var searchPaths = new List<string>
+            // 3. List of possible places to look. Your own files come first: a Graphics or Sound folder
+            //    moved in Project → Folders, then the working folder (Documents/AmosLikeBasic, where the
+            //    examples' files are copied so they can be changed), and last the files inside the app.
+            var searchPaths = new List<string>();
+            if (AmosLikeBasic.Workspace.MovedPath(cleanPath) is { } moved) searchPaths.Add(Path.GetFullPath(moved));
+            searchPaths.Add(Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, cleanPath)));
+            searchPaths.AddRange(new[]
             {
                 // Alt A: Standard macOS bundle resources (../Resources)
                 Path.GetFullPath(Path.Combine(baseDir, "..", "Resources", cleanPath)),
@@ -33,10 +38,7 @@
             
                 // Alt C: A Resources folder next to the executable (if the structure was copied as is)
                 Path.GetFullPath(Path.Combine(baseDir, "Resources", cleanPath)),
-            
-                // Alt D: Fall back to the current working directory (development)
-                Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, cleanPath))
-            };
+            });
 
             // 4. Loop and see where the file is
             foreach (var path in searchPaths)

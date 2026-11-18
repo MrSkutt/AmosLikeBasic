@@ -118,3 +118,76 @@ public class PrintgWrapTests
         Assert.Equal(45, g.CursorX);
     }
 }
+
+// With the CRT filter on, the PRINT text is drawn into the game picture (so it gets the effect)
+// and the text box above it is hidden
+public class CrtConsoleTests
+{
+    private static void Pump()
+    {
+        for (int i = 0; i < 6; i++) { Avalonia.Threading.Dispatcher.UIThread.RunJobs(); Avalonia.Headless.AvaloniaHeadlessPlatform.ForceRenderTimerTick(); }
+    }
+
+    // Light pixels in the top left corner, where the first row of text is (the CRT vignette darkens
+    // the corner, so "light" is a little over a third of white)
+    private static unsafe int TextPixels(Avalonia.Media.Imaging.Bitmap frame)
+    {
+        int w = frame.PixelSize.Width;
+        var px = new byte[w * 40 * 4];
+        fixed (byte* p = px) frame.CopyPixels(new Avalonia.PixelRect(0, 0, w, 40), (nint)p, px.Length, w * 4);
+        int n = 0;
+        for (int y = 0; y < 40; y++)
+            for (int x = 0; x < 200; x++)
+                if (px[(y * w + x) * 4] > 90 && px[(y * w + x) * 4 + 1] > 90) n++;
+        return n;
+    }
+
+    [AvaloniaFact]
+    public void Print_text_is_drawn_into_the_picture_with_crt()
+    {
+        var g = new AmosGraphics();
+        g.Screen(640, 480);
+        var w = new ScreenWindow { Width = 640, Height = 480 };
+        w.ScreenControl.Graphics = g;
+        w.UpdateScreenSize(640, 480);
+        w.Console.Text = "HELLO WORLD";
+        w.Show();
+        Pump();
+
+        g.CrtEnabled = true;
+        g.CrtCurvature = 0;
+        g.CrtScanlines = 0;
+        w.ScreenControl.InvalidateVisual();
+        Pump();
+        Assert.Equal(0, w.Console.Opacity);
+        Assert.True(TextPixels(Avalonia.Headless.HeadlessWindowExtensions.CaptureRenderedFrame(w)!) > 20);
+
+        g.CrtEnabled = false;
+        w.ScreenControl.InvalidateVisual();
+        Pump();
+        Assert.Equal(1, w.Console.Opacity);
+        w.Close();
+    }
+}
+
+// The CRT settings in percent, as SCREEN CRT and the settings window give them
+public class CrtSettingsTests
+{
+    [Fact]
+    public void Standard_settings_are_the_old_look()
+    {
+        var g = new AmosGraphics();
+        Assert.Equal(new float[] { 55, 50, 50, 50, 122, 100 }, g.CrtPercentages().Select(v => MathF.Round(v)));
+    }
+
+    [Fact]
+    public void Percentages_are_kept_within_bounds()
+    {
+        var g = new AmosGraphics();
+        g.SetCrtPercentages(150, -5, 30);
+        Assert.Equal(1f, g.CrtScanlines);
+        Assert.Equal(0f, g.CrtCurvature);
+        Assert.Equal(0.3f, g.CrtMask, 3);
+        Assert.Equal(0.5f, g.CrtVignette);   // not given: unchanged
+    }
+}

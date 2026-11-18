@@ -201,7 +201,15 @@ GOTO Loop
 SCREEN CRT 1, 80, 20     ; strong lines, almost flat screen
 ```
 
-The effect is drawn by the graphics card in the last step, when the picture is scaled up to the window, so it costs almost nothing. It looks best in a large window or in full screen. **F8** turns it on and off while the game runs, and in the editor it is also under **View → CRT Effect**.
+Four more values give the whole look: the red, green and blue stripes of the tube (**mask**), how much darker the edges are (**vignette**), the **brightness** in percent and the **softness** of the pixels (0 sharp, 100 soft as on a TV). The standard look is:
+
+```basic nocheck
+SCREEN CRT 1, 55, 50, 50, 50, 122, 100
+```
+
+The easiest way to find a look is **View → CRT Settings...** in the editor. Move the sliders, or choose a ready-made look such as *Arcade monitor* or *Old TV*, and the game window changes while you watch. At the bottom is the same setting as a `SCREEN CRT` line; press **Copy** and paste it at the start of your program, so that the game always looks like that, also when it is exported.
+
+The effect is drawn by the graphics card in the last step, when the picture is scaled up to the window, so it costs almost nothing. It looks best in a large window or in full screen. **F8** turns it on and off while the game runs, and in the editor it is also under **View → CRT Effect**. The text from `PRINT` gets the effect too, just like the graphics.
 
 ## Snow, rain and stars
 

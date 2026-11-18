@@ -855,9 +855,10 @@ public partial class TrackerWindow : Window
 
     private async Task<IStorageFolder?> StartFolderAsync()
     {
-        string dir = _path != null ? Path.GetDirectoryName(_path)! : Path.Combine(Environment.CurrentDirectory, "Sound", "Tracker");
-        if (!Directory.Exists(dir)) dir = Environment.CurrentDirectory;
-        return await StorageProvider.TryGetFolderFromPathAsync(dir);
+        // The open song's folder, otherwise the Sound folder's Tracker folder
+        if (_path != null && Directory.Exists(Path.GetDirectoryName(_path)))
+            return await StorageProvider.TryGetFolderFromPathAsync(Path.GetDirectoryName(_path)!);
+        return await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound, "Tracker");
     }
 
     private async void New_OnClick(object? sender, RoutedEventArgs e)

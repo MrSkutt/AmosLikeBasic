@@ -2772,12 +2772,13 @@ public static partial class AmosRunner
                                 }
                                 else if (subCmd == "CRT" && screenArgs.Count >= 2)
                                 {
-                                    // SCREEN CRT on/off [, scanlines 0-100 [, curve 0-100]]
+                                    // SCREEN CRT on/off [, scanlines [, curve [, mask [, vignette [, brightness [, softness]]]]]]
+                                    // in percent; brightness 122 is the standard
                                     graphics.CrtEnabled = EvalDouble(screenArgs[1], vars, ln, getInkey, isKeyDown, graphics) != 0;
-                                    if (screenArgs.Count >= 3)
-                                        graphics.CrtScanlines = (float)EvalDouble(screenArgs[2], vars, ln, getInkey, isKeyDown, graphics) / 100f;
-                                    if (screenArgs.Count >= 4)
-                                        graphics.CrtCurvature = (float)EvalDouble(screenArgs[3], vars, ln, getInkey, isKeyDown, graphics) / 100f;
+                                    var crt = new float[Math.Min(6, screenArgs.Count - 2)];
+                                    for (int i = 0; i < crt.Length; i++)
+                                        crt[i] = (float)EvalDouble(screenArgs[i + 2], vars, ln, getInkey, isKeyDown, graphics);
+                                    graphics.SetCrtPercentages(crt);
                                     onGraphicsChanged();
                                 }
                                 else if (subCmd == "ON" && screenArgs.Count >= 2)
@@ -4122,6 +4123,45 @@ public static partial class AmosRunner
                         }
                         
                         case "MAP":
+                            if (arg.TrimStart().StartsWith("OBJECTS", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // MAP OBJECTS tile, X(), Y() [, count [, KEEP]]
+                                // The places of every cell with that tile, in dots (top left corner), in X() and
+                                // Y(); count gets how many. The cells are emptied (marker tiles from the map
+                                // editor become sprites in the program), unless KEEP is given.
+                                var oArgs = SplitArgsRespectQuotes(arg.TrimStart()[7..]);
+                                if (oArgs.Count < 3) throw new Exception("MAP OBJECTS needs a tile and two arrays: MAP OBJECTS tile, X(), Y()");
+                                int tile = EvalInt(oArgs[0], vars, ln, getInkey, isKeyDown, graphics);
+                                string ArrayName(string a) => a.Trim().EndsWith("()") ? a.Trim()[..^2].Trim() : a.Trim();
+                                bool keep = oArgs.Count >= 5 && oArgs[4].Trim().Equals("KEEP", StringComparison.OrdinalIgnoreCase);
+                                var (tw, th) = graphics.GetTileSize();
+                                var found = new List<(int x, int y)>();
+                                for (int cy = 0; cy < graphics.GetMapHeight(); cy++)
+                                    for (int cx = 0; cx < graphics.GetMapWidth(); cx++)
+                                        if (graphics.GetMapTile(cx, cy) == tile)
+                                        {
+                                            found.Add((cx * tw, cy * th));
+                                            if (!keep) graphics.SetMapTile(cx, cy, -1);
+                                        }
+                                // The arrays are made, or made bigger, when they do not hold them all
+                                void Fill(string name, Func<(int x, int y), int> pick)
+                                {
+                                    var array = vars.TryGetValue(name, out var a) ? a as AmosNumericArray : null;
+                                    if (array == null || array.Dimensions.Length != 1 || array.Data.Length < found.Count)
+                                    {
+                                        var bigger = new AmosNumericArray(Math.Max(1, found.Count));
+                                        if (array != null && array.Dimensions.Length == 1)
+                                            Array.Copy(array.Data, bigger.Data, Math.Min(array.Data.Length, bigger.Data.Length));
+                                        array = bigger;
+                                        setVar(name, array);
+                                    }
+                                    for (int i = 0; i < found.Count; i++) array.Data[i] = pick(found[i]);
+                                }
+                                Fill(ArrayName(oArgs[1]), p => p.x);
+                                Fill(ArrayName(oArgs[2]), p => p.y);
+                                if (oArgs.Count >= 4 && oArgs[3].Trim().Length > 0) setVar(oArgs[3].Trim(), (double)found.Count);
+                                break;
+                            }
                             var mArgs = SplitCsvOrSpaces(arg);
                             if (mArgs.Count >= 2 && mArgs[0].ToUpperInvariant() == "LOAD")
                             {

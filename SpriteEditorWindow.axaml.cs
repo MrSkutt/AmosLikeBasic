@@ -690,6 +690,7 @@ public partial class SpriteEditorWindow : Window
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Load Sprite",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Graphics),
             AllowMultiple = false,
             FileTypeFilter = new[]
             {
@@ -738,6 +739,7 @@ public partial class SpriteEditorWindow : Window
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Load Spritesheet",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Graphics),
             AllowMultiple = false,
             FileTypeFilter = new[]
             {
@@ -901,6 +903,7 @@ public partial class SpriteEditorWindow : Window
         var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
             Title = "Save Sprite As",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Graphics),
             SuggestedFileName = suggestedName,
             FileTypeChoices = new[]
             {

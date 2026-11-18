@@ -8,8 +8,8 @@ Output in Export/Release/:
     AmosLikeBasic-<version>-win.zip   a folder with AmosLikeBasic.exe and the manual
 
 .NET is included (self-contained), so nothing needs installing. The examples, images, sounds and
-fonts come with the app; on the first start the example projects are copied to
-Documents/AmosLikeBasic, which becomes the folder that programs count their file paths from.
+fonts come with the app; on the first start the example projects, graphics and sounds are
+copied to Documents/AmosLikeBasic, which becomes the folder that programs count their file paths from.
 
 Needs the .NET SDK. The Mac app must be built on a Mac (for codesign); the Windows version can
 be built anywhere. GitHub Actions runs this for every version tag (.github/workflows/release.yml).

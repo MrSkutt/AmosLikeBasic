@@ -34,13 +34,14 @@ public static class AppExporter
 
     // Runs the export. Returns the exit code of the process (0 = success).
     public static async Task<int> RunAsync(string sourceRoot, string projectFile, string name, string platform,
-        Action<string> log)
+        Action<string> log, string? outDir = null)
     {
         var args = new List<string>
         {
             "-u", // unbuffered output, so that the log updates while it runs
             Path.Combine(sourceRoot, ScriptPath), projectFile, "--name", name, "--platform", platform
         };
+        if (outDir != null) args.AddRange(new[] { "--out", outDir });
 
         Exception? lastError = null;
         foreach (var python in OperatingSystem.IsWindows() ? new[] { "python", "py", "python3" } : new[] { "python3", "python" })

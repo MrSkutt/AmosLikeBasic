@@ -666,18 +666,21 @@ PROC LoadLevel
   SCREEN SELECT 4
   NG=0 : NE=0
   MAP LOAD "Graphics/ForestHop/level.amosmap"
-  ; The marker tiles become gems, beetles, the start and the flag,
-  ; and are taken off the map so that they are not drawn
-  FOR R=0 TO LH-1
-    FOR C=0 TO LW-1
-      TI=TILE(4,C*32,R*32)
-      IF TI=GEMTILE THEN GX(NG)=C*32+6 : GY(NG)=R*32+6 : GA(NG)=1 : NG=NG+1
-      IF TI=BUGTILE THEN EX(NE)=C*32 : EY(NE)=R*32 : ED(NE)=-1 : EA(NE)=1 : NE=NE+1
-      IF TI=STARTTILE THEN STARTX=C*32 : STARTY=R*32
-      IF TI=FLAGTILE THEN FLAGX=C*32 : FLAGY=R*32
-      IF TI>=GEMTILE THEN TILE SET C,R,-1
-    NEXT C
-  NEXT R
+  ; The marker tiles give the places of the gems, beetles, start and
+  ; flag, and are taken off the map so that they are not drawn
+  MAP OBJECTS GEMTILE, GX(), GY(), NG
+  MAP OBJECTS BUGTILE, EX(), EY(), NE
+  MAP OBJECTS STARTTILE, MX(), MY()
+  STARTX=MX(0) : STARTY=MY(0)
+  MAP OBJECTS FLAGTILE, MX(), MY()
+  FLAGX=MX(0) : FLAGY=MY(0)
+  ; A gem is smaller than a tile: put it in the middle
+  FOR I=0 TO NG-1
+    GX(I)=GX(I)+6 : GY(I)=GY(I)+6 : GA(I)=1
+  NEXT I
+  FOR I=0 TO NE-1
+    ED(I)=-1 : EA(I)=1
+  NEXT I
   TILE DRAW #4,0,0
   FOR I=0 TO NG-1
     SPRITE IMAGE GEMSPR+I,1,0

@@ -24,10 +24,35 @@ public partial class ScreenWindow : Window
     public ScreenWindow()
     {
         InitializeComponent();
-        var amosFont = new FontFamily("Topaz a600a1200a400");
+        var amosFont = new FontFamily(ScreenDrawOperation.ConsoleFont);
         Console.FontFamily = amosFont;
         
         Console.LayoutUpdated += (_, _) => UpdateConsoleFont();
+
+        // With the CRT filter the game view draws the console into the picture: the text box is then
+        // hidden (but stays, for INPUT), and a change of text redraws the picture
+        ScreenControl.ConsoleSource = () => new ConsoleOverlay(
+            Console.Text ?? "",
+            (Console.Foreground as ISolidColorBrush)?.Color ?? Colors.White,
+            (ScreenGrid.Background as ISolidColorBrush)?.Color ?? Colors.Black,
+            ConsoleColumns, ConsoleRows);
+        // (after the render pass: a control may not be changed while it is being drawn)
+        ScreenControl.ConsoleDrawnInPicture += inPicture =>
+        {
+            double opacity = inPicture ? 0 : 1;
+            if (Console.Opacity != opacity)
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => Console.Opacity = opacity);
+        };
+        Console.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == TextBox.TextProperty || e.Property == TextBox.ForegroundProperty)
+                if (ScreenControl.Graphics?.CrtEnabled == true) ScreenControl.InvalidateVisual();
+        };
+        ScreenGrid.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == Panel.BackgroundProperty && ScreenControl.Graphics?.CrtEnabled == true)
+                ScreenControl.InvalidateVisual();
+        };
         
         
         Opened += (_, _) =>
@@ -46,10 +71,12 @@ public partial class ScreenWindow : Window
         ScreenGrid.Height = height;
     }
     
+    private const int ConsoleColumns = 80, ConsoleRows = 30;
+
     private void UpdateConsoleFont()
     {
-        const int Columns = 80;
-        const int Rows = 30;
+        const int Columns = ConsoleColumns;
+        const int Rows = ConsoleRows;
 
         var bounds = Console.Bounds;
 

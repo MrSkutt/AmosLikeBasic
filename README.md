@@ -73,7 +73,7 @@ Ready-to-run versions for macOS (Apple Silicon) and Windows (x64) are on the [Re
 - **Mac:** the app is not signed by Apple, so the first time you right-click it and choose **Open**.
 - **Windows:** if SmartScreen warns, click **More info** and **Run anyway**.
 
-On the first start the example projects are copied to `Documents/AmosLikeBasic`. That folder is where your programs count their file paths from, so put your own images and sounds there (for example `Documents/AmosLikeBasic/Graphics/hero.png`). The images and sounds the examples use come with the app.
+On the first start the example projects, graphics and sounds are copied to `Documents/AmosLikeBasic` (with an `Export` folder for exported games). That folder is where your programs count their file paths from, so put your own images and sounds there (for example `Documents/AmosLikeBasic/Graphics/hero.png`). **Project → Folders...** moves the Projects, Graphics, Sound and Export folders elsewhere.
 
 To build and run from the source code instead:
 

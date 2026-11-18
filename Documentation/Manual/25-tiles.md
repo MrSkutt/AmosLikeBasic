@@ -62,6 +62,23 @@ MAP LOAD "Graphics/test.amosmap"
 TILE DRAW 0, 0
 ```
 
+## Figures on the map
+
+A level has more than walls and floors: coins, enemies, the start and the goal. They are sprites, but it is handy to put them out in the map editor too. Draw a few **marker tiles** in your tileset, for example a coin and an enemy with a frame round them, and place them on the map like any tile. `MAP OBJECTS` then finds them:
+
+```basic nocheck
+MAP LOAD "Graphics/level.amosmap"
+MAP OBJECTS 12, CX(), CY(), COINS     ; tile 12 marks a coin
+FOR I = 0 TO COINS - 1
+  SPRITE IMAGE 10 + I, 1, 0
+  SPRITE POS 10 + I, CX(I), CY(I)
+  SPRITE ON 10 + I
+NEXT I
+TILE DRAW 0, 0
+```
+
+The places are in dots, so they go straight into `SPRITE POS`. The marker tiles are taken off the map, so call `MAP OBJECTS` before `TILE DRAW`. Forest Hop does this with tiles 12 to 15 for gems, beetles, the start and the flag.
+
 ## Levels in DATA
 
 Another way is to draw the level with letters in `DATA` lines, right in the program. Each letter stands for a tile:

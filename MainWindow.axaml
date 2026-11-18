@@ -28,6 +28,8 @@
                 <Separator/>
                 <MenuItem Header="Export app..." Name="ExportAppMenuItem" Click="ExportApp_OnClick"/>
                 <Separator/>
+                <MenuItem Header="Folders..." Click="Folders_OnClick"/>
+                <Separator/>
                 <MenuItem Header="Exit"  Click="Exit_OnClick"/>
             </MenuItem>
             <MenuItem Header="_Edit">
@@ -38,6 +40,7 @@
             <MenuItem Header="_View">
                 <MenuItem Header="Toggle Fullscreen (F10)" Click="ToggleFullscreen_OnClick"/>
                 <MenuItem Header="CRT Effect (F8)" Click="ToggleCrt_OnClick"/>
+                <MenuItem Header="CRT Settings..." Click="CrtSettings_OnClick"/>
                 <MenuItem Header="Reset Layout"/>
             </MenuItem>
             <MenuItem Header="Themes">
