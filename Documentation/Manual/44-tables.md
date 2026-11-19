@@ -99,7 +99,8 @@ Drum sounds on a channel with `PLAY WAVE channel, "Drums"`:
 
 | Key | Does |
 |---|---|
-| `F1` | shows or hides the variable panel |
+| `F1` | the manual's section for the command or function at the cursor |
+| `F2` | shows or hides the variable panel |
 | `F8` | CRT effect on or off |
 | `F12` | the game window in full screen or a window |
 | `PgUp`, `PgDown` | scrolls a page in the editor |

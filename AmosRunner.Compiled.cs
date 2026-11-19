@@ -79,6 +79,10 @@ public static partial class AmosRunner
     private static readonly object Zero = 0.0;
 
     // Names that ParseFactor treats as built-in functions. They take precedence over arrays with the same name.
+    // For the code editor: the built-in functions and the words after each command
+    internal static IReadOnlyCollection<string> FunctionNames => BuiltinFunctions;
+    internal static IReadOnlyDictionary<string, HashSet<string>> SubCommandWords => SubCommands;
+
     private static readonly HashSet<string> BuiltinFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
         "ABS", "ANYPLAYING", "ASC", "ATN", "CHR$", "COS", "DEC", "DIM", "EOF", "EXP", "FADING", "FIND",

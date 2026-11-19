@@ -46,12 +46,16 @@ public partial class MainWindow : Window
 
     private sealed record WatchItem(string Name, string Value, string Kind, bool IsArray);
 
+    // Syntax colours, completion, hover help and values, F1 and error marks in the code editor
+    private readonly CodeAssist _assist;
+
     public MainWindow()
     {
         InitializeComponent();
         
         Editor.Options.IndentationSize = 2;
         Editor.Options.ConvertTabsToSpaces = true;
+        _assist = new CodeAssist(Editor, VariableForHover);
         
         Opened += MainWindow_OnOpened;
         this.Closing += MainWindow_Closing;
@@ -305,8 +309,16 @@ public partial class MainWindow : Window
             }
         }
         
-        // F1 - VARIABLE WATCH
-        if (e.Key == Key.F1) 
+        // F1 - HELP for the word at the cursor in the code editor
+        if (e.Key == Key.F1 && e.KeyModifiers == KeyModifiers.None)
+        {
+            _assist.ShowHelpAtCaret(this);
+            e.Handled = true;
+            return;
+        }
+
+        // F2 - VARIABLE WATCH
+        if (e.Key == Key.F2 && e.KeyModifiers == KeyModifiers.None)
         { 
             ToggleVariableWatch();
             e.Handled = true; 
@@ -519,8 +531,20 @@ public partial class MainWindow : Window
             {
                 LogBox.Text += line + Environment.NewLine;
                 LogBox.CaretIndex = LogBox.Text.Length;
+                // An error with its line: a wavy line under it in the editor, with the message on hover
+                var err = System.Text.RegularExpressions.Regex.Match(line, @"(?i)error.*?\bat line (\d+)\s*:?\s*(.*)$");
+                if (err.Success && int.TryParse(err.Groups[1].Value, out int errLine))
+                    _assist.ShowError(errLine, err.Groups[2].Value.Length > 0 ? err.Groups[2].Value : line);
             }
         });
+    }
+
+    // A variable's value for hovering in the editor, while a program runs or is paused
+    private object? VariableForHover(string name)
+    {
+        if (RunButton.IsEnabled) return null;   // no program running
+        if (_stoppedAtPause && _debugVars != null) return _debugVars.Get(name);
+        return _currentVars != null && _currentVars.TryGetValue(name, out var v) ? v : null;
     }
 
     private async void Exit_OnClick(object? sender, RoutedEventArgs e)
@@ -741,6 +765,7 @@ public partial class MainWindow : Window
         statsTimer.Tick += (_, _) => UpdateScreenTitle(_gfx.TakeFrameStats());
         statsTimer.Start();
         var program = Editor.Text ?? string.Empty;
+        _assist.ClearError();
         _debugVars = new DebugVariables();
         _stoppedAtPause = false;
 
@@ -1450,6 +1475,7 @@ public partial class MainWindow : Window
     private void ApplyTheme(AmosTheme theme)
     {
         _currentTheme = theme;
+        _assist.SetTheme(theme);
         var font = new FontFamily(theme.Font);
 
         // Theme colours for all windows (the sprite and map editors etc.), with readable text colours

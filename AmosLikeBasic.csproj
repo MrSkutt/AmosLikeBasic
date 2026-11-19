@@ -48,6 +48,9 @@
         <None Include="Projects/**/*" CopyToOutputDirectory="PreserveNewest" />
         <!-- Retro fonts for FONT SET (C64 Pro Mono, Topaz ...), so the text looks the same on every computer -->
         <None Include="fonts/**/*" CopyToOutputDirectory="PreserveNewest" />
+        <!-- The reference chapters of the manual, for help in the code editor (F1, hovering) -->
+        <EmbeddedResource Include="Documentation/Manual/42-commands.md" LogicalName="Manual.42-commands.md" />
+        <EmbeddedResource Include="Documentation/Manual/43-functions.md" LogicalName="Manual.43-functions.md" />
     </ItemGroup>
 
     <!-- Native libraries for Windows -->

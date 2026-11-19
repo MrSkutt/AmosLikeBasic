@@ -38,7 +38,17 @@ When you start AMOS Like Basic you see the editor, where you write the program. 
 | **TRACKER** | Opens the tracker, where you write music in patterns with notes and effects. |
 | **LOAD** / **SAVE** | Opens and saves projects (files ending in `.amosproj`). |
 
-If you click in the margin to the left of a line you set a **breakpoint**. The program then stops when it reaches that line, and you can see the value of every variable in the variable panel (press **F1** to show or hide it, and drag its left edge to make it wider or narrower).
+If you click in the margin to the left of a line you set a **breakpoint**. The program then stops when it reaches that line, and you can see the value of every variable in the variable panel (press **F2** to show or hide it, and drag its left edge to make it wider or narrower).
+
+### Help while you write
+
+The editor helps you along as you type:
+
+- **Colours.** Commands, functions, text, numbers, comments, and your own procedures and labels each have their own colour, so the program is easy to read and a missing quotation mark shows at once.
+- **Suggestions.** After two letters a list shows the commands, functions and your own names that fit; after `SPRITE ` (with the space) it shows the words that can come next, such as `POS`, `ON` and `MOVE`. Choose with the arrow keys and `Enter` or `Tab`, or just keep typing. The box beside the list shows what the command does.
+- **Hover.** Rest the mouse over a command or function and a box shows how it is written and what it does. While the program runs or is paused, resting it over a variable shows its value, and over an array its size and first values.
+- **F1** opens the manual's section for the word the cursor is on.
+- **Errors.** When the program stops with an error, the line gets a wavy red line and the error is shown when you rest the mouse over it. The line goes back to normal when you change it.
 
 While the program is paused you can also **change** a variable: choose it in the panel, type the new value in the box at the bottom and press **Enter** (or **Set**). Text is typed as it is, numbers as in BASIC (`12`, `-3.5`, `$FF`). Double-click an array to see all its elements; there you change an element the same way. The program carries on with the new values when you press **RESUME** or **STEP**, so you can try out a change without starting again, for example give yourself more lives. The box at the top filters the list by name.
 

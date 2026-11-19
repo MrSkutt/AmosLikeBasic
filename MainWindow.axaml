@@ -144,7 +144,7 @@
                 <DockPanel>
                     <Border Name="WatchHeader" DockPanel.Dock="Top" Background="#06206F" Padding="10,8">
                         <StackPanel Spacing="2">
-                            <TextBlock Name="WatchTitle" Text="VARIABLE WATCH  [F1]" Foreground="Yellow" FontWeight="Bold"/>
+                            <TextBlock Name="WatchTitle" Text="VARIABLE WATCH  [F2]" Foreground="Yellow" FontWeight="Bold"/>
                             <StackPanel Orientation="Horizontal" Spacing="14">
                                 <TextBlock Name="StatusText" Text="Status: Idle" Foreground="#7FB2FF" FontSize="11" VerticalAlignment="Center"/>
                                 <TextBlock Name="CurrentLineText" Text="Line: -" Foreground="Lime" FontWeight="Bold" FontSize="13" VerticalAlignment="Center"/>
