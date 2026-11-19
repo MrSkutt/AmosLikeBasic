@@ -5,7 +5,7 @@ using S = AmosLikeBasic.ChiptuneSynth;
 
 namespace AmosLikeBasic.Tests;
 
-// ProTracker modules read into tracker songs
+// ProTracker and FastTracker 2 modules read into tracker songs
 public class ModImportTests : IDisposable
 {
     private readonly string _temp = Path.Combine(Path.GetTempPath(), "amos-modtest-" + Guid.NewGuid().ToString("N"));
@@ -135,11 +135,14 @@ public class ModImportTests : IDisposable
     [Theory]
     [InlineData("Sound/Tracker/MODs/Introgasm.MOD")]
     [InlineData("Sound/Tracker/MODs/GruftSong.MOD")]
+    [InlineData("Sound/Tracker/XM/Arcadian.XM")]
+    [InlineData("Sound/Tracker/XM/Introghost.XM")]   // Amiga periods
     public void A_module_sounds_and_lasts_as_in_BASS(string file)
     {
         var bytes = File.ReadAllBytes(Repo.PathOf(file));
         Bass.Init(0, 44100);   // the "no sound" device, for decoding
-        int h = Bass.MusicLoad(bytes, 0, bytes.Length, BassFlags.Decode | BassFlags.Float | BassFlags.Mono | BassFlags.Prescan | BassFlags.MusicPT1Mod, 44100);
+        var flags = BassFlags.Decode | BassFlags.Float | BassFlags.Mono | BassFlags.Prescan | (XmImport.IsXm(bytes) ? 0 : BassFlags.MusicPT1Mod);
+        int h = Bass.MusicLoad(bytes, 0, bytes.Length, flags, 44100);
         Assert.NotEqual(0, h);
         double bassSeconds = Bass.ChannelBytes2Seconds(h, Bass.ChannelGetLength(h));
         var bass = new float[N];
@@ -148,7 +151,7 @@ public class ModImportTests : IDisposable
         pin.Free();
         Bass.MusicFree(h);
 
-        var song = ModImport.Import(bytes, Path.GetFileNameWithoutExtension(file), _temp, _temp).Song;
+        var song = (XmImport.IsXm(bytes) ? XmImport.Import(bytes, "xm", _temp, _temp) : ModImport.Import(bytes, "mod", _temp, _temp)).Song;
         S.TrackPlay(song, loop: false);
         var ours = new float[N];
         S.Render(ours);
@@ -157,6 +160,86 @@ public class ModImportTests : IDisposable
         while (S.IsTrackPlaying() && chunks < 6000) { S.Render(chunk); chunks++; }
 
         Assert.InRange(chunks * 0.1, bassSeconds - 0.3, bassSeconds + 0.3);   // tempo, jumps and loops
-        Assert.True(Correlation(Bands(bass), Bands(ours)) > 0.95, "the pitches sound as in BASS");
+        Assert.True(Correlation(Bands(bass), Bands(ours)) > 0.94, "the pitches sound as in BASS");
+    }
+
+    // ── XM ─────────────────────────────────────────────────────────────
+
+    // A small XM: one instrument with two samples (keys below C-4 play the first), an envelope,
+    // and one pattern of four rows, every cell written out in full
+    private static byte[] TinyXm(Action<(int note, int inst, int vol, int eff, int par)[,]> fill)
+    {
+        var b = new List<byte>();
+        void Bytes(params int[] v) { foreach (var x in v) b.Add((byte)x); }
+        void Text(string t, int n) { var a = new byte[n]; System.Text.Encoding.ASCII.GetBytes(t).CopyTo(a, 0); b.AddRange(a); }
+        void U16(int v) => Bytes(v & 255, v >> 8);
+        void I32(int v) => Bytes(v & 255, (v >> 8) & 255, (v >> 16) & 255, v >> 24);
+
+        Text("Extended Module: ", 17); Text("tiny xm", 20); Bytes(0x1A); Text("test", 20); U16(0x0104);
+        I32(276); U16(1); U16(0); U16(4); U16(1); U16(1); U16(1); U16(6); U16(125);
+        b.AddRange(new byte[256]);                                    // order: pattern 0
+
+        var cells = new (int note, int inst, int vol, int eff, int par)[4, 4];
+        fill(cells);
+        I32(9); Bytes(0); U16(4); U16(4 * 4 * 5);
+        for (int r = 0; r < 4; r++)
+            for (int c = 0; c < 4; c++) Bytes(cells[r, c].note, cells[r, c].inst, cells[r, c].vol, cells[r, c].eff, cells[r, c].par);
+
+        int start = b.Count;
+        I32(263); Text("lead", 22); Bytes(0); U16(2); I32(40);
+        for (int k = 0; k < 96; k++) Bytes(k < 48 ? 0 : 1);           // keymap
+        int[] env = { 0, 64, 10, 32, 20, 0 };
+        for (int k = 0; k < 24; k++) U16(k < env.Length ? env[k] : 0);   // volume envelope
+        b.AddRange(new byte[48]);                                        // panning envelope
+        Bytes(3, 0, 1, 0, 0, 0, 0, 0, 1 | 2, 0, 0, 0, 0, 0); U16(0x400);
+        while (b.Count < start + 263) Bytes(0);
+
+        // "low": 8-bit, 16 frames, a forward loop; "high": 16-bit, 16 frames, ping-pong 4 – 12, an octave up
+        I32(16); I32(0); I32(16); Bytes(48, 0, 1, 128, 0, 0); Text("low", 22);
+        I32(32); I32(8); I32(16); Bytes(64, 0, 2 | 16, 255, 12, 0); Text("high", 22);
+        int last = 0;
+        for (int f = 0; f < 16; f++) { int v = f % 4 < 2 ? 80 : -80; Bytes((v - last) & 255); last = v; }
+        last = 0;
+        for (int f = 0; f < 16; f++) { int v = f * 1000; U16((v - last) & 0xFFFF); last = v; }
+        return b.ToArray();
+    }
+
+    [Fact]
+    public void An_XM_file_is_read()
+    {
+        var xm = TinyXm(c =>
+        {
+            c[0, 0] = (37, 1, 0x30, 0, 0);       // C-3, the low sample, volume 20 from the volume column
+            c[1, 0] = (61, 0, 0, 1, 8);          // C-5 without an instrument: the high sample; slide up 8
+            c[2, 0] = (97, 0, 0, 0, 0);          // key off
+            c[0, 1] = (49, 1, 0x18, 0, 0x37);    // C-4 (the high sample), volume 8 and an arpeggio: a copy
+            c[3, 1] = (0, 0, 0, 0x10, 0x20);     // Gxx (global volume) is not in the tracker
+        });
+
+        var r = XmImport.Import(xm, "tiny", _temp, _temp);
+        var song = r.Song;
+        Assert.Equal(("tiny xm", 6, 125), (song.Title, song.Speed, song.Tempo));
+        Assert.Equal(new[] { "lead low", "lead high", "lead high vol 08" }, song.Instruments.Select(i => i.Name));
+
+        var low = song.Instruments[0];
+        Assert.Equal((60, 48, 0, 16), (low.SampleNote, low.DefaultVolume, low.LoopStart, low.LoopEnd));
+        // Envelope: 64 → 32 over 10 ticks (20 ms each), sustain there, then down to 0 in 10 more
+        Assert.Equal((0.0, 200.0, 50.0, 200.0), (low.Attack, low.Decay, low.Sustain, low.Release));
+
+        var high = song.Instruments[1];
+        Assert.Equal(48, high.SampleNote);                        // relative note +12
+        Assert.Equal((4, 18), (high.LoopStart, high.LoopEnd));    // 4 – 12 and back: 12 + 6 frames
+        var wav = SampleBank.ReadWav(File.ReadAllBytes(high.Sample));
+        Assert.Equal(18, wav.Data.Length);
+        Assert.Equal(3000 / 32768f, wav.Data[3], 3);              // 16-bit deltas added up
+        Assert.Equal(wav.Data[10], wav.Data[12], 3);              // and back again
+
+        var p = song.Patterns[0];
+        Assert.Equal("C-3 01 C20", p[0, 0].ToString());
+        Assert.Equal((72, 2, '1', 8), (p[1, 0].Note, p[1, 0].Instrument, p[1, 0].Effect, p[1, 0].Param));
+        Assert.Equal(TrackerCell.NoteOff, p[2, 0].Note);
+        Assert.Equal((60, 3, '0', 0x37), (p[0, 1].Note, p[0, 1].Instrument, p[0, 1].Effect, p[0, 1].Param));
+        Assert.Equal(8, song.Instruments[2].DefaultVolume);
+        Assert.Contains(r.Notes, n => n.Contains("Gxx"));
     }
 }

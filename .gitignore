@@ -66,3 +66,6 @@ Documentation/Manual/build/
 # Sandbox/ is for programs and files you do not want on GitHub. Paths in a program
 # (like "Graphics/hero.png") count from the project folder, so they work from here too.
 Sandbox/
+
+# Samples written when a MOD or XM file is read into the tracker (Sound/Samples/<module>/)
+Sound/Samples/*/

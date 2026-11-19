@@ -65,6 +65,8 @@ public partial class TrackerWindow : Window
         {
             if (_loading || OrderList.SelectedIndex < 0) return;
             SelectOrder(OrderList.SelectedIndex);
+            // While the song plays, a click on a position goes on playing from there
+            if (_playMode == PlayMode.Song) TryEngine(() => ChiptuneSynth.TrackPlay(_song, _orderPos, 0, loop: true));
             KeepTypingFocus();
         };
         InstrumentList.SelectionChanged += (_, _) =>
@@ -1177,9 +1179,9 @@ public partial class TrackerWindow : Window
             Title = "Load song",
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("Songs and MOD files") { Patterns = new[] { "*.amostrk", "*.mod" } },
+                new FilePickerFileType("Songs and modules") { Patterns = new[] { "*.amostrk", "*.mod", "*.xm" } },
                 SongFileType,
-                new FilePickerFileType("ProTracker modules") { Patterns = new[] { "*.mod" } }
+                new FilePickerFileType("Modules (MOD, XM)") { Patterns = new[] { "*.mod", "*.xm" } }
             },
             SuggestedStartLocation = await StartFolderAsync()
         });
@@ -1190,7 +1192,7 @@ public partial class TrackerWindow : Window
 
     public void LoadFile(string path)
     {
-        if (Path.GetExtension(path).Equals(".mod", StringComparison.OrdinalIgnoreCase) || IsModFile(path))
+        if (Path.GetExtension(path).ToLowerInvariant() is ".mod" or ".xm" || IsModFile(path))
         {
             ImportMod(path);
             return;
@@ -1215,12 +1217,14 @@ public partial class TrackerWindow : Window
         }
     }
 
-    // A ProTracker module ("M.K." at byte 1080), whatever its file name
+    // A ProTracker module ("M.K." at byte 1080) or an XM file, whatever its file name
     private static bool IsModFile(string path)
     {
         try
         {
             using var f = File.OpenRead(path);
+            var head = new byte[17];
+            if (f.Read(head, 0, 17) == 17 && XmImport.IsXm(head)) return true;
             if (f.Length < 1084) return false;
             var tag = new byte[4];
             f.Seek(1080, SeekOrigin.Begin);
@@ -1230,7 +1234,7 @@ public partial class TrackerWindow : Window
         catch (Exception) { return false; }
     }
 
-    // A MOD file becomes a new, unsaved song; its samples are written as WAV files in
+    // A MOD or XM file becomes a new, unsaved song; its samples are written as WAV files in
     // Sound/Samples/<module name>/, which the song refers to
     private void ImportMod(string path)
     {
@@ -1241,7 +1245,10 @@ public partial class TrackerWindow : Window
             string folder = Path.Combine(Workspace.Sound, "Samples", safe);
             string inSong = Path.GetRelativePath(Workspace.Root, folder).Replace('\\', '/');
             if (inSong.StartsWith("..")) inSong = folder;   // the Sound folder is moved outside the working folder
-            var result = ModImport.Import(File.ReadAllBytes(path), name, folder, inSong);
+            var bytes = File.ReadAllBytes(path);
+            var result = XmImport.IsXm(bytes)
+                ? XmImport.Import(bytes, name, folder, inSong)
+                : ModImport.Import(bytes, name, folder, inSong);
             Stop();
             _song = result.Song;
             _path = null;   // saved as a tracker song the first time SAVE is pressed

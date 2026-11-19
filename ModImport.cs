@@ -180,7 +180,7 @@ public static class ModImport
 
     private static int Word(byte[] b, int o) => (b[o] << 8) | b[o + 1];
 
-    private static string Text(byte[] b, int o, int length)
+    internal static string Text(byte[] b, int o, int length)
     {
         var chars = new StringBuilder();
         for (int i = 0; i < length && b[o + i] != 0; i++)
@@ -190,7 +190,7 @@ public static class ModImport
 
     private static string Printable(string s) => new(s.Select(c => c is >= ' ' and < (char)127 ? c : '?').ToArray());
 
-    private static string Safe(string name)
+    internal static string Safe(string name)
     {
         var s = new string(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c == '/' ? '_' : c).ToArray()).Trim();
         return s.Length == 0 ? "sample" : s.Length > 40 ? s[..40] : s;

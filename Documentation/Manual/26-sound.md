@@ -360,7 +360,7 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **Selecting and changing.** Hold `Shift` and move the cursor, or drag with the mouse, to select a block. `Cmd+C`, `Cmd+X` and `Cmd+V` copy, cut and paste (`Ctrl` on Windows). `Cmd+↑` and `Cmd+↓` move the notes a semitone, with `Shift` an octave. `Cmd+I` (or `Insert`) inserts an empty row and `Cmd+Backspace` removes the row, in the cursor's channel or with `Shift` in all channels. `Cmd+Z` undoes and `Cmd+Shift+Z` redoes.
 
-**The order list.** **INS** adds a place after the selected one, **DEL** removes it. **PAT -** and **PAT +** change which pattern the place plays; after the last pattern **PAT +** makes a new empty one. **CLONE PATTERN** copies the pattern to a new one, so that you can make a variation without changing the original. **Rows** is how many rows the pattern has.
+**The order list.** Click a place to show its pattern; while the song plays, it goes on playing from there. **INS** adds a place after the selected one, **DEL** removes it. **PAT -** and **PAT +** change which pattern the place plays; after the last pattern **PAT +** makes a new empty one. **CLONE PATTERN** copies the pattern to a new one, so that you can make a variation without changing the original. **Rows** is how many rows the pattern has.
 
 **Choosing an instrument.** Click an instrument in the list to give new notes that instrument. The keyboard stays in the pattern, so you can go on typing notes straight away.
 
@@ -516,13 +516,22 @@ The file is JSON, so it can be opened in an ordinary text editor. Each row of a 
 
 An error in the file gives an error message that tells you the pattern, row and channel.
 
-### Reading MOD files
+### Reading MOD and XM files
 
-**LOAD** also opens ProTracker modules (`.mod`, with 4, 6 or 8 channels), so you can open a song from the Amiga and change it. The patterns, the order list and the effects are read as they are, since the tracker's effects are ProTracker's. Each sample becomes a sampled instrument with its loop, its volume and its finetune; the samples are written as WAV files in `Sound/Samples/<module name>/`, which the song refers to. The pitches are kept: ProTracker's C-2 is C-4 here.
+**LOAD** also opens ProTracker modules (`.mod`, with 4, 6 or 8 channels) and FastTracker 2 modules (`.xm`), so you can open a song from the Amiga or the PC and change it, or add chip sounds on the channels it does not use. The patterns, the order list and the effects are read as they are, since the tracker's effects are ProTracker's. Each sample becomes a sampled instrument with its loop, its volume and its tuning; the samples are written as WAV files in `Sound/Samples/<module name>/`, which the song refers to. The pitches are kept: ProTracker's C-2 and FastTracker's C-4 are C-4 here.
 
-The module becomes a new song that is not saved yet. **SAVE** keeps it as a tracker song (`.amostrk`), and from then on it is an ordinary song: you can change notes, swap a sample for a synth sound, or play it from your program with `TRACK PLAY`.
+The module becomes a new song that is not saved yet. **SAVE** keeps it as a tracker song (`.amostrk`), and from then on it is an ordinary song: you can change notes, swap a sample for a synth sound, or play it from your program with `TRACK PLAY`. To save it as a MOD or XM file again, use another tracker.
 
-A few things differ from the Amiga. `E0x` (the Amiga's filter), `E3x`, `E4x`, `E5x`, `E7x`, `E8x` and `EFx` are left out, and the status line says if the module used any. A slide is turned into sixteenths of a semitone at the note it starts from, so a very long slide can end slightly off. XM, S3M and IT files cannot be read into the tracker, but `MUSIC PLAY` plays them.
+A few things differ from the originals, and the status line says what a module used that was left out:
+
+- `E0x` (the Amiga's filter), `E3x`, `E4x`, `E5x`, `E7x`, `E8x` and `EFx` are left out, and in XM files also global volume (`Gxx`, `Hxy`), envelope position (`Lxx`), pan slides (`Pxy`) and tremor (`Txy`).
+- A slide is turned into sixteenths of a semitone where it starts, so in Amiga-style songs a very long slide can end slightly off.
+- An XM instrument with several samples over the keys becomes one instrument per sample, and a note gets the one its key plays.
+- XM's volume envelope becomes the ADSR, and the fadeout part of the release; an envelope that loops is held still instead.
+- XM's volume column goes into the effect column. When both are used, a volume for a new note becomes a copy of the instrument that starts at that volume (named for example "Bass vol 20"); other volume column entries are left out.
+- The tracker plays at most 8 channels, so of an XM with more, the first 8 that play something are kept.
+
+S3M and IT files cannot be read into the tracker, but `MUSIC PLAY` plays them.
 
 A song played once (not looping) ends when it jumps back to a place it has already played, with `Bxx` or `Dxx`, as in ProTracker; that is how a song says it repeats.
 
