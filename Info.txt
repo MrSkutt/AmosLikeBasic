@@ -1,4 +1,5 @@
 How the game screen works (notes for working on the engine)
+For the whole program - threads, the interpreter, sound, editors - see Documentation/Architecture.md.
 
 1. Layers
 - The screen is a list of GpuLayers in Z order (AmosGraphics._layers, also called ActiveFrame).
@@ -20,9 +21,10 @@ How the game screen works (notes for working on the engine)
   through the CRT effect (F8).
 
 3. Frames: WAIT VBL
-- WAIT VBL ends a frame. It steps fades, animations and sprite effects, waits for the
-  screen's next refresh (DisplayClock), then presents the frame: PresentFrame takes a snapshot
-  of the sprites, the FONT PRINT texts and every layer's shader values.
+- WAIT VBL ends a frame. It steps fades, animations and sprite effects, presents the frame
+  (PresentFrame takes a snapshot of the sprites, the FONT PRINT texts, every layer's shader
+  values and which layers are on), and then waits for the screen refresh that shows it
+  (DisplayClock). Presenting first means the refresh always shows the frame just finished.
 - DisplayClock: the game window reports each screen refresh (RequestAnimationFrame) and WAIT
   VBL waits for those, 60 frames a second: every refresh at 60 Hz, every second at 120 Hz, an
   average of 60 at other rates, and a timer when no window is refreshing (tests, hidden window).
