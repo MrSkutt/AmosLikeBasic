@@ -17,12 +17,13 @@ public sealed class AudioEngine : IDisposable
     {
         Bass.Configure(Configuration.PlaybackBufferLength, 200);
         
-        if (!Bass.Init(-1, 44100))
+        // The sound card and channels chosen in View → Sound Output
+        if (!AmosLikeBasic.AudioOutput.Start())
         {
             throw new Exception($"Could not initialise BASS: {Bass.LastError}");
         }
 
-        _mixer = BassMix.CreateMixerStream(44100, 2, BassFlags.Default | BassFlags.Float);
+        _mixer = BassMix.CreateMixerStream(44100, 2, BassFlags.Default | BassFlags.Float | AmosLikeBasic.AudioOutput.PairFlags);
         Bass.ChannelPlay(_mixer);
     }
 
@@ -48,6 +49,7 @@ public sealed class AudioEngine : IDisposable
         try 
         {
             byte[] data = File.ReadAllBytes(fullPath);
+            AmosLikeBasic.AudioOutput.UseDevice();
 
             // Use the overload that takes a byte array (data) instead of a file name
             // Parametrar: Data, Offset, Length, Flags, Frequency (0 = default)
@@ -88,12 +90,13 @@ public sealed class AudioEngine : IDisposable
             StopSample(fullPath);
         
             // Add the loop flag if wanted
-            var flags = BassFlags.Default;
+            var flags = BassFlags.Default | AmosLikeBasic.AudioOutput.PairFlags;
             if (loop) flags |= BassFlags.Loop;
         
             // We create an ordinary stream that does NOT go through the mixer.
             // Without BassFlags.Decode it plays straight on the sound card.
             // CHANGED HERE: Uses the variable 'flags' instead of BassFlags.Default
+            AmosLikeBasic.AudioOutput.UseDevice();
             int effectStream = Bass.CreateStream(fullPath, 0, 0, flags);
         
             if (effectStream != 0)

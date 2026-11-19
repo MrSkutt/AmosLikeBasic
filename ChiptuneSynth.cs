@@ -293,7 +293,8 @@ namespace AmosLikeBasic
                 _started = true;
 
                 _streamProc = StreamCallback;
-                _stream = Bass.CreateStream(SampleRate, 2, BassFlags.Float, _streamProc, IntPtr.Zero);
+                AudioOutput.UseDevice();   // the card chosen in Sound Output, whichever thread starts the synth
+                _stream = Bass.CreateStream(SampleRate, 2, BassFlags.Float | AudioOutput.PairFlags, _streamProc, IntPtr.Zero);
                 if (_stream != 0)
                 {
                     // No extra buffering: changes from BASIC are heard within a few milliseconds

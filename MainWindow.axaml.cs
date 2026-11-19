@@ -131,8 +131,14 @@ public partial class MainWindow : Window
 
     public static void InitializeAudio()
     {
-        // Initialize BASS
-        Bass.BASS_Init(-1, 44100, BASSInit.BASS_DEVICE_DEFAULT, IntPtr.Zero);
+        // BASS on the sound card and channels chosen in View → Sound Output (if not started already)
+        AudioOutput.Start();
+    }
+
+    private async void SoundOutput_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (await new SoundOutputWindow().ShowDialog<bool>(this))
+            Log("Sound output: the new choice is used when AMOS Like Basic starts again." + Environment.NewLine);
     }
     
     private async void OnCut(object? sender, RoutedEventArgs e)
@@ -197,6 +203,9 @@ public partial class MainWindow : Window
     private void MainWindow_OnOpened(object? sender, EventArgs e)
     {
         _uiReady = true;
+        // Where the sound goes, when it is not the usual card and channels 1 – 2
+        if (AudioOutput.Current.Pair > 1 || !string.IsNullOrEmpty(AudioOutput.Current.Device))
+            Log($"Sound output: {AudioOutput.Description}" + Environment.NewLine);
     }
 
     private void UpdateCursorPosition()

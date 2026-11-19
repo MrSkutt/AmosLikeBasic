@@ -41,6 +41,7 @@
                 <MenuItem Header="Toggle Fullscreen (F10)" Click="ToggleFullscreen_OnClick"/>
                 <MenuItem Header="CRT Effect (F8)" Click="ToggleCrt_OnClick"/>
                 <MenuItem Header="CRT Settings..." Click="CrtSettings_OnClick"/>
+                <MenuItem Header="Sound Output..." Click="SoundOutput_OnClick"/>
                 <MenuItem Header="Reset Layout"/>
             </MenuItem>
             <MenuItem Header="Themes">

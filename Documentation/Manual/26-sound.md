@@ -2,6 +2,8 @@
 
 A game without sound feels empty. AMOS Like Basic has a built-in **synth** that makes sound effects and music in the style of old games consoles, and it can also play sound files and music modules.
 
+> **No sound?** Most sound cards play on channels 1 – 2, and that is where AMOS Like Basic sends its sound. A sound card or mixer with many channels may listen on other ones; the system's own setting for stereo channels is not used. Choose the card and the channels in **View → Sound Output...** (for example *Channels 17 – 18*) and start AMOS Like Basic again.
+
 ## Ready-made sound effects
 
 The simplest sounds are ready to use. Write `PLAY` and the name:
