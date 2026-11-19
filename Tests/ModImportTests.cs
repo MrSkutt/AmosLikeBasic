@@ -224,8 +224,9 @@ public class ModImportTests : IDisposable
 
         var low = song.Instruments[0];
         Assert.Equal((60, 48, 0, 16), (low.SampleNote, low.DefaultVolume, low.LoopStart, low.LoopEnd));
-        // Envelope: 64 → 32 over 10 ticks (20 ms each), sustain there, then down to 0 in 10 more
-        Assert.Equal((0.0, 200.0, 50.0, 200.0), (low.Attack, low.Decay, low.Sustain, low.Release));
+        // The envelope as it is; the fadeout of 0x400 takes 32 ticks of 20 ms
+        Assert.Equal(new[] { (0, 64), (10, 32), (20, 0) }, low.Envelope.Select(p => (p.Tick, p.Level)));
+        Assert.Equal((1, -1, -1, 640.0), (low.EnvelopeSustain, low.EnvelopeLoopStart, low.EnvelopeLoopEnd, low.FadeOut));
 
         var high = song.Instruments[1];
         Assert.Equal(48, high.SampleNote);                        // relative note +12

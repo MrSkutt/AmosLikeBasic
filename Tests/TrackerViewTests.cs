@@ -1,3 +1,4 @@
+using Avalonia.VisualTree;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -37,6 +38,27 @@ public class TrackerViewTests : IDisposable
         S.ReadScope(2, two);
         Assert.True(one.Max(Math.Abs) > 0.05, "channel 1 plays a note");
         Assert.True(two.Max(Math.Abs) < 1e-6, "channel 2 is silent");
+    }
+
+    [AvaloniaFact]
+    public void Points_makes_an_envelope_like_the_ADSR_and_ADSR_takes_it_away()
+    {
+        var w = Open();
+        var song = (TrackerSong)typeof(TrackerWindow).GetField("_song", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(w)!;
+        var inst = song.Instruments[0];
+        (inst.Attack, inst.Decay, inst.Sustain, inst.Release) = (40, 100, 50, 200);
+        Avalonia.Controls.Primitives.ToggleButton Choice(string text) => w.GetVisualDescendants()
+            .OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => b.Content as string == text);
+        Press(w, Key.F4);   // the instrument page
+        Choice("POINTS").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        // Tempo 125: a tick is 20 ms
+        Assert.Equal(new[] { (0, 0), (2, 64), (7, 32), (17, 0) }, inst.Envelope.Select(p => (p.Tick, p.Level)));
+        Assert.Equal(2, inst.EnvelopeSustain);
+        Assert.True(w.GetVisualDescendants().OfType<PointEnvelopeEditor>().Single().IsVisible);
+        Choice("ADSR").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Assert.Empty(inst.Envelope);
+        Assert.False(w.GetVisualDescendants().OfType<PointEnvelopeEditor>().Single().IsVisible);
+        Close(w);
     }
 
     private static TrackerWindow Open()

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 
 namespace AmosLikeBasic
@@ -53,6 +54,11 @@ namespace AmosLikeBasic
             public int DefaultVolume = 64;
             public TableStep[] Table = Array.Empty<TableStep>();
             public int TableLoop = -1;
+            // A volume envelope with points (null: the ADSR); ticks and levels 0 – 1
+            public int[]? EnvTicks;
+            public double[] EnvLevels = Array.Empty<double>();
+            public int EnvSustain = -1, EnvLoopStart = -1, EnvLoopEnd = -1;
+            public double FadeOut;   // seconds, 0 = none
         }
 
         private sealed class TrackData
@@ -96,6 +102,10 @@ namespace AmosLikeBasic
             public int Param;
             public int TableIndex, TableOffset;
             public int DelayNote = TrackerCell.NoNote;
+            // The volume envelope: where it is, whether the note has been let go, and the fade (1 – 0)
+            public int EnvTick;
+            public bool KeyOff;
+            public double Fade = 1;
             // Set with G, H and I. Apply until the channel changes instrument.
             public double? Cutoff, Resonance, PulseWidth, Pan;
             // Sound effect: samples left until the note is released, and the channel's PLAY settings from before
@@ -279,6 +289,8 @@ namespace AmosLikeBasic
         // may fade out fully, one with a table without a loop is held until the table ends, otherwise a quarter of a second
         private static double AutoSfxLength(TrackInstrument inst)
         {
+            if (inst.EnvTicks is { } ticks)
+                return inst.EnvSustain < 0 && inst.EnvLoopStart < 0 ? ticks[^1] / SfxTickRate : 0.25;
             if (inst.Sustain <= 0) return inst.Attack + inst.Decay;
             if (inst.Table.Length > 1 && inst.TableLoop < 0) return inst.Table.Length / SfxTickRate;
             return 0.25;
@@ -414,6 +426,9 @@ namespace AmosLikeBasic
                 steps.Add(ParseTableStep(text, number));
 
             var wave = ParseWave(src.Wave ?? "Pulse");
+            // Points in tick order; the first is at tick 0
+            var env = (src.Envelope ?? new()).Where(p => p != null).OrderBy(p => p.Tick).ToList();
+            bool points = env.Count >= 2;
             // A sampled instrument plays its file instead of oscillator 1 (a missing file is silent)
             var sample = (src.Wave ?? "").Equals("Sample", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(src.Sample)
                 ? SampleBank.Get(src.Sample) ?? new SampleData(Array.Empty<float>(), 44100) : null;
@@ -424,10 +439,17 @@ namespace AmosLikeBasic
                 PulseWidth = Math.Clamp(src.PulseWidth / 100.0, 0.01, 0.99),
                 PwmDepth = Math.Clamp(src.PwmDepth / 100.0, 0, 0.49),
                 PwmRate = Math.Max(0, src.PwmRate),
-                Attack = Math.Max(0, src.Attack) / 1000.0,
-                Decay = Math.Max(0, src.Decay) / 1000.0,
-                Sustain = Math.Clamp(src.Sustain / 100.0, 0, 1),
-                Release = Math.Max(0, src.Release) / 1000.0,
+                // With an envelope of points the voice's own one is only there to start and end without a click
+                Attack = points ? 0.001 : Math.Max(0, src.Attack) / 1000.0,
+                Decay = points ? 0 : Math.Max(0, src.Decay) / 1000.0,
+                Sustain = points ? 1 : Math.Clamp(src.Sustain / 100.0, 0, 1),
+                Release = points ? 0.005 : Math.Max(0, src.Release) / 1000.0,
+                EnvTicks = points ? env.Select((p, k) => k == 0 ? 0 : Math.Clamp(p.Tick, 0, 65535)).ToArray() : null,
+                EnvLevels = points ? env.Select(p => Math.Clamp(p.Level, 0, 64) / 64.0).ToArray() : Array.Empty<double>(),
+                EnvSustain = points && src.EnvelopeSustain < env.Count ? src.EnvelopeSustain : -1,
+                EnvLoopStart = points && src.EnvelopeLoopStart >= 0 && src.EnvelopeLoopStart <= src.EnvelopeLoopEnd && src.EnvelopeLoopEnd < env.Count ? src.EnvelopeLoopStart : -1,
+                EnvLoopEnd = points && src.EnvelopeLoopStart >= 0 && src.EnvelopeLoopStart <= src.EnvelopeLoopEnd && src.EnvelopeLoopEnd < env.Count ? src.EnvelopeLoopEnd : -1,
+                FadeOut = Math.Clamp(src.FadeOut, 0, 60000) / 1000.0,
                 Filter = ParseFilterMode(src.Filter ?? "Off"),
                 Cutoff = Math.Clamp(src.Cutoff, 20, 18000),
                 Resonance = Math.Clamp(src.Resonance / 100.0, 0, 0.98),
@@ -872,6 +894,9 @@ namespace AmosLikeBasic
             ch.TableIndex = 0;
             ch.TableOffset = 0;
             ch.VibPhase = 0;
+            ch.EnvTick = 0;
+            ch.KeyOff = false;
+            ch.Fade = 1;
 
             var v = _voices[c];
             SetVoiceFromInstrument(ch, v, inst);
@@ -956,8 +981,16 @@ namespace AmosLikeBasic
             });
         }
 
+        // Lets go of the note. With an envelope of points the envelope goes on and the fade starts; a sound
+        // effect is let go at once.
         private static void ReleaseTrackVoice(int c)
         {
+            var ch = _trackChannels[c];
+            if (ch.Active && !ch.Sfx && ch.Inst?.EnvTicks != null)
+            {
+                ch.KeyOff = true;
+                return;
+            }
             var v = _voices[c];
             if (v.Stage is EnvStage.Attack or EnvStage.Decay or EnvStage.Sustain) v.Stage = EnvStage.Release;
         }
@@ -993,8 +1026,43 @@ namespace AmosLikeBasic
             double vol = ch.Vol;
             if (ch.Effect == '7')   // tremolo: the volume swings by up to depth × 4 of 64
                 vol = Math.Clamp(vol + Math.Sin(ch.TremPhase * 2 * Math.PI / 64) * ch.TremDepth * 4, 0, 64);
+            if (inst.EnvTicks != null) vol *= NextEnvelope(ch, v, inst);
             v.Volume = ch.Sfx ? inst.Volume * _sfxVolume
                 : _trackMute[c] ? 0 : inst.Volume * vol / 64.0 * _trackVolume;
+        }
+
+        // The envelope's level at the channel's tick (0 – 1, with the fade), and one tick on
+        private static double NextEnvelope(TrackChannel ch, Voice v, TrackInstrument inst)
+        {
+            var ticks = inst.EnvTicks!;
+            var levels = inst.EnvLevels;
+            int t = ch.EnvTick;
+            double level = levels[^1];
+            for (int k = 0; k < ticks.Length - 1; k++)
+                if (t < ticks[k + 1])
+                {
+                    int span = Math.Max(1, ticks[k + 1] - ticks[k]);
+                    level = levels[k] + (levels[k + 1] - levels[k]) * Math.Clamp((t - ticks[k]) / (double)span, 0, 1);
+                    break;
+                }
+
+            // The sustain point holds the note until it is let go; the loop goes round either way
+            if (!(inst.EnvSustain >= 0 && !ch.KeyOff && t == ticks[inst.EnvSustain]))
+            {
+                t++;
+                if (inst.EnvLoopEnd >= 0 && t > ticks[inst.EnvLoopEnd]) t = ticks[inst.EnvLoopStart];
+                ch.EnvTick = Math.Min(t, ticks[^1] + 1);
+            }
+
+            if (ch.KeyOff)
+            {
+                double tickSeconds = ch.Sfx ? 1 / SfxTickRate : 1 / (_trackTempo * 0.4);
+                if (inst.FadeOut > 0) ch.Fade = Math.Max(0, ch.Fade - tickSeconds / inst.FadeOut);
+                // Faded out, or at the end of an envelope that ends silent: the note is over
+                bool ended = ch.Fade <= 0 || (inst.EnvLoopEnd < 0 && ch.EnvTick > ticks[^1] && levels[^1] <= 0);
+                if (ended && v.Stage is EnvStage.Attack or EnvStage.Decay or EnvStage.Sustain) v.Stage = EnvStage.Release;
+            }
+            return level * ch.Fade;
         }
 
         private static void AdvanceRow(TrackData d)

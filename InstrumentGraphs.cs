@@ -390,3 +390,159 @@ public sealed class SampleGraph : InstrumentGraph
             new Point(a.Left, a.Bottom + 3));
     }
 }
+
+// The volume envelope drawn with points: click to add a point, drag to move one, right-click to take
+// one away (there are always at least two). The first point stays at tick 0. The sustain point has a
+// line, the loop is shaded.
+public sealed class PointEnvelopeEditor : InstrumentGraph
+{
+    public const int MaxPoints = 25;
+
+    // Makes a change to the instrument through the tracker window (for undo and the sound)
+    public Action<Action<TrackerInstrument>>? Edit { get; set; }
+
+    private int _drag = -1;
+
+    public PointEnvelopeEditor()
+    {
+        Height = 150;
+        Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Cross);
+        ToolTip.SetTip(this, "Click to add a point, drag to move one, right-click to take one away. The ticks follow the song's speed.");
+    }
+
+    private static int Span(TrackerInstrument inst) =>
+        Math.Max(32, (int)Math.Ceiling((inst.Envelope.Count > 0 ? inst.Envelope[^1].Tick : 0) * 1.15 + 4));
+
+    private double X(TrackerInstrument inst, Rect a, double tick) => a.Left + tick / Span(inst) * a.Width;
+    private static double Y(Rect a, double level) => a.Bottom - level / 64.0 * a.Height;
+
+    protected override void Draw(DrawingContext ctx, TrackerInstrument inst, Rect a)
+    {
+        var env = inst.Envelope;
+        var gridPen = new Pen(Grid, 1, new DashStyle(new double[] { 2, 3 }, 0));
+        foreach (var level in new[] { 16, 32, 48 }) ctx.DrawLine(gridPen, new Point(a.Left, Y(a, level)), new Point(a.Right, Y(a, level)));
+        if (env.Count < 2) return;
+
+        if (inst.EnvelopeLoopStart >= 0 && inst.EnvelopeLoopEnd >= inst.EnvelopeLoopStart && inst.EnvelopeLoopEnd < env.Count)
+        {
+            double x0 = X(inst, a, env[inst.EnvelopeLoopStart].Tick), x1 = X(inst, a, env[inst.EnvelopeLoopEnd].Tick);
+            ctx.FillRectangle(new SolidColorBrush(Color.FromArgb(40, 255, 220, 120)), new Rect(x0, a.Top, Math.Max(2, x1 - x0), a.Height));
+        }
+        if (inst.EnvelopeSustain >= 0 && inst.EnvelopeSustain < env.Count)
+        {
+            double x = X(inst, a, env[inst.EnvelopeSustain].Tick);
+            ctx.DrawLine(new Pen(Faint, 1, new DashStyle(new double[] { 3, 3 }, 0)), new Point(x, a.Top), new Point(x, a.Bottom));
+            ctx.DrawText(Text("S", Faint, 10), new Point(x + 2, a.Top));
+        }
+
+        var pts = new List<Point>();
+        foreach (var p in env) pts.Add(new Point(X(inst, a, p.Tick), Y(a, p.Level)));
+        var fill = new StreamGeometry();
+        using (var g = fill.Open())
+        {
+            g.BeginFigure(new Point(pts[0].X, a.Bottom), true);
+            foreach (var p in pts) g.LineTo(p);
+            g.LineTo(new Point(pts[^1].X, a.Bottom));
+            g.EndFigure(true);
+        }
+        ctx.DrawGeometry(new SolidColorBrush(Color.FromArgb(40, 255, 220, 0)), null, fill);
+        ctx.DrawGeometry(null, new Pen(Line, 2), Polyline(pts));
+        for (int k = 0; k < pts.Count; k++)
+        {
+            double r = k == _drag ? 5 : 3.5;
+            ctx.FillRectangle(k == _drag ? Line : Screen, new Rect(pts[k].X - r, pts[k].Y - r, 2 * r, 2 * r));
+            ctx.DrawRectangle(new Pen(Line, 1.5), new Rect(pts[k].X - r, pts[k].Y - r, 2 * r, 2 * r));
+        }
+        string info = _drag >= 0 && _drag < env.Count
+            ? $"point {_drag + 1}: tick {env[_drag].Tick}, level {env[_drag].Level}"
+            : $"{env.Count} points, {env[^1].Tick} ticks";
+        ctx.DrawText(Text(info, Label), new Point(a.Left, a.Bottom + 3));
+    }
+
+    private int HitPoint(TrackerInstrument inst, Point p)
+    {
+        var a = Area;
+        for (int k = 0; k < inst.Envelope.Count; k++)
+        {
+            var e = inst.Envelope[k];
+            if (Math.Abs(X(inst, a, e.Tick) - p.X) <= 6 && Math.Abs(Y(a, e.Level) - p.Y) <= 6) return k;
+        }
+        return -1;
+    }
+
+    protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        var inst = Instrument();
+        if (inst == null || Edit == null || inst.Envelope.Count < 2) return;
+        var p = e.GetPosition(this);
+        int hit = HitPoint(inst, p);
+        e.Handled = true;
+
+        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+        {
+            if (hit > 0 && inst.Envelope.Count > 2) Edit(i => RemovePoint(i, hit));
+            return;
+        }
+        if (hit < 0)
+        {
+            if (inst.Envelope.Count >= MaxPoints) return;
+            var a = Area;
+            int tick = (int)Math.Round(Math.Clamp((p.X - a.Left) / a.Width, 0, 1) * Span(inst));
+            int level = (int)Math.Round(Math.Clamp((a.Bottom - p.Y) / a.Height, 0, 1) * 64);
+            int at = inst.Envelope.FindIndex(q => q.Tick >= tick);
+            if (at == 0 || (at > 0 && inst.Envelope[at].Tick == tick)) return;   // tick taken
+            if (at < 0) at = inst.Envelope.Count;
+            Edit(i => InsertPoint(i, at, new TrackerEnvelopePoint(tick, level)));
+            hit = at;
+        }
+        _drag = hit;
+        e.Pointer.Capture(this);
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerMoved(Avalonia.Input.PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        var inst = Instrument();
+        if (_drag < 0 || inst == null || Edit == null || _drag >= inst.Envelope.Count) return;
+        var a = Area;
+        var p = e.GetPosition(this);
+        int k = _drag;
+        // Between its neighbours; the first point stays at tick 0. Dragging past the right edge makes room.
+        int lo = k == 0 ? 0 : inst.Envelope[k - 1].Tick + 1;
+        int hi = k == 0 ? 0 : k < inst.Envelope.Count - 1 ? inst.Envelope[k + 1].Tick - 1 : 9999;
+        int tick = Math.Clamp((int)Math.Round((p.X - a.Left) / a.Width * Span(inst)), lo, hi);
+        int level = (int)Math.Round(Math.Clamp((a.Bottom - p.Y) / a.Height, 0, 1) * 64);
+        if (tick == inst.Envelope[k].Tick && level == inst.Envelope[k].Level) return;
+        Edit(i => { i.Envelope[k].Tick = tick; i.Envelope[k].Level = level; });
+    }
+
+    protected override void OnPointerReleased(Avalonia.Input.PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        _drag = -1;
+        e.Pointer.Capture(null);
+        InvalidateVisual();
+    }
+
+    // The sustain and loop points follow the points they are on
+    public static void InsertPoint(TrackerInstrument i, int at, TrackerEnvelopePoint point)
+    {
+        i.Envelope.Insert(at, point);
+        int Moved(int index) => index >= at ? index + 1 : index;
+        if (i.EnvelopeSustain >= 0) i.EnvelopeSustain = Moved(i.EnvelopeSustain);
+        if (i.EnvelopeLoopStart >= 0) i.EnvelopeLoopStart = Moved(i.EnvelopeLoopStart);
+        if (i.EnvelopeLoopEnd >= 0) i.EnvelopeLoopEnd = Moved(i.EnvelopeLoopEnd);
+    }
+
+    public static void RemovePoint(TrackerInstrument i, int at)
+    {
+        i.Envelope.RemoveAt(at);
+        int Moved(int index) => index == at ? Math.Min(index, i.Envelope.Count - 1) : index > at ? index - 1 : index;
+        if (i.EnvelopeSustain >= 0) i.EnvelopeSustain = Moved(i.EnvelopeSustain);
+        if (i.EnvelopeLoopStart >= 0) i.EnvelopeLoopStart = Moved(i.EnvelopeLoopStart);
+        if (i.EnvelopeLoopEnd >= 0) i.EnvelopeLoopEnd = Moved(i.EnvelopeLoopEnd);
+        if (i.EnvelopeLoopStart > i.EnvelopeLoopEnd) i.EnvelopeLoopStart = i.EnvelopeLoopEnd;
+    }
+}

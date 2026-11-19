@@ -649,4 +649,54 @@ public class SynthTests : IDisposable
         Assert.Equal(TrackerCell.NoVolume, default(TrackerCell).Volume);
         Assert.Throws<FormatException>(() => TrackerCell.Parse("C-4 01 41 ..."));
     }
+
+    // ── Volume envelopes drawn with points (a tick is 20 ms at tempo 125) ──
+
+    private const string Fall = "\"Envelope\":[{\"Tick\":0,\"Level\":64},{\"Tick\":10,\"Level\":0}]";
+
+    [Fact]
+    public void AnEnvelopeOfPointsShapesTheVolume()
+    {
+        S.TrackPlay(SongWith(Fall), loop: false);
+        var b = Render(0.4);
+        double start = Loudness(b, 0.005, 0.03), late = Loudness(b, 0.15, 0.19);
+        Assert.InRange(late / start, 0.1, 0.35);            // ticks 7.5 – 9.5 of 10 down to 0
+        Assert.True(Loudness(b, 0.25, 0.35) < start * 0.01, "silent after the last point");
+    }
+
+    [Fact]
+    public void TheSustainPointHoldsUntilTheNoteIsLetGo()
+    {
+        const string env = "\"Envelope\":[{\"Tick\":0,\"Level\":64},{\"Tick\":5,\"Level\":32},{\"Tick\":15,\"Level\":0}],\"EnvelopeSustain\":1";
+        S.TrackPlay(SongWith("", "A-4 01 ...", "--- .. ...", "--- .. ...", "=== .. ...", "--- .. ...", "--- .. ...", "--- .. ..."), loop: false);
+        var full = Render(0.8);
+        S.TrackPlay(SongWith(env, "A-4 01 ...", "--- .. ...", "--- .. ...", "=== .. ...", "--- .. ...", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.8);
+        Assert.InRange(Loudness(b, 0.15, 0.34) / Loudness(full, 0.15, 0.34), 0.45, 0.55);   // held at 32 of 64
+        Assert.True(Loudness(b, 0.40, 0.46) > 0.1 * Loudness(full, 0.15, 0.34), "after === the envelope goes on down");
+        Assert.True(Loudness(b, 0.62, 0.75) < 0.01 * Loudness(full, 0.15, 0.34), "and ends at its last point");
+    }
+
+    [Fact]
+    public void TheEnvelopeLoopGoesRound()
+    {
+        const string points = "\"Envelope\":[{\"Tick\":0,\"Level\":64},{\"Tick\":4,\"Level\":0},{\"Tick\":8,\"Level\":64},{\"Tick\":9,\"Level\":0}]";
+        S.TrackPlay(SongWith(points), loop: false);
+        var once = Render(0.6);
+        S.TrackPlay(SongWith(points + ",\"EnvelopeLoopStart\":0,\"EnvelopeLoopEnd\":2"), loop: false);
+        var looped = Render(0.6);
+        Assert.True(Loudness(once, 0.4, 0.55) < 1e-3, "without the loop it ends at tick 9");
+        Assert.True(Loudness(looped, 0.4, 0.55) > 0.05, "with it the volume keeps going up and down");
+    }
+
+    [Fact]
+    public void TheFadeOutStartsWhenTheNoteIsLetGo()
+    {
+        const string env = "\"Envelope\":[{\"Tick\":0,\"Level\":64},{\"Tick\":1,\"Level\":64}],\"EnvelopeSustain\":1,\"FadeOut\":200";
+        S.TrackPlay(SongWith(env, "A-4 01 ...", "--- .. ...", "=== .. ...", "--- .. ...", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.7);
+        double held = Loudness(b, 0.1, 0.23);
+        Assert.InRange(Loudness(b, 0.29, 0.31) / held, 0.5, 0.85);   // 60 ms of 200 into the fade
+        Assert.True(Loudness(b, 0.5, 0.65) < held * 0.01, "faded out after 200 ms");
+    }
 }

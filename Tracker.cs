@@ -196,6 +196,16 @@ namespace AmosLikeBasic
         // Where in stereo: -100 left, 0 the middle, 100 right (effect 8xx changes it in a song)
         public double Pan { get; set; }
 
+        // A volume envelope drawn with points, used instead of the ADSR when it has two or more: each
+        // point is a tick from the note's start and a level 0 – 64. The note stays at the sustain point
+        // until it is let go, and goes round from loop start to loop end (point numbers from 0, -1 = none).
+        // After it is let go, the envelope goes on and the sound fades out over FadeOut ms (0: no fade).
+        public List<TrackerEnvelopePoint> Envelope { get; set; } = new();
+        public int EnvelopeSustain { get; set; } = -1;
+        public int EnvelopeLoopStart { get; set; } = -1;
+        public int EnvelopeLoopEnd { get; set; } = -1;
+        public double FadeOut { get; set; }
+
         // Echo: the sound comes back after a while, a little quieter each time. Mix 0 is off.
         public double EchoTime { get; set; } = 300;        // ms, at most 2000
         public int EchoSyncRows { get; set; }              // > 0: the time is this many rows of the song
@@ -210,6 +220,15 @@ namespace AmosLikeBasic
         // TableLoop is the step the table jumps back to, -1 stays on the last step.
         public List<string> Table { get; set; } = new();
         public int TableLoop { get; set; } = -1;
+    }
+
+    public sealed class TrackerEnvelopePoint
+    {
+        public int Tick { get; set; }
+        public int Level { get; set; }      // 0 – 64
+
+        public TrackerEnvelopePoint() { }
+        public TrackerEnvelopePoint(int tick, int level) { Tick = tick; Level = level; }
     }
 
     // A low frequency oscillator: a slow wave that moves a setting of the instrument.

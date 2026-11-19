@@ -368,7 +368,7 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 - **OSCILLATORS**: the name, a picture of the wave (both oscillators mixed), and the buttons and knobs for oscillator 1 and 2.
 - **FILTER**: the type (off, low pass, high pass, band), a picture of which frequencies come through, cutoff and resonance, and the filter envelope.
-- **AMP ENVELOPE**: a picture of how the volume rises and falls, and four sliders for attack, decay, sustain and release.
+- **AMP ENVELOPE**: how the volume rises and falls. With **ADSR** there is a picture and four sliders for attack, decay, sustain and release. With **POINTS** you draw the envelope yourself, as in FastTracker 2 (see below).
 - **EFFECTS**: echo and vibrato, ring modulation and sync.
 - **LFO 1** and **LFO 2**: what they move, their wave and knobs, with a picture.
 - **TABLE**: the steps of the instrument's table.
@@ -490,6 +490,18 @@ The waves are sine, triangle, square, saw up, saw down and **random**, which jum
 
 In the file an LFO is written `"Lfo1": { "Target": "Cutoff", "Shape": "Triangle", "Depth": 24, "SyncRows": 4 }`. The older settings `Vibrato` and `PwmDepth` still work as before.
 
+### Envelopes drawn with points
+
+**POINTS** on the AMP ENVELOPE card swaps the ADSR for an envelope you draw. It starts out shaped like the ADSR it replaces. Click in the picture to add a point, drag a point to move it, and right-click one to take it away; the first point stays at the start. Across is time in *ticks* (one tick is 20 ms at tempo 125, so the envelope follows the song's speed), up is the volume, 0 – 64.
+
+| Knob | Does |
+|---|---|
+| SUSTAIN | the point a held note stays at until it is let go (`===`); OFF runs through the envelope without stopping |
+| LOOP START, LOOP END | the envelope goes round between these points as long as the note sounds, for tremolo or a pulsing sound |
+| FADE OUT | after the note is let go, the sound fades out over this time; NONE lets the envelope end it |
+
+When the note is let go, the envelope goes on past the sustain point to its end. **ADSR** takes the points away again. In the file the points are written as `"Envelope": [{"Tick": 0, "Level": 64}, ...]` with `EnvelopeSustain`, `EnvelopeLoopStart`, `EnvelopeLoopEnd` (point numbers from 0, -1 for none) and `FadeOut` (ms).
+
 ### The file
 
 The file is JSON, so it can be opened in an ordinary text editor. Each row of a pattern is a line of text, with the channels separated by `|`:
@@ -529,7 +541,7 @@ A few things differ from the originals, and the status line says what a module u
 - `E0x` (the Amiga's filter), `E3x`, `E4x`, `E5x`, `E7x`, `E8x` and `EFx` are left out, and in XM files also global volume (`Gxx`, `Hxy`), envelope position (`Lxx`), pan slides (`Pxy`) and tremor (`Txy`).
 - A slide is turned into sixteenths of a semitone where it starts, so in Amiga-style songs a very long slide can end slightly off.
 - An XM instrument with several samples over the keys becomes one instrument per sample, and a note gets the one its key plays.
-- XM's volume envelope becomes the ADSR, and the fadeout part of the release; an envelope that loops is held still instead.
+- XM's volume envelope is kept as an envelope of points, with its sustain point, loop and fadeout. The panning envelope and the auto-vibrato are left out.
 - A volume in XM's volume column goes in the tracker's volume column. Its other commands (volume slides, vibrato, pan and glide) go in the effect column when that is free, and are left out when it is not.
 - The tracker plays at most 8 channels, so of an XM with more, the first 8 that play something are kept.
 

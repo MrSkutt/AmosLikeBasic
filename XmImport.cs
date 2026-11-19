@@ -10,7 +10,8 @@ namespace AmosLikeBasic;
 // more than the tracker, so some of it is made simpler:
 //  - an instrument can have several samples over the keys; each sample becomes its own instrument,
 //    and a note gets the one its key plays;
-//  - the volume envelope becomes an ADSR, and the fadeout part of the release;
+//  - the volume envelope is kept, with its sustain point, loop and fadeout (the panning envelope
+//    and the auto-vibrato are left out);
 //  - a volume in the volume column goes in the tracker's volume column; its other commands (slides,
 //    vibrato, pan, glide) go in the effect column when that is free, and a volume slide with a
 //    glide or vibrato that carries on becomes 5xy or 6xy;
@@ -250,30 +251,18 @@ public static class XmImport
         return new ModImport.Result(song, song.Instruments.Count, notes);
     }
 
-    // The volume envelope as an ADSR: up to its highest point, down to the sustain point, and after the
-    // note is let go, the rest of the envelope or the fadeout, whichever ends first
+    // The volume envelope as it is, with its sustain point, loop and fadeout. Without an envelope a
+    // note sounds until it is let go, and then stops at once.
     private static void Envelope(Instrument inst, TrackerInstrument t, double tickMs)
     {
-        // Without an envelope a note sounds until it is let go, and then stops at once
-        double fade = inst.Fadeout > 0 ? 32768.0 / inst.Fadeout * tickMs : double.PositiveInfinity;
-        if (!inst.EnvelopeOn)
-        {
-            (t.Attack, t.Decay, t.Sustain, t.Release) = (0, 0, 100, 5);
-            return;
-        }
-        var e = inst.Envelope;
-        int hold = inst.Sustain >= 0 ? inst.Sustain : inst.LoopStart >= 0 ? inst.LoopStart : e.Length - 1;
-        int peak = 0;
-        for (int k = 1; k <= hold; k++) if (e[k].y > e[peak].y) peak = k;
-        double top = Math.Max(1, e[peak].y);
-        t.Volume = e[peak].y / 64.0;                       // multiplied by the song's level afterwards
-        t.Attack = Math.Round(e[peak].x * tickMs);
-        t.Decay = Math.Round(Math.Max(0, e[hold].x - e[peak].x) * tickMs);
-        t.Sustain = Math.Round(e[hold].y / top * 100);
-        double rest = e[^1].y < 4 ? (e[^1].x - e[hold].x) * tickMs : double.PositiveInfinity;
-        double release = Math.Min(rest, fade);
-        t.Release = Math.Round(double.IsInfinity(release) ? 5000 : Math.Clamp(release, 5, 10000));
-        if (inst.Sustain < 0 && inst.LoopStart < 0 && e[^1].y < 4) t.Sustain = 0;   // dies away by itself
+        (t.Attack, t.Decay, t.Sustain, t.Release) = (0, 0, 100, 5);
+        if (!inst.EnvelopeOn || inst.Envelope.Length < 2) return;
+        t.Envelope = inst.Envelope.Select(p => new TrackerEnvelopePoint(p.x, p.y)).ToList();
+        t.EnvelopeSustain = inst.Sustain;
+        t.EnvelopeLoopStart = inst.LoopStart;
+        t.EnvelopeLoopEnd = inst.LoopEnd;
+        // FT2 takes the fadeout from 32768 each tick
+        t.FadeOut = inst.Fadeout > 0 ? Math.Round(32768.0 / inst.Fadeout * tickMs) : 0;
     }
 
     private sealed class Shared

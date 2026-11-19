@@ -387,9 +387,62 @@ public partial class TrackerWindow : Window
 
         // ── AMP ──
         var amp = Card(cards, "AMP ENVELOPE", 300);
-        AddGraph(amp, new EnvelopeGraph());
+        // ADSR, or an envelope drawn with points (as in FastTracker 2)
+        AddChoice(amp, new[] { "ADSR", "Points" }, new[] { "ADSR", "POINTS" },
+            i => i.Envelope.Count >= 2 ? "Points" : "ADSR", SetEnvelopeMode, "envelope mode", refreshPage: true);
+        var adsrGraph = new EnvelopeGraph();
+        AddGraph(amp, adsrGraph);
+        var pointEditor = new PointEnvelopeEditor();
+        pointEditor.Edit = change =>
+        {
+            int before = CurrentInstrument?.Envelope.Count ?? 0;
+            EditInstrument("envelope", change);
+            // A point added or taken away changes what the sustain and loop knobs can point at
+            if ((CurrentInstrument?.Envelope.Count ?? 0) != before) RefreshInstrumentPanel();
+        };
+        AddGraph(amp, pointEditor);
+        var pointKnobs = KnobRow(amp);
+        Knob? sustainKnob = null, loopStartKnob = null, loopEndKnob = null;
+        _instrumentRefresh.Add(() =>
+        {
+            int last = Math.Max(0, (CurrentInstrument?.Envelope.Count ?? 1) - 1);
+            foreach (var k in new[] { sustainKnob, loopStartKnob, loopEndKnob })
+                if (k != null) k.Maximum = last;
+        });
+        string PointName(double v) => v < 0 ? "OFF" : "P" + (v + 1).ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+        Knob LastKnob() => (Knob)((WrapPanel)pointKnobs.Children[0]).Children[^1];
+        AddKnob(pointKnobs, "SUSTAIN", -1, 24, i => i.EnvelopeSustain,
+            (i, v) => i.EnvelopeSustain = Math.Min((int)v, i.Envelope.Count - 1), "env sustain", step: 1);
+        sustainKnob = LastKnob();
+        sustainKnob.ValueText = PointName;
+        ToolTip.SetTip(sustainKnob, "The point a held note stays at until it is let go");
+        AddKnob(pointKnobs, "LOOP START", -1, 24, i => i.EnvelopeLoopStart, (i, v) =>
+        {
+            i.EnvelopeLoopStart = Math.Min((int)v, i.Envelope.Count - 1);
+            if (i.EnvelopeLoopStart < 0) i.EnvelopeLoopEnd = -1;
+            else if (i.EnvelopeLoopEnd < i.EnvelopeLoopStart) i.EnvelopeLoopEnd = i.EnvelopeLoopStart;
+        }, "env loop start", step: 1);
+        loopStartKnob = LastKnob();
+        loopStartKnob.ValueText = PointName;
+        AddKnob(pointKnobs, "LOOP END", -1, 24, i => i.EnvelopeLoopEnd, (i, v) =>
+        {
+            i.EnvelopeLoopEnd = Math.Min((int)v, i.Envelope.Count - 1);
+            if (i.EnvelopeLoopEnd < 0) i.EnvelopeLoopStart = -1;
+            else if (i.EnvelopeLoopStart < 0 || i.EnvelopeLoopStart > i.EnvelopeLoopEnd) i.EnvelopeLoopStart = i.EnvelopeLoopEnd;
+        }, "env loop end", step: 1);
+        loopEndKnob = LastKnob();
+        loopEndKnob.ValueText = PointName;
+        AddKnob(pointKnobs, "FADE OUT", 0, 20000, i => i.FadeOut, (i, v) => i.FadeOut = v, "fade out", "0", "ms", step: 10);
+        LastKnob().ValueText = v => v <= 0 ? "NONE" : v.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " ms";
+        ToolTip.SetTip(LastKnob(), "After the note is let go, the sound fades out over this time (NONE: it follows the envelope)");
         var adsr = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center };
         amp.Children.Add(adsr);
+        _instrumentRefresh.Add(() =>
+        {
+            bool points = CurrentInstrument?.Envelope.Count >= 2;
+            adsrGraph.IsVisible = adsr.IsVisible = !points;
+            pointEditor.IsVisible = pointKnobs.IsVisible = points;
+        });
         AddVSlider(adsr, "A", 1, 5000, true, i => i.Attack, (i, v) => i.Attack = v, "attack", "0", "ms");
         AddVSlider(adsr, "D", 1, 5000, true, i => i.Decay, (i, v) => i.Decay = v, "decay", "0", "ms");
         AddVSlider(adsr, "S", 0, 100, false, i => i.Sustain, (i, v) => i.Sustain = v, "sustain", "0", "%");
@@ -574,7 +627,7 @@ public partial class TrackerWindow : Window
 
     // A row of buttons for a choice (waves, filter type); they do not take the keyboard from the piano
     private void AddChoice(StackPanel panel, string[] values, string[] labels, Func<TrackerInstrument, string> get,
-        Action<TrackerInstrument, string> set, string key)
+        Action<TrackerInstrument, string> set, string key, bool refreshPage = false)
     {
         var row = new WrapPanel { Margin = new Thickness(0, 2, 0, 2) };
         var buttons = new Avalonia.Controls.Primitives.ToggleButton[values.Length];
@@ -587,6 +640,7 @@ public partial class TrackerWindow : Window
             {
                 EditInstrument(key, i => set(i, v));
                 for (int j = 0; j < buttons.Length; j++) buttons[j].IsChecked = buttons[j] == b;
+                if (refreshPage) RefreshInstrumentPanel();   // the choice shows other settings
             };
             buttons[k] = b;
             row.Children.Add(b);
@@ -617,6 +671,25 @@ public partial class TrackerWindow : Window
             check.IsEnabled = inst != null;
             check.IsChecked = inst != null && get(inst);
         });
+    }
+
+    // Points: an envelope like the ADSR to start from (ticks at the song's tempo); ADSR: the points go
+    private void SetEnvelopeMode(TrackerInstrument i, string mode)
+    {
+        if (mode != "Points")
+        {
+            i.Envelope.Clear();
+            i.EnvelopeSustain = i.EnvelopeLoopStart = i.EnvelopeLoopEnd = -1;
+            return;
+        }
+        if (i.Envelope.Count >= 2) return;
+        double tickMs = 2500.0 / Math.Clamp(_song.Tempo, 32, 255);
+        int Ticks(double ms) => Math.Max(1, (int)Math.Round(ms / tickMs));
+        int a = Ticks(i.Attack), d = a + Ticks(i.Decay), r = d + Ticks(i.Release);
+        int s = (int)Math.Round(Math.Clamp(i.Sustain, 0, 100) / 100 * 64);
+        i.Envelope = new List<TrackerEnvelopePoint> { new(0, 0), new(a, 64), new(d, s), new(r, 0) };
+        i.EnvelopeSustain = 2;
+        i.EnvelopeLoopStart = i.EnvelopeLoopEnd = -1;
     }
 
     // A card on the instrument page; returns the panel its rows go in
