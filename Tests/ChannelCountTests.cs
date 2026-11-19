@@ -64,9 +64,9 @@ public class ChannelCountTests : IDisposable
         string json = song.ToJson();
         var again = TrackerSong.FromJson(json);
         Assert.Equal(6, again.Channels);
-        Assert.Equal("A-4 01 ...", again.Patterns[0][0, 5].ToString());
+        Assert.Equal("A-4 01 .. ...", again.Patterns[0][0, 5].ToString());
         // Each row has exactly six cells in the file
-        Assert.Contains("\"--- .. ...|--- .. ...|--- .. ...|--- .. ...|--- .. ...|A-4 01 ...\"", json);
+        Assert.Contains("\"--- .. .. ...|--- .. .. ...|--- .. .. ...|--- .. .. ...|--- .. .. ...|A-4 01 .. ...\"", json);
     }
 
     [Theory]
@@ -149,7 +149,7 @@ public class ChannelCountTests : IDisposable
         w.KeyRelease(Key.Z, RawInputModifiers.None, PhysicalKey.None, null);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(7, pattern.CursorChannel);
-        Assert.Equal("C-4 01 ...", pattern.Song!.Patterns[0][0, 7].ToString());
+        Assert.Equal("C-4 01 .. ...", pattern.Song!.Patterns[0][0, 7].ToString());
         // Everything still fits: the pattern is not wider than the space it has
         Assert.True(pattern.PreferredWidth <= pattern.Bounds.Width + 1, $"{pattern.PreferredWidth} > {pattern.Bounds.Width}");
 

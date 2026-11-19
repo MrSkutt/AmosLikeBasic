@@ -50,10 +50,10 @@ public class TrackerEditorTests
         Press(w, Key.S);
         Press(w, Key.Q);
         Press(w, Key.D1);
-        Assert.Equal("C-4 01 ...", Cell(p, 0, 0));
-        Assert.Equal("C#4 01 ...", Cell(p, 1, 0));
-        Assert.Equal("C-5 01 ...", Cell(p, 2, 0));
-        Assert.Equal("=== .. ...", Cell(p, 3, 0));
+        Assert.Equal("C-4 01 .. ...", Cell(p, 0, 0));
+        Assert.Equal("C#4 01 .. ...", Cell(p, 1, 0));
+        Assert.Equal("C-5 01 .. ...", Cell(p, 2, 0));
+        Assert.Equal("=== .. .. ...", Cell(p, 3, 0));
         Assert.Equal(4, p.CursorRow);
         Close(w);
     }
@@ -64,7 +64,7 @@ public class TrackerEditorTests
         var (w, p) = Open();
         Press(w, Key.Z);
         Press(w, Key.Home);
-        for (int i = 0; i < 3; i++) Press(w, Key.Right);
+        for (int i = 0; i < 5; i++) Press(w, Key.Right);
         Press(w, Key.A);
         Press(w, Key.Up);
         Press(w, Key.Right);
@@ -72,7 +72,29 @@ public class TrackerEditorTests
         Press(w, Key.Up);
         Press(w, Key.Right);
         Press(w, Key.D4);
-        Assert.Equal("C-4 01 A04", Cell(p, 0, 0));
+        Assert.Equal("C-4 01 .. A04", Cell(p, 0, 0));
+        Close(w);
+    }
+
+    [AvaloniaFact]
+    public void HexDigitsWriteTheVolume()
+    {
+        var (w, p) = Open();
+        Press(w, Key.Z);
+        Press(w, Key.Home);
+        for (int i = 0; i < 3; i++) Press(w, Key.Right);   // the volume column
+        Press(w, Key.D3);
+        Press(w, Key.Up);
+        Press(w, Key.Right);
+        Press(w, Key.D2);
+        Assert.Equal("C-4 01 32 ...", Cell(p, 0, 0));
+        Press(w, Key.Up);
+        Press(w, Key.Left);
+        Press(w, Key.D7);                                   // above 40 is 40
+        Assert.Equal("C-4 01 40 ...", Cell(p, 0, 0));
+        Press(w, Key.Up);
+        Press(w, Key.Delete);
+        Assert.Equal("C-4 01 .. ...", Cell(p, 0, 0));
         Close(w);
     }
 
@@ -85,21 +107,21 @@ public class TrackerEditorTests
         Press(w, Key.Home);
         Press(w, Key.Down, RawInputModifiers.Shift);
         Press(w, Key.Up, RawInputModifiers.Meta | RawInputModifiers.Shift);
-        Assert.Equal("C-5 01 ...", Cell(p, 0, 0));
-        Assert.Equal("D-5 01 ...", Cell(p, 1, 0));
+        Assert.Equal("C-5 01 .. ...", Cell(p, 0, 0));
+        Assert.Equal("D-5 01 .. ...", Cell(p, 1, 0));
 
         Press(w, Key.C, RawInputModifiers.Meta);
         Press(w, Key.Tab);
         Press(w, Key.Home);
         Press(w, Key.V, RawInputModifiers.Meta);
-        Assert.Equal("C-5 01 ...", Cell(p, 0, 1));
+        Assert.Equal("C-5 01 .. ...", Cell(p, 0, 1));
 
         Press(w, Key.Z, RawInputModifiers.Meta);
-        Assert.Equal("--- .. ...", Cell(p, 0, 1));
+        Assert.Equal("--- .. .. ...", Cell(p, 0, 1));
         Press(w, Key.Z, RawInputModifiers.Meta);
-        Assert.Equal("C-4 01 ...", Cell(p, 0, 0));
+        Assert.Equal("C-4 01 .. ...", Cell(p, 0, 0));
         Press(w, Key.Z, RawInputModifiers.Meta | RawInputModifiers.Shift);
-        Assert.Equal("C-5 01 ...", Cell(p, 0, 0));
+        Assert.Equal("C-5 01 .. ...", Cell(p, 0, 0));
         Close(w);
     }
 
@@ -110,12 +132,12 @@ public class TrackerEditorTests
         Press(w, Key.Z);
         Press(w, Key.Home);
         Press(w, Key.I, RawInputModifiers.Meta);
-        Assert.Equal("--- .. ...", Cell(p, 0, 0));
-        Assert.Equal("C-4 01 ...", Cell(p, 1, 0));
+        Assert.Equal("--- .. .. ...", Cell(p, 0, 0));
+        Assert.Equal("C-4 01 .. ...", Cell(p, 1, 0));
         Press(w, Key.Back, RawInputModifiers.Meta);
-        Assert.Equal("C-4 01 ...", Cell(p, 0, 0));
+        Assert.Equal("C-4 01 .. ...", Cell(p, 0, 0));
         Press(w, Key.Back);
-        Assert.Equal("--- .. ...", Cell(p, 0, 0));
+        Assert.Equal("--- .. .. ...", Cell(p, 0, 0));
         Close(w);
     }
 
@@ -126,7 +148,7 @@ public class TrackerEditorTests
         Press(w, Key.Space);
         Assert.False(p.EditMode);
         Press(w, Key.Z);
-        Assert.Equal("--- .. ...", Cell(p, 0, 0));
+        Assert.Equal("--- .. .. ...", Cell(p, 0, 0));
         Close(w);
     }
 
@@ -137,7 +159,7 @@ public class TrackerEditorTests
         w.LoadFile(Repo.PathOf("Sound/Tracker/forest_song.amostrk"));
         Dispatcher.UIThread.RunJobs();
         Assert.Equal("Tracker - forest_song.amostrk", w.Title);
-        Assert.Equal("G-5 01 ...", Cell(p, 0, 0));
+        Assert.Equal("G-5 01 .. ...", Cell(p, 0, 0));
         Close(w);
     }
 }

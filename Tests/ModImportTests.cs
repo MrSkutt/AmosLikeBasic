@@ -82,7 +82,7 @@ public class ModImportTests : IDisposable
         Assert.True(File.Exists(inst.Sample));
 
         var p = song.Patterns[0];
-        Assert.Equal("C-4 01 C20", p[0, 0].ToString());
+        Assert.Equal("C-4 01 .. C20", p[0, 0].ToString());
         Assert.Equal(72, p[1, 0].Note);                    // an octave up
         Assert.Equal('1', p[1, 0].Effect);
         Assert.InRange(p[1, 0].Param, 2, 4);                // 2 periods at period 214 ≈ 0.16 semitone ≈ 3 sixteenths
@@ -212,14 +212,15 @@ public class ModImportTests : IDisposable
             c[0, 0] = (37, 1, 0x30, 0, 0);       // C-3, the low sample, volume 20 from the volume column
             c[1, 0] = (61, 0, 0, 1, 8);          // C-5 without an instrument: the high sample; slide up 8
             c[2, 0] = (97, 0, 0, 0, 0);          // key off
-            c[0, 1] = (49, 1, 0x18, 0, 0x37);    // C-4 (the high sample), volume 8 and an arpeggio: a copy
+            c[0, 1] = (49, 1, 0x18, 0, 0x37);    // C-4 (the high sample), volume 8 and an arpeggio
+            c[1, 1] = (0, 0, 0x65, 0, 0);        // volume slide down 5 (in the effect column)
             c[3, 1] = (0, 0, 0, 0x10, 0x20);     // Gxx (global volume) is not in the tracker
         });
 
         var r = XmImport.Import(xm, "tiny", _temp, _temp);
         var song = r.Song;
         Assert.Equal(("tiny xm", 6, 125), (song.Title, song.Speed, song.Tempo));
-        Assert.Equal(new[] { "lead low", "lead high", "lead high vol 08" }, song.Instruments.Select(i => i.Name));
+        Assert.Equal(new[] { "lead low", "lead high" }, song.Instruments.Select(i => i.Name));
 
         var low = song.Instruments[0];
         Assert.Equal((60, 48, 0, 16), (low.SampleNote, low.DefaultVolume, low.LoopStart, low.LoopEnd));
@@ -235,11 +236,11 @@ public class ModImportTests : IDisposable
         Assert.Equal(wav.Data[10], wav.Data[12], 3);              // and back again
 
         var p = song.Patterns[0];
-        Assert.Equal("C-3 01 C20", p[0, 0].ToString());
+        Assert.Equal("C-3 01 20 ...", p[0, 0].ToString());
         Assert.Equal((72, 2, '1', 8), (p[1, 0].Note, p[1, 0].Instrument, p[1, 0].Effect, p[1, 0].Param));
         Assert.Equal(TrackerCell.NoteOff, p[2, 0].Note);
-        Assert.Equal((60, 3, '0', 0x37), (p[0, 1].Note, p[0, 1].Instrument, p[0, 1].Effect, p[0, 1].Param));
-        Assert.Equal(8, song.Instruments[2].DefaultVolume);
+        Assert.Equal("C-4 02 08 037", p[0, 1].ToString());
+        Assert.Equal("--- .. .. A05", p[1, 1].ToString());
         Assert.Contains(r.Notes, n => n.Contains("Gxx"));
     }
 }

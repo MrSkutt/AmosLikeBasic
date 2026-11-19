@@ -350,7 +350,7 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **Entering notes.** The keyboard works like a piano, as in ProTracker. The bottom row of letters (`Z S X D C V G B H N J M`) is one octave and the top row (`Q 2 W 3 E R 5 T 6 Y 7 U I`) the next. The note gets the instrument selected in the list, and you hear it while you hold the key. `1` lets go of the note (`===`). After each note the cursor moves down as many rows as **Step** says. **Octave** chooses which octave the piano starts on, and `F1` and `F2` change the octave.
 
-**Instruments and effects.** With the arrow keys the cursor goes to the instrument and effect columns. There you type digits and letters directly: `0`–`9` and `A`–`F` for hex digits, and in the first column of the effect also `G`, `H` and `I`. `Delete` or `Backspace` clears whatever the cursor is on.
+**Instruments, volume and effects.** With the arrow keys the cursor goes to the instrument, volume and effect columns. There you type digits and letters directly: `0`–`9` and `A`–`F` for hex digits, and in the first column of the effect also `G`, `H` and `I`. `Delete` or `Backspace` clears whatever the cursor is on.
 
 **Playing.** `F5` plays the song from the place selected in the order list. `F6` plays the pattern over and over, `F7` plays the pattern from the cursor row and `Esc` stops. With **Follow** the pattern follows along while the song plays. Click a channel's oscilloscope (or its heading) to mute the channel, and right-click to hear only that channel (solo); right-click it again and all are heard. A muted channel's oscilloscope says MUTE, and the one heard alone says SOLO.
 
@@ -389,13 +389,15 @@ A song has three parts:
 
 The tempo is set by two numbers. **Speed** is how many *ticks* each row lasts, and **tempo** how fast the ticks come: 125 gives 50 ticks a second. With speed 6 and four rows per beat, the tempo is the same number as the beats per minute, so speed 6 and tempo 136 is 136 BPM.
 
-A cell is written as note, instrument and effect:
+A cell is written as note, instrument, volume and effect:
 
 ```text
-C-4 01 A04
+C-4 01 30 A04
 ```
 
-That means C in the fourth octave, instrument 01, and effect `A04` (the volume goes down). `---` is no new note, `===` lets go of the note, and `..` and `...` are empty. A note keeps sounding until a new note or `===` comes.
+That means C in the fourth octave, instrument 01, volume 30, and effect `A04` (the volume goes down). `---` is no new note, `===` lets go of the note, and `..` and `...` are empty. A note keeps sounding until a new note or `===` comes.
+
+The **volume column** sets the channel's volume on the row, `00` – `40` (hex, 40 is full volume), as the effect `Cxx` does, but it leaves the effect column free for something else: a note can start quietly *and* have an arpeggio. A volume written on a row without a note changes the volume of the note that sounds. Typing a first digit above 4 gives 40. An effect `Cxx` on the same row wins over the volume column. Songs saved before the volume column (with three parts in each cell, `C-4 01 A04`) are read as before.
 
 ### Effects
 
@@ -506,8 +508,8 @@ The file is JSON, so it can be opened in an ordinary text editor. Each row of a 
   "Order": [0, 1, 2, 3],
   "Patterns": [
     [
-      "G-5 01 ...|G-2 03 G5D|G-3 04 047|C-7 0B ...",
-      "--- .. ...|=== .. ...|--- .. 047|--- .. ...",
+      "G-5 01 .. ...|G-2 03 30 G5D|G-3 04 .. 047|C-7 0B .. ...",
+      "--- .. .. ...|=== .. .. ...|--- .. .. 047|--- .. .. ...",
       ...
     ]
   ]
@@ -528,7 +530,7 @@ A few things differ from the originals, and the status line says what a module u
 - A slide is turned into sixteenths of a semitone where it starts, so in Amiga-style songs a very long slide can end slightly off.
 - An XM instrument with several samples over the keys becomes one instrument per sample, and a note gets the one its key plays.
 - XM's volume envelope becomes the ADSR, and the fadeout part of the release; an envelope that loops is held still instead.
-- XM's volume column goes into the effect column. When both are used, a volume for a new note becomes a copy of the instrument that starts at that volume (named for example "Bass vol 20"); other volume column entries are left out.
+- A volume in XM's volume column goes in the tracker's volume column. Its other commands (volume slides, vibrato, pan and glide) go in the effect column when that is free, and are left out when it is not.
 - The tracker plays at most 8 channels, so of an XM with more, the first 8 that play something are kept.
 
 S3M and IT files cannot be read into the tracker, but `MUSIC PLAY` plays them.

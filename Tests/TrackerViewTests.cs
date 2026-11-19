@@ -78,7 +78,7 @@ public class TrackerViewTests : IDisposable
         Assert.Equal(3, pattern.Instrument);
         Assert.True(pattern.IsFocused, "the pattern has the focus again");
         Press(w, Key.Z);   // and a note can be typed straight away, with the new instrument
-        Assert.Equal("C-4 03 ...", pattern.Song!.Patterns[pattern.PatternIndex][0, 0].ToString());
+        Assert.Equal("C-4 03 .. ...", pattern.Song!.Patterns[pattern.PatternIndex][0, 0].ToString());
         Close(w);
     }
 
@@ -116,7 +116,7 @@ public class TrackerViewTests : IDisposable
         Dispatcher.UIThread.RunJobs();
 
         Assert.True(scope.Max(Math.Abs) > 0.01, "the instrument sounds");
-        Assert.Equal("--- .. ...", pattern.Song!.Patterns[pattern.PatternIndex][0, 0].ToString());
+        Assert.Equal("--- .. .. ...", pattern.Song!.Patterns[pattern.PatternIndex][0, 0].ToString());
         Close(w);
     }
 

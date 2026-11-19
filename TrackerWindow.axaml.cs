@@ -1135,7 +1135,7 @@ public partial class TrackerWindow : Window
                 var cell = pat[r, c];
                 if (cell.Instrument < n) continue;
                 int inst = cell.Instrument == n ? 0 : cell.Instrument - 1;
-                pat[r, c] = new TrackerCell(cell.Note, inst, cell.Effect, cell.Param);
+                pat[r, c] = new TrackerCell(cell.Note, inst, cell.Effect, cell.Param, cell.Volume);
             }
         Pattern.Instrument = Math.Min(n, _song.Instruments.Count);
         RefreshInstrumentList();

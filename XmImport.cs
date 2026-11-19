@@ -11,9 +11,9 @@ namespace AmosLikeBasic;
 //  - an instrument can have several samples over the keys; each sample becomes its own instrument,
 //    and a note gets the one its key plays;
 //  - the volume envelope becomes an ADSR, and the fadeout part of the release;
-//  - the volume column goes into the effect column when that is free; a volume for a new note
-//    when it is not becomes a copy of the instrument that starts at that volume, and a volume
-//    slide with a glide or vibrato that carries on becomes 5xy or 6xy;
+//  - a volume in the volume column goes in the tracker's volume column; its other commands (slides,
+//    vibrato, pan, glide) go in the effect column when that is free, and a volume slide with a
+//    glide or vibrato that carries on becomes 5xy or 6xy;
 //  - ping-pong loops are played forwards and backwards in the WAV file, so they sound the same.
 // The notes are kept: XM's C-4 is C-4 here, and a sample with no relative note plays at 8363 Hz there.
 public static class XmImport
@@ -229,7 +229,6 @@ public static class XmImport
         int volumeLost = 0;
         var shared = new Shared { Speed = speed };
         var state = used.Select(_ => new ChannelState { Song = shared }).ToArray();
-        var copies = new Dictionary<(int, int), int>();
         var converted = new TrackerPattern?[Math.Max(patternCount, 1)];
         foreach (int p in order.Concat(Enumerable.Range(0, patternCount)).Where(p => p < patternCount))
         {
@@ -238,7 +237,7 @@ public static class XmImport
             var pattern = new TrackerPattern(cells.GetLength(0));
             for (int r = 0; r < cells.GetLength(0); r++)
                 for (int c = 0; c < used.Count; c++)
-                    pattern[r, c] = Convert(cells[r, used[c]], state[c], instruments, linear, skipped, ref volumeLost, song, copies);
+                    pattern[r, c] = Convert(cells[r, used[c]], state[c], instruments, linear, skipped, ref volumeLost);
             converted[p] = pattern;
         }
         song.Patterns.Clear();
@@ -247,7 +246,7 @@ public static class XmImport
         song.Order.AddRange(order.Select(p => p < song.Patterns.Count ? p : song.Patterns.Count - 1));
 
         if (skipped.Count > 0) notes.Add("Effects the tracker does not have were left out: " + string.Join(", ", skipped) + ".");
-        if (volumeLost > 0) notes.Add($"{volumeLost} volume column entries were left out, where the effect column was taken.");
+        if (volumeLost > 0) notes.Add($"{volumeLost} volume column slides were left out, where the effect column was taken.");
         return new ModImport.Result(song, song.Instruments.Count, notes);
     }
 
@@ -293,7 +292,7 @@ public static class XmImport
     }
 
     private static TrackerCell Convert(Cell x, ChannelState ch, List<Instrument> instruments, bool linear,
-        ISet<string> skipped, ref int volumeLost, TrackerSong song, Dictionary<(int, int), int> copies)
+        ISet<string> skipped, ref int volumeLost)
     {
         bool glide = x.Effect is 3 or 5 || (x.Volume >> 4) == 0xF;
         int note = TrackerCell.NoNote, inst = 0;
@@ -328,36 +327,22 @@ public static class XmImport
         if (x.Effect == 0xF && x.Param is > 0 and < 0x20) ch.Song.Speed = x.Param;
         if (x.Effect == 0x14 && x.Param == 0 && note == TrackerCell.NoNote) { note = TrackerCell.NoteOff; (eff, prm) = ('\0', 0); }
 
-        // The volume column, where the effect column is free
-        if (x.Volume >= 0x10)
+        // The volume column: a volume stays there, the rest goes where the effect column is free
+        int volume = TrackerCell.NoVolume;
+        if (x.Volume is >= 0x10 and <= 0x50)
+            volume = x.Volume - 0x10;
+        else if (x.Volume > 0x50)
         {
             var (veff, vprm) = VolumeColumn(x.Volume, ch, linear);
             if (veff != '\0')
             {
                 if (eff == '\0') (eff, prm) = (veff, vprm);
                 else if (veff == 'A' && x.Param == 0 && eff is '3' or '4') eff = eff == '3' ? '5' : '6';
-                else if (veff == 'C' && note >= 0 && (inst > 0 ? inst : ch.Emitted) is var of && of > 0
-                         && WithVolume(song, copies, of, vprm) is var copy && copy > 0)
-                    inst = copy;
                 else volumeLost++;
             }
             else skipped.Add("volume column " + ((x.Volume >> 4) == 0xD ? "pan slide left" : "pan slide right"));
         }
-        return new TrackerCell(note, inst, eff, prm);
-    }
-
-    // A copy of an instrument that starts at another volume (0 if there is no room for more)
-    private static int WithVolume(TrackerSong song, Dictionary<(int, int), int> copies, int of, int volume)
-    {
-        var original = song.Instruments[of - 1];
-        if (original.DefaultVolume == volume) return of;
-        if (copies.TryGetValue((of, volume), out int n)) return n;
-        if (song.Instruments.Count >= MaxInstruments) return 0;
-        var copy = InstrumentLibrary.Copy(original);
-        copy.DefaultVolume = volume;
-        copy.Name = $"{original.Name} vol {volume:X2}";
-        song.Instruments.Add(copy);
-        return copies[(of, volume)] = song.Instruments.Count;
+        return new TrackerCell(note, inst, eff, prm, volume);
     }
 
     private static (char, int) VolumeColumn(int v, ChannelState ch, bool linear)
@@ -365,8 +350,6 @@ public static class XmImport
         int x = v >> 4, y = v & 15;
         switch (x)
         {
-            case >= 1 and <= 4: return ('C', v - 0x10);
-            case 5: return v == 0x50 ? ('C', 0x40) : ('\0', 0);
             case 6: return ('A', y);
             case 7: return ('A', y << 4);
             case 8: return ('E', 0xB0 | y);

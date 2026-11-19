@@ -624,4 +624,29 @@ public class SynthTests : IDisposable
         Render(0.3);
         Assert.True(S.IsTrackPlaying());
     }
+
+    [Fact]
+    public void TheVolumeColumnSetsTheVolume()
+    {
+        // 20 (hex) is half of 40, as C20 is
+        S.TrackPlay(SongWith("", "A-4 01 .. ..."), loop: false);
+        double full = Loudness(Render(0.1), 0.03, 0.1);
+        S.TrackPlay(SongWith("", "A-4 01 20 ..."), loop: false);
+        double half = Loudness(Render(0.1), 0.03, 0.1);
+        S.TrackPlay(SongWith("", "A-4 01 .. C20"), loop: false);
+        double effect = Loudness(Render(0.1), 0.03, 0.1);
+        Assert.InRange(half / full, 0.45, 0.55);
+        Assert.InRange(half / effect, 0.97, 1.03);
+    }
+
+    [Fact]
+    public void CellsWithAndWithoutTheVolumeColumnAreRead()
+    {
+        Assert.Equal(TrackerCell.Parse("C-4 01 A04"), TrackerCell.Parse("C-4 01 .. A04"));   // songs from before it
+        var c = TrackerCell.Parse("C-4 01 3F A04");
+        Assert.Equal((60, 1, 0x3F, 'A', 4), (c.Note, c.Instrument, c.Volume, c.Effect, c.Param));
+        Assert.Equal("C-4 01 3F A04", c.ToString());
+        Assert.Equal(TrackerCell.NoVolume, default(TrackerCell).Volume);
+        Assert.Throws<FormatException>(() => TrackerCell.Parse("C-4 01 41 ..."));
+    }
 }

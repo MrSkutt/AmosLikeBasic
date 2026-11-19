@@ -8,18 +8,18 @@ using Avalonia.Media;
 
 namespace AmosLikeBasic;
 
-// The pattern in the tracker: four channels with note, instrument and effect per row.
+// The pattern in the tracker: four to eight channels with note, instrument, volume and effect per row.
 // The cursor row stays still in the middle of the view and the pattern scrolls past, as in ProTracker.
 public class PatternView : Control
 {
-    // Columns in a channel: note, instrument (two digits), effect, parameter (two digits)
-    private const int ColNote = 0, ColInstHi = 1, ColInstLo = 2, ColEffect = 3, ColParamHi = 4, ColParamLo = 5;
-    private const int ColumnsPerChannel = 6;
+    // Columns in a channel: note, instrument (two digits), volume (two digits), effect, parameter (two digits)
+    private const int ColNote = 0, ColInstHi = 1, ColInstLo = 2, ColVolHi = 3, ColVolLo = 4, ColEffect = 5, ColParamHi = 6, ColParamLo = 7;
+    private const int ColumnsPerChannel = 8;
 
-    // Character position of each column within the cell "C-4 01 A04"
-    private static readonly int[] ColumnChar = { 0, 4, 5, 7, 8, 9 };
-    private static readonly int[] ColumnWidth = { 3, 1, 1, 1, 1, 1 };
-    private const int CellChars = 10;
+    // Character position of each column within the cell "C-4 01 40 A04"
+    private static readonly int[] ColumnChar = { 0, 4, 5, 7, 8, 10, 11, 12 };
+    private static readonly int[] ColumnWidth = { 3, 1, 1, 1, 1, 1, 1, 1 };
+    private const int CellChars = 13;
     private const int ChannelGapChars = 2;
     private const int RowNumberChars = 4;
 
@@ -235,6 +235,7 @@ public class PatternView : Control
         var dim = new SolidColorBrush(Color.FromArgb(110, 160, 160, 160));
         var instBrush = title;
         var effBrush = label;
+        var volBrush = new SolidColorBrush(Color.FromRgb(70, 190, 110));
 
         var (s0, s1, sc0, sc1) = HasSelection ? SelectionOrCursor() : (-1, -1, -1, -1);
 
@@ -265,7 +266,8 @@ public class PatternView : Control
                 string eff = cell.Effect == '\0' ? "..." : cell.Effect + cell.Param.ToString("X2", CultureInfo.InvariantCulture);
                 ctx.DrawText(Text(note, muted || cell.Note == TrackerCell.NoNote ? dim : fg), new Point(x, y + 1));
                 ctx.DrawText(Text(inst, muted || cell.Instrument == 0 ? dim : instBrush), new Point(x + 4 * _charW, y + 1));
-                ctx.DrawText(Text(eff, muted || cell.Effect == '\0' ? dim : effBrush), new Point(x + 7 * _charW, y + 1));
+                ctx.DrawText(Text(cell.VolumeText, muted || cell.Volume < 0 ? dim : volBrush), new Point(x + 7 * _charW, y + 1));
+                ctx.DrawText(Text(eff, muted || cell.Effect == '\0' ? dim : effBrush), new Point(x + 10 * _charW, y + 1));
             }
         }
 
@@ -587,7 +589,7 @@ public class PatternView : Control
     {
         var c = Cell;
         int inst = note >= 0 ? Instrument : c.Instrument;
-        Cell = new TrackerCell(note, inst, c.Effect, c.Param);
+        Cell = new TrackerCell(note, inst, c.Effect, c.Param, c.Volume);
     });
 
     private void SetHexDigit(int digit) => Change(() =>
@@ -595,17 +597,20 @@ public class PatternView : Control
         var c = Cell;
         switch (CursorColumn)
         {
-            case ColInstHi: Cell = new TrackerCell(c.Note, digit * 16 + c.Instrument % 16, c.Effect, c.Param); break;
-            case ColInstLo: Cell = new TrackerCell(c.Note, c.Instrument / 16 * 16 + digit, c.Effect, c.Param); break;
-            case ColParamHi: Cell = new TrackerCell(c.Note, c.Instrument, c.Effect == '\0' ? '0' : c.Effect, digit * 16 + c.Param % 16); break;
-            case ColParamLo: Cell = new TrackerCell(c.Note, c.Instrument, c.Effect == '\0' ? '0' : c.Effect, c.Param / 16 * 16 + digit); break;
+            case ColInstHi: Cell = new TrackerCell(c.Note, digit * 16 + c.Instrument % 16, c.Effect, c.Param, c.Volume); break;
+            case ColInstLo: Cell = new TrackerCell(c.Note, c.Instrument / 16 * 16 + digit, c.Effect, c.Param, c.Volume); break;
+            // The volume goes up to 40 (hex): a first digit above 4 is taken as 4
+            case ColVolHi: Cell = c.WithVolume(Math.Min(64, Math.Min(digit, 4) * 16 + (c.Volume < 0 || digit >= 4 ? 0 : c.Volume % 16))); break;
+            case ColVolLo: Cell = c.WithVolume(Math.Min(64, (c.Volume < 0 ? 0 : c.Volume / 16 * 16) + digit)); break;
+            case ColParamHi: Cell = new TrackerCell(c.Note, c.Instrument, c.Effect == '\0' ? '0' : c.Effect, digit * 16 + c.Param % 16, c.Volume); break;
+            case ColParamLo: Cell = new TrackerCell(c.Note, c.Instrument, c.Effect == '\0' ? '0' : c.Effect, c.Param / 16 * 16 + digit, c.Volume); break;
         }
     });
 
     private void SetEffectChar(char ch) => Change(() =>
     {
         var c = Cell;
-        Cell = new TrackerCell(c.Note, c.Instrument, ch, c.Param);
+        Cell = new TrackerCell(c.Note, c.Instrument, ch, c.Param, c.Volume);
     });
 
     private void ClearField() => Change(() =>
@@ -613,9 +618,10 @@ public class PatternView : Control
         var c = Cell;
         Cell = CursorColumn switch
         {
-            ColNote => new TrackerCell(TrackerCell.NoNote, 0, c.Effect, c.Param),
-            ColInstHi or ColInstLo => new TrackerCell(c.Note, 0, c.Effect, c.Param),
-            _ => new TrackerCell(c.Note, c.Instrument, '\0', 0)
+            ColNote => new TrackerCell(TrackerCell.NoNote, 0, c.Effect, c.Param, c.Volume),
+            ColInstHi or ColInstLo => new TrackerCell(c.Note, 0, c.Effect, c.Param, c.Volume),
+            ColVolHi or ColVolLo => c.WithVolume(TrackerCell.NoVolume),
+            _ => new TrackerCell(c.Note, c.Instrument, '\0', 0, c.Volume)
         };
     });
 
@@ -675,7 +681,7 @@ public class PatternView : Control
                 var cell = Pattern![r, c];
                 if (cell.Note < 0) continue;
                 int n = Math.Clamp(cell.Note + semis, 0, 119);
-                Pattern![r, c] = new TrackerCell(n, cell.Instrument, cell.Effect, cell.Param);
+                Pattern![r, c] = new TrackerCell(n, cell.Instrument, cell.Effect, cell.Param, cell.Volume);
             }
         });
     }

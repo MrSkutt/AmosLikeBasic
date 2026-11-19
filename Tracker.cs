@@ -284,23 +284,31 @@ namespace AmosLikeBasic
     {
         public const int NoNote = -1;
         public const int NoteOff = -2;
+        public const int NoVolume = -1;
 
         public readonly int Note;        // MIDI number (A-4 = 69), NoNote or NoteOff
         public readonly int Instrument;  // 1 – 255, 0 = none
         public readonly char Effect;     // '0' – '9', 'A' – 'Z', '\0' = none
         public readonly int Param;       // 0 – 255
+        // The volume column: the volume the channel gets on the row, 0 – 64 (0x40), or NoVolume.
+        // Kept as one more, so that a cell that is all zeros (default) has none.
+        private readonly int _volume;
+        public int Volume => _volume - 1;
 
         public static readonly TrackerCell Empty = new(NoNote, 0, '\0', 0);
 
-        public TrackerCell(int note, int instrument, char effect, int param)
+        public TrackerCell(int note, int instrument, char effect, int param, int volume = NoVolume)
         {
             Note = note;
             Instrument = instrument;
             Effect = effect;
             Param = param;
+            _volume = volume < 0 ? 0 : Math.Min(volume, 64) + 1;
         }
 
-        public bool IsEmpty => Note == NoNote && Instrument == 0 && Effect == '\0';
+        public TrackerCell WithVolume(int volume) => new(Note, Instrument, Effect, Param, volume);
+
+        public bool IsEmpty => Note == NoNote && Instrument == 0 && Effect == '\0' && Volume == NoVolume;
 
         private static readonly string[] NoteNames = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" };
 
@@ -324,10 +332,23 @@ namespace AmosLikeBasic
             return (text[2] - '0' + 1) * 12 + semi;
         }
 
+        // "C-4 01 40 A04": note, instrument, volume and effect. Songs from before the volume column
+        // have three parts, "C-4 01 A04".
         public static TrackerCell Parse(string text)
         {
             var parts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             int note = parts.Length > 0 ? ParseNote(parts[0]) : NoNote;
+
+            int volume = NoVolume;
+            if (parts.Length > 3)
+            {
+                if (parts[2].Trim('.', '-').Length > 0)
+                {
+                    if (parts[2].Length != 2 || !int.TryParse(parts[2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out volume) || volume > 64)
+                        throw new FormatException($"'{parts[2]}' is not a volume (two hex digits, 00 – 40)");
+                }
+                parts = new[] { parts[0], parts[1], parts[3] };
+            }
 
             int inst = 0;
             if (parts.Length > 1 && parts[1].Trim('.', '-').Length > 0 &&
@@ -345,18 +366,20 @@ namespace AmosLikeBasic
                 effect = e[0];
                 if (effect == '0' && param == 0) effect = '\0';
             }
-            return new TrackerCell(note, Math.Clamp(inst, 0, 255), effect, param);
+            return new TrackerCell(note, Math.Clamp(inst, 0, 255), effect, param, volume);
         }
+
+        public string VolumeText => Volume == NoVolume ? ".." : Volume.ToString("X2", CultureInfo.InvariantCulture);
 
         public override string ToString()
         {
             string inst = Instrument == 0 ? ".." : Instrument.ToString("X2", CultureInfo.InvariantCulture);
             string eff = Effect == '\0' ? "..." : Effect + Param.ToString("X2", CultureInfo.InvariantCulture);
-            return $"{NoteName(Note)} {inst} {eff}";
+            return $"{NoteName(Note)} {inst} {VolumeText} {eff}";
         }
 
-        public bool Equals(TrackerCell o) => Note == o.Note && Instrument == o.Instrument && Effect == o.Effect && Param == o.Param;
+        public bool Equals(TrackerCell o) => Note == o.Note && Instrument == o.Instrument && Effect == o.Effect && Param == o.Param && _volume == o._volume;
         public override bool Equals(object? obj) => obj is TrackerCell o && Equals(o);
-        public override int GetHashCode() => HashCode.Combine(Note, Instrument, Effect, Param);
+        public override int GetHashCode() => HashCode.Combine(Note, Instrument, Effect, Param, _volume);
     }
 }

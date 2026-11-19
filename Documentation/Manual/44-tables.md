@@ -112,7 +112,7 @@ Drum sounds on a channel with `PLAY WAVE channel, "Drums"`:
 | `Z S X D C V G B H N J M` | notes, one octave |
 | `Q 2 W 3 E R 5 T 6 Y 7 U I` | notes, the octave above |
 | `1` | let go of the note (`===`) |
-| `0`–`9`, `A`–`F` | hex digits in the instrument and effect columns |
+| `0`–`9`, `A`–`F` | hex digits in the instrument, volume and effect columns |
 | `Delete`, `Backspace` | clears whatever the cursor is on, or the selection |
 | `Space` | edit mode on or off; stops the song if it is playing |
 | `F1`, `F2` | octave down or up |

@@ -709,6 +709,7 @@ namespace AmosLikeBasic
                     ch.InstNumber = cell.Instrument;
                     ch.Vol = inst.DefaultVolume;
                 }
+                if (cell.Volume >= 0) ch.Vol = cell.Volume;   // the volume column; a C effect on the row wins
 
                 if (cell.Note == TrackerCell.NoteOff)
                     ReleaseTrackVoice(c);
