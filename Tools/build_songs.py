@@ -7,6 +7,9 @@ second oscillator and the LFOs:
     Sound/Tracker/acid_sunrise.amostrk   acid techno: a filter-swept acid bass, supersaw lead, 808 drums
     Sound/Tracker/deep_space.amostrk     ambient: space drone, glass pad, music box, UFO sounds
     Sound/Tracker/pixel_rush.amostrk     fast chiptune: C64 lead, chord arpeggios, NES bass, trills
+    Sound/Tracker/steel_sprint.amostrk   in the style of 1980s C64 game music: a bouncing octave bass,
+                                         fast chord arpeggios, a gliding PWM lead, four channels
+    Sound/Tracker/glass_labyrinth.amostrk  the same style, slower and mysterious, with echo
 
 A row is a sixteenth note; 16 rows make a bar and a pattern is four bars (64 rows).
 """
@@ -341,8 +344,140 @@ def pixel_rush():
     return song("Pixel Rush", 6, 150, I, [intro, run, verse, chorus, bridge], [0, 1, 2, 3, 2, 3, 4, 3], level=0.66)
 
 
+# ════════════════════════════════════════════════════════════════════════
+#  In the style of 1980s C64 game music (original tunes): four channels as close to the
+#  SID's three voices as the tracker goes - lead, a bass that jumps octaves, chord arpeggios
+#  and a drum channel. The lead glides into notes (effect 3) and gets vibrato on long ones.
+# ════════════════════════════════════════════════════════════════════════
+def c64_bass(p, ch, inst, roots, steps="R.ROR.ORR.RO.RFO"):
+    """The bouncing bass: root, octave up and fifth in sixteenths."""
+    for bar, root in enumerate(roots):
+        r = n(root)
+        for i, step in enumerate(steps):
+            if step != ".":
+                p.play(bar * 16 + i, ch, r + {"R": 0, "O": 12, "F": 7}[step], inst)
+
+
+def c64_drums(p, ch, kick, snare, hat, steps):
+    """One channel for all drums: K kick, S snare, H hi-hat, a 16 character bar."""
+    which = {"K": kick, "S": snare, "H": hat}
+    for bar in range(4):
+        for i, step in enumerate(steps):
+            if step in which:
+                p.put(bar * 16 + i, ch, "C-4", which[step])
+
+
+def chord_arps(p, ch, chords):
+    """A chord per half bar as an arpeggio: (root, instrument) for each bar."""
+    for bar, (root, inst) in enumerate(chords):
+        p.play(bar * 16, ch, n(root), inst)
+        p.play(bar * 16 + 8, ch, n(root), inst)
+
+
+def steel_sprint():
+    I = [
+        load("Chip", "C64 Lead", Volume=0.2, EchoMix=15, EchoSyncRows=3, EchoFeedback=25),    # 1
+        load("Bass", "C64 Bass", Volume=0.24, Decay=90, Sustain=40),                         # 2
+        load("Chip", "Minor Chord", Volume=0.1, Pan=-25),                                   # 3
+        load("Chip", "Major Chord", Volume=0.1, Pan=-25),                                   # 4
+        load("Drums", "Kick", Volume=0.4),                                                  # 5
+        load("Drums", "Snare", Volume=0.28),                                                # 6
+        load("Drums", "Closed Hihat", Volume=0.13, Pan=25),                                 # 7
+    ]
+    verse_chords = [("A-4", 3), ("A-4", 3), ("F-4", 4), ("G-4", 4)]
+    turn_chords = [("A-4", 3), ("A-4", 3), ("D-4", 3), ("E-4", 4)]   # E major pulls back to A minor
+    beat = "K.H.S.HKK.HKS.HH"
+
+    def base(p, chords, bass_roots):
+        c64_bass(p, 1, 2, bass_roots)
+        chord_arps(p, 2, chords)
+        c64_drums(p, 3, 5, 6, 7, beat)
+
+    tune_a = [(0, "A-4"), (3, "C-5"), (6, "E-5"), (8, "A-5"), (12, "G-5"), (14, "E-5"),
+              (16, "D-5"), (18, "E-5"), (20, "C-5"), (24, "A-4"), (28, "B-4"), (30, "C-5"),
+              (32, "C-5"), (35, "F-5"), (38, "A-5"), (40, "G-5"), (44, "F-5"), (46, "E-5"),
+              (48, "D-5"), (52, "B-4"), (56, "G-4"), (60, "B-4"), (62, "D-5")]
+    tune_b = [(0, "E-5"), (2, "A-5"), (4, "B-5"), (6, "C-6"), (8, "B-5"), (10, "A-5"), (12, "E-5"),
+              (16, "A-5"), (20, "G-5"), (22, "F-5"), (24, "E-5"), (28, "C-5"),
+              (32, "D-5"), (34, "F-5"), (36, "A-5"), (40, "D-6"), (44, "C-6"), (46, "A-5"),
+              (48, "G#5"), (52, "B-5"), (56, "E-6"), (60, "D-6"), (62, "B-5")]
+
+    def lead(p, tune, glides):
+        melody(p, 0, 1, tune)
+        for row in glides:   # glide into these notes instead of striking them
+            p.fx(row, 0, "318")
+
+    intro = Pattern(4)
+    c64_bass(intro, 1, 2, ["A-2", "A-2", "F-2", "G-2"])
+    c64_drums(intro, 3, 5, 6, 7, "K...S...K.K.S.HH")
+
+    verse = Pattern(4)
+    base(verse, verse_chords, ["A-2", "A-2", "F-2", "G-2"])
+    lead(verse, tune_a, (8, 38))
+
+    turn = Pattern(4)
+    base(turn, turn_chords, ["A-2", "A-2", "D-2", "E-2"])
+    lead(turn, tune_b, (8, 40, 56))
+
+    # A break: the arpeggio and the bass alone, the drums only on the beat, the lead holding long notes
+    bridge = Pattern(4)
+    c64_bass(bridge, 1, 2, ["F-2", "G-2", "E-2", "E-2"], steps="R...O...R...O.F.")
+    chord_arps(bridge, 2, [("F-4", 4), ("G-4", 4), ("E-4", 4), ("E-4", 4)])
+    c64_drums(bridge, 3, 5, 6, 7, "K.......S.......")
+    melody(bridge, 0, 1, [(0, "A-5"), (16, "B-5"), (32, "G#5"), (48, "B-5"), (56, "E-6"), (62, "===")])
+
+    return song("Steel Sprint", 6, 150, I, [intro, verse, turn, bridge],
+                [0, 1, 2, 1, 2, 3, 1, 2], channels=4, level=0.85)
+
+
+def glass_labyrinth():
+    I = [
+        load("Lead", "Square Lead", Volume=0.18, EchoMix=35, EchoSyncRows=3, EchoFeedback=45),  # 1
+        load("Bass", "Pulse Bass", Volume=0.22),                                               # 2
+        load("Chip", "Minor Chord", Volume=0.09, EchoMix=25, EchoSyncRows=2, EchoFeedback=30, Pan=-30),   # 3
+        load("Chip", "Major Chord", Volume=0.09, EchoMix=25, EchoSyncRows=2, EchoFeedback=30, Pan=-30),   # 4
+        load("Drums", "Kick", Volume=0.36),                                                    # 5
+        load("Drums", "Snare", Volume=0.24),                                                   # 6
+        load("Percussion", "Shaker", Volume=0.14, Pan=30),                                     # 7
+    ]
+    chords = [("D-4", 3), ("A#3", 4), ("C-4", 4), ("A-3", 3)]
+    roots = ["D-2", "A#1", "C-2", "A-1"]
+    beat = "K.H.H.H.S.H.H.HH"
+
+    def base(p, steps="R...O.R.R...O.F."):
+        c64_bass(p, 1, 2, roots, steps)
+        chord_arps(p, 2, chords)
+        c64_drums(p, 3, 5, 6, 7, beat)
+
+    tune_a = [(0, "A-4"), (4, "D-5"), (8, "F-5"), (12, "E-5"), (16, "D-5"), (22, "F-5"), (24, "A#4"), (28, "D-5"),
+              (32, "C-5"), (36, "E-5"), (40, "G-5"), (44, "E-5"), (48, "C-5"), (52, "A-4"), (56, "E-5"), (60, "===")]
+    tune_b = [(0, "F-5"), (2, "E-5"), (4, "D-5"), (8, "A-5"), (16, "A#5"), (20, "A-5"), (24, "F-5"), (28, "D-5"),
+              (32, "E-5"), (34, "F-5"), (36, "G-5"), (40, "C-6"), (48, "A-5"), (52, "E-5"), (56, "C#5"), (60, "E-5")]
+
+    intro = Pattern(4)
+    chord_arps(intro, 2, chords)
+    c64_drums(intro, 3, 5, 6, 7, "........H.......")
+
+    walk = Pattern(4)
+    base(walk)
+
+    theme = Pattern(4)
+    base(theme)
+    melody(theme, 0, 1, tune_a)
+    theme.fx(8, 0, "310")
+
+    answer = Pattern(4)
+    base(answer, steps="R.ROR.O.R.ROR.FO")
+    melody(answer, 0, 1, tune_b)
+    answer.fx(40, 0, "310")
+
+    return song("Glass Labyrinth", 6, 118, I, [intro, walk, theme, answer],
+                [0, 1, 2, 3, 2, 3, 1], channels=4, level=0.9)
+
+
 def main():
-    for name, build in [("acid_sunrise", acid_sunrise), ("deep_space", deep_space), ("pixel_rush", pixel_rush)]:
+    for name, build in [("acid_sunrise", acid_sunrise), ("deep_space", deep_space), ("pixel_rush", pixel_rush),
+                        ("steel_sprint", steel_sprint), ("glass_labyrinth", glass_labyrinth)]:
         path = os.path.join(OUT, name + ".amostrk")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(build(), f, indent=2, ensure_ascii=False)

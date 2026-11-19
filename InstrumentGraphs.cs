@@ -95,13 +95,16 @@ public sealed class WaveGraph : InstrumentGraph
         double mid = a.Center.Y, half = a.Height / 2 - 2;
         ctx.DrawLine(new Pen(Grid, 1), new Point(a.Left, mid), new Point(a.Right, mid));
         string wave2 = (inst.Osc2Wave ?? "Off").ToUpperInvariant();
-        if (wave2 == "OFF")
-        {
-            ctx.DrawText(Text("OFF  (only oscillator 1 sounds)", Label), new Point(a.Left, a.Bottom + 3));
-            return;
-        }
         string wave1 = (inst.Wave ?? "Pulse").ToUpperInvariant();
         double width = Math.Clamp(inst.PulseWidth / 100.0, 0.01, 0.99);
+        if (wave2 == "OFF")
+        {
+            // Only oscillator 1 sounds: its wave alone
+            ctx.DrawGeometry(null, new Pen(Line, 2), Polyline(Points(a, mid, half, wave1, width)));
+            string name = wave1 == "SAW" ? "SAWTOOTH" : wave1;
+            ctx.DrawText(Text(wave1 == "PULSE" ? $"PULSE  width {inst.PulseWidth:0} %" : name, Label), new Point(a.Left, a.Bottom + 3));
+            return;
+        }
         double ratio = Math.Pow(2, (inst.Osc2Semitones + inst.Osc2Detune / 100.0) / 12.0);
         double mix = Math.Clamp(inst.Osc2Mix / 100.0, 0, 1);
         ctx.DrawGeometry(null, new Pen(Faint, 1, new DashStyle(new double[] { 3, 3 }, 0)),

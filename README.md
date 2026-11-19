@@ -12,17 +12,19 @@ AMOS Like Basic brings back the workflow of the classic Amiga **AMOS Professiona
 
 ## Features
 
-- **AMOS-style BASIC**: `GOTO`/`GOSUB`, `PROC`, `FUNCTION`, `FOR`/`WHILE`/`REPEAT`/`DO`, `SELECT CASE`, multi-dimensional arrays, `DATA`/`READ` and `ON ERROR`.
-- **Screens and layers**: multiple screens composited on the GPU, each with its own opacity, fades and SkSL shader.
+- **AMOS-style BASIC**: `GOTO`/`GOSUB`, `PROC` with `LOCAL`, `FUNCTION`, `FOR`/`WHILE`/`REPEAT`/`DO`, `SELECT CASE`, multi-dimensional arrays, `DATA`/`READ`, `CONST` and `ON ERROR`. Expressions are compiled to trees the first time they run, so game loops stay fast.
+- **Screens and layers**: multiple screens composited on the GPU, each with its own opacity, fades and SkSL shader. `WAIT VBL` follows the screen's real refreshes for smooth scrolling.
+- **CRT effect**: scanlines, a curved tube, phosphor mask, vignette and soft pixels over the whole game window, `PRINT` text included, with a settings window and ready-made looks (`SCREEN CRT`, F8).
 - **Raster bars**: copper-style gradient bars with wrap-around, plus built-in weather (snow, rain, stars) and full-screen shaders such as Star Nest and clouds.
 - **Sprites and bobs**: sprite sheets, animations, rotation, zoom, alpha fades, groups, and box, circle and pixel-perfect collision.
-- **Bitmap fonts**: fonts from images, with rotation, zoom and effects.
+- **Bitmap fonts**: fonts from images, with rotation, zoom and effects, plus TrueType fonts in the graphics; the C64 fonts with all their PETSCII characters (`PETSCII$`) and a C64-style `PRINTG` that wraps and scrolls.
 - **Effects**: wave, blur and color grading on sprites and font texts.
-- **Tilemaps**: tile sets, maps, scrolling, and a built-in map editor.
-- **Sound and music**: MOD music, samples, and a real-time chiptune synth in the spirit of the C64 SID and the NES: eight channels, pulse width modulation, filters with envelopes, arpeggio, vibrato, ring modulation and sync, plus ready-made sound effects (`COIN`, `JUMP`, `LASER`, `EXPLOSION` and more).
-- **Tracker**: a ProTracker-style music editor in the IDE, with instruments, per-tick tables and effects. Songs are played with `TRACK PLAY`, and tracker instruments double as sound effects with `TRACK SFX`.
+- **Tilemaps**: tile sets, maps, scrolling, and `MAP OBJECTS`, which turns marker tiles into the places of coins, enemies and the start.
+- **Sound and music**: MOD music, samples, and a real-time stereo chiptune synth in the spirit of the C64 SID and the NES: eight channels, two oscillators per voice, two LFOs, pulse width modulation, filters with envelopes, echo, panning, arpeggio, vibrato, ring modulation and sync, plus ready-made sound effects (`COIN`, `JUMP`, `LASER`, `EXPLOSION` and more). All of it works from `PLAY` as well.
+- **Tracker**: a ProTracker-style music editor in the IDE with 4 – 8 channels, an oscilloscope per channel (click to mute, right-click for solo) and ProTracker effects. The instrument page works like a software synth, with knobs, graphs and a live oscilloscope, and a held note changes as you turn a knob. A library of 66 instruments in ten categories, from basses and leads to drums and effects, and songs can be saved as WAV. Songs are played with `TRACK PLAY`, and tracker instruments double as sound effects with `TRACK SFX`.
+- **Sprite and map editors**: pencil, line, rectangle, ellipse, fill and colour picker, undo, mirror drawing, the sprite's own colours and an animation preview; sprite sheets split with a frame grid you can see. Both editors open the pictures, tiles and maps the program loads, with its sizes, and the map editor shows marker tiles as the figures the game puts there.
 - **Input**: keyboard, plus joystick and gamepad through SDL2.
-- **IDE**: syntax-highlighting editor, breakpoints and single-stepping, a variable and array viewer, a sprite editor, and selectable retro themes.
+- **IDE**: syntax-highlighting editor, breakpoints and single-stepping, a variable watch where values and array elements can be changed while paused, selectable retro themes, movable folders for projects, graphics, sound and exports, and export of a program as a standalone app.
 
 ---
 
@@ -58,7 +60,7 @@ Effects belong to the font, so they survive `FONT CLEAR`. Slow effects like blur
 
 `Projects/froghop.amosproj` is a smaller climbing game drawn entirely with code, using double buffering and sound effects made in the tracker.
 
-The `Projects/` folder contains 25 examples, which the IDE lists under **Project → Examples**, sorted into *Games*, *Graphics and effects* and *Sound and music*. Hover over a name to see what it shows. The list is in [`Examples.cs`](Examples.cs); a test checks that it matches the files in `Projects/`, so a new example must be added there too.
+The `Projects/` folder contains 28 examples, which the IDE lists under **Project → Examples**, sorted into *Games*, *Graphics and effects* and *Sound and music*. Hover over a name to see what it shows. The list is in [`Examples.cs`](Examples.cs); a test checks that it matches the files in `Projects/`, so a new example must be added there too.
 
 Put your own experiments in a `Sandbox/` folder in the project folder. It is ignored by git, so nothing there ends up on GitHub, and file paths such as `"Graphics/hero.png"` work from there just as they do from `Projects/`. The manual, a step-by-step guide plus a full command reference, is in [`Documentation/AMOS Like Basic - Manual.pdf`](Documentation/AMOS%20Like%20Basic%20-%20Manual.pdf). It is built from the Markdown chapters in `Documentation/Manual` with `python3 Tools/build_manual.py`.
 
@@ -103,9 +105,10 @@ The tests run headless, without opening any windows, and take about two minutes.
 
 - every code example in the manual and every example project runs without errors;
 - the language gives the answers the manual promises (comparisons, string functions, `FOR`, `SWAP` ...);
-- the synth keeps time and pitch, the tracker effects and order list work, and every song in `Sound/Tracker` loads, saves and plays;
+- the synth keeps time and pitch; oscillator 2, the LFOs, echo, panning and the tracker effects do what they should, measured in the rendered sound; every song in `Sound/Tracker` loads, saves and plays, and every library instrument sounds without clipping;
 - sound effects use channels 5 – 8 and give them back;
-- the tracker editor responds to its keys (notes, effects, transpose, copy and paste, undo).
+- the tracker editor responds to its keys (notes, effects, transpose, copy and paste, undo);
+- the drawing tools, the sprite sheet guess, the folders and the variable watch work.
 
 They run on GitHub for every push and pull request.
 
@@ -136,16 +139,21 @@ To build the same zip files on your own Mac, run `python3 Tools/build_release.py
 
 | Path | Contents |
 |---|---|
-| `AmosRunner.cs` | The BASIC interpreter |
+| `AmosRunner.cs`, `AmosRunner.Compiled.cs` | The BASIC interpreter, and its expression compiler |
 | `AmosGraphics.cs` | Screens, layers, sprites, fonts, raster bars, effects and GPU rendering |
 | `Shaders.cs` | SkSL shaders for raster bars, weather and full-screen effects |
-| `ChiptuneSynth.cs`, `ChiptuneSynth.Tracker.cs`, `AudioEngine.cs`, `LibXmp.cs` | Sound effects, synth, tracker playback and music |
-| `Tracker.cs`, `TrackerWindow.axaml`, `PatternView.cs` | The tracker song format and editor |
+| `DisplayClock.cs` | `WAIT VBL`: frames in step with the screen's refreshes |
+| `ChiptuneSynth.cs`, `ChiptuneSynth.Tracker.cs`, `ChiptuneSynth.Export.cs`, `AudioEngine.cs`, `LibXmp.cs` | Sound effects, synth, tracker playback, WAV export and music |
+| `Tracker.cs`, `TrackerWindow.axaml`, `PatternView.cs`, `ChannelScopes.cs`, `Knob.cs`, `InstrumentGraphs.cs`, `InstrumentLibrary.cs` | The tracker song format, editor, instrument page and library |
 | `MainWindow.axaml(.cs)` | The IDE |
-| `SpriteEditorWindow`, `MapEditorWindow`, `TilePaletteWindow` | Built-in editors |
+| `SpriteEditorWindow`, `MapEditorWindow`, `GridTools.cs`, `SheetGuess.cs`, `ProgramAssets.cs` | Built-in editors, their drawing tools, and the pictures a program loads |
+| `Workspace.cs`, `ResourceLoader.cs` | The working folders and finding files |
 | `Projects/` | Example programs (`.amosproj`) |
 | `Tests/` | Automated tests (xUnit, Avalonia headless) |
-| `Graphics/`, `Sound/`, `fonts/` | Assets used by the examples |
+| `Graphics/`, `Sound/`, `fonts/` | Assets used by the examples; `Sound/Instruments` is the instrument library |
+| `Tools/` | Building the manual, releases, exported apps, the instrument library and songs |
+
+How the parts fit together, in which thread, and the order things are called in, is described in [`Documentation/Architecture.md`](Documentation/Architecture.md).
 
 ### Exporting a program as an app
 
@@ -167,11 +175,11 @@ The Mac app must be built on a Mac and is only ad-hoc signed, so the first time 
 
 ### Resources
 
-Assets are located by `ResourceLoader`, which looks in the following places relative to the executable:
+Assets are located by `ResourceLoader`, which looks in this order:
 
-- the application folder
-- a `Resources` folder next to the executable
-- `../Resources` inside a macOS app bundle
+- a Graphics or Sound folder moved in **Project → Folders**
+- the working folder (the repository, or `Documents/AmosLikeBasic` when installed), so your own copy of a file comes first
+- the files inside the app: next to the executable, a `Resources` folder next to it, or `../Resources` inside a macOS app bundle
 
 ---
 
@@ -190,11 +198,19 @@ Under active development. Commands, APIs and internal architecture may still cha
 | ![The Forest Hop title screen](images/foresthop-title.png) | ![Raster bars](images/raster_bars.png) |
 | *The Forest Hop title screen* | *Raster bars* |
 
-![The tracker playing Neon Horizon, an eight-channel song](images/tracker.png)
-*The tracker: 4 – 8 channels with an oscilloscope and level meter each, and ProTracker-style effects*
+![The tracker playing Steel Sprint](images/tracker.png)
+*The tracker playing Steel Sprint: an oscilloscope and level meter per channel (click to mute, right-click for solo) and ProTracker-style effects*
 
 ![The tracker's instrument page](images/tracker-instrument.png)
-*The instrument page: the waveform, envelope and filter drawn from the settings*
+*The instrument page laid out like a software synth: a live oscilloscope, oscillators, filter, envelope, effects and LFOs, with knobs*
+
+| | |
+|---|---|
+| ![The sprite editor with Pinecone from Forest Hop](images/sprite-editor.png) | ![The map editor with Forest Hop's level](images/map-editor.png) |
+| *The sprite editor: Pinecone opened straight from Forest Hop's program, with drawing tools, its own colours and the animation* | *The map editor: Forest Hop's level, with gems, beetles and Pinecone shown where the game puts them* |
+
+![The instrument library](images/instrument-library.png)
+*The instrument library: 66 ready-made instruments in ten categories*
 
 | | |
 |---|---|

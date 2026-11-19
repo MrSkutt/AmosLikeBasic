@@ -84,6 +84,8 @@ public class InstrumentLibraryTests : IDisposable
     [InlineData("acid_sunrise")]
     [InlineData("deep_space")]
     [InlineData("pixel_rush")]
+    [InlineData("steel_sprint")]
+    [InlineData("glass_labyrinth")]
     public void Library_songs_play_without_clipping(string name)
     {
         var song = TrackerSong.Load(Repo.PathOf($"Sound/Tracker/{name}.amostrk"));
@@ -98,7 +100,8 @@ public class InstrumentLibraryTests : IDisposable
         }
         Assert.False(S.IsTrackPlaying(), $"{name} did not end");
         Assert.True(peak < 0.95, $"{name} peaks at {peak:0.00}");
-        Assert.InRange(Math.Sqrt(sum / count), 0.1, 0.3);
+        double rms = Math.Sqrt(sum / count);
+        Assert.True(rms is > 0.1 and < 0.3, $"{name} has loudness {rms:0.000}");
     }
 
     [Fact]

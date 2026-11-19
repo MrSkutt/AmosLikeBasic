@@ -325,8 +325,10 @@ More songs in C64 style are in `Sound/Tracker` and are used by the example proje
 | `acid_sunrise.amostrk` | `synth_jukebox` | acid techno: an acid bass whose filter opens part by part, a supersaw lead (two detuned saws) with vibrato that grows in, a wobble bass in the breakdown and 808 drums |
 | `deep_space.amostrk` | `synth_jukebox` | slow and spacey: a drone whose filter drifts with two LFOs, a glass pad, a music box and UFO sounds |
 | `pixel_rush.amostrk` | `synth_jukebox` | fast chip music: a C64 lead whose pulse width moves, chord arpeggios, an NES bass and trills made with a square LFO |
+| `steel_sprint.amostrk` | `synth_jukebox` | in the style of 1980s C64 game music, on four channels: a bass that bounces between octaves, fast chord arpeggios, a pulse-wave lead that glides into its notes, and one channel for all the drums |
+| `glass_labyrinth.amostrk` | `synth_jukebox` | the same style, slower and mysterious: a square lead and arpeggios with echo on the beat |
 
-Open them in the tracker to see how the sounds and effects are made. The last three are made only with instruments from the library, and are written by `Tools/build_songs.py`.
+Open them in the tracker to see how the sounds and effects are made. The last five are made only with instruments from the library, and are written by `Tools/build_songs.py`.
 
 A game often changes music depending on what happens. Forest Hop has four songs in `Sound/Tracker`: calm music on the title screen, Forest Song while you play, and two short jingles when you win or lose. The jingles play once with `TRACK LOOP 0`:
 
