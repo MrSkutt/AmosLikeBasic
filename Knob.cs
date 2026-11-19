@@ -22,6 +22,8 @@ public sealed class Knob : Control
     public double Step { get; set; }            // values are rounded to this (0: not rounded)
     public string Format { get; set; } = "0";
     public string Unit { get; set; } = "";
+    // How the value is written under the knob, when a number is not the best way (a note name)
+    public Func<double, string>? ValueText { get; set; }
 
     private double _value;
     public double Value
@@ -183,7 +185,7 @@ public sealed class Knob : Control
         var font = new Typeface("Menlo, Consolas, Courier New, monospace");
         var title = new FormattedText(Label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, font, 10, label);
         ctx.DrawText(title, new Point((Bounds.Width - title.Width) / 2, 0));
-        string shown = _value.ToString(Format, CultureInfo.InvariantCulture) + (Unit.Length > 0 ? " " + Unit : "");
+        string shown = ValueText?.Invoke(_value) ?? _value.ToString(Format, CultureInfo.InvariantCulture) + (Unit.Length > 0 ? " " + Unit : "");
         var text = new FormattedText(shown, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, font, 10, IsEnabled ? accent : label);
         ctx.DrawText(text, new Point((Bounds.Width - text.Width) / 2, Bounds.Height - 13));
     }

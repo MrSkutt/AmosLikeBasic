@@ -324,8 +324,8 @@ public partial class TrackerWindow : Window
         _instrumentRefresh.Add(() => name.Text = CurrentInstrument?.Name ?? "");
         AddGraph(osc, new WaveGraph { Mixed = true });
         AddSubHeading(osc, "OSC 1");
-        AddChoice(osc, new[] { "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
-            new[] { "PULSE", "SQUARE", "TRI", "SAW", "SINE", "NOISE" }, i => i.Wave, (i, v) => i.Wave = v, "wave");
+        AddChoice(osc, new[] { "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise", "Sample" },
+            new[] { "PULSE", "SQUARE", "TRI", "SAW", "SINE", "NOISE", "SAMPLE" }, i => i.Wave, (i, v) => i.Wave = v, "wave");
         var o1 = KnobRow(osc);
         AddKnob(o1, "VOLUME", 0, 1, i => i.Volume, (i, v) => i.Volume = v, "volume", "0.00", step: 0.01);
         AddKnob(o1, "WIDTH", 1, 99, i => i.PulseWidth, (i, v) => i.PulseWidth = v, "width", unit: "%", step: 1);
@@ -338,6 +338,36 @@ public partial class TrackerWindow : Window
         AddKnob(o2, "SEMI", -24, 24, i => i.Osc2Semitones, (i, v) => i.Osc2Semitones = v, "osc2 semi", "+0;-0;0", bipolar: true, step: 1);
         AddKnob(o2, "DETUNE", -100, 100, i => i.Osc2Detune, (i, v) => i.Osc2Detune = v, "osc2 detune", "+0;-0;0", "c", bipolar: true, step: 1);
         AddKnob(o2, "MIX", 0, 100, i => i.Osc2Mix, (i, v) => i.Osc2Mix = v, "osc2 mix", unit: "%", step: 1);
+
+        // ── SAMPLE: a WAV file instead of oscillator 1 ──
+        var sampleCard = Card(cards, "SAMPLE", 400);
+        AddGraph(sampleCard, new SampleGraph());
+        var sampleRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        var sampleName = new TextBlock { Classes = { "amos-label" }, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        var loadSample = new Button { Content = "Load sample...", Focusable = false };
+        ToolTip.SetTip(loadSample, "A WAV file (8, 16, 24 or 32-bit, mono or stereo); OSC 1 becomes SAMPLE");
+        loadSample.Click += async (_, _) => await LoadSampleAsync();
+        sampleRow.Children.Add(sampleName);
+        Grid.SetColumn(loadSample, 1);
+        sampleRow.Children.Add(loadSample);
+        sampleCard.Children.Add(sampleRow);
+        _instrumentRefresh.Add(() =>
+        {
+            var inst = CurrentInstrument;
+            loadSample.IsEnabled = inst != null;
+            sampleName.Text = inst == null || string.IsNullOrEmpty(inst.Sample) ? "No sample" : Path.GetFileName(inst.Sample);
+        });
+        var s1 = KnobRow(sampleCard);
+        AddKnob(s1, "NOTE", 0, 119, i => i.SampleNote, (i, v) => i.SampleNote = (int)v, "sample note", step: 1);
+        ((Knob)((WrapPanel)s1.Children[0]).Children[^1]).ValueText = NoteName;
+        ToolTip.SetTip(((WrapPanel)s1.Children[0]).Children[^1], "The note the sample sounds at as it is recorded");
+        AddKnob(s1, "LOOP START", 0, 100, i => LoopPercent(i, i.LoopStart), (i, v) => i.LoopStart = LoopFrame(i, v), "loop start", "0.0", "%", step: 0.1);
+        AddKnob(s1, "LOOP END", 0, 100, i => LoopPercent(i, i.LoopEnd), (i, v) => i.LoopEnd = LoopFrame(i, v), "loop end", "0.0", "%", step: 0.1);
+        sampleCard.Children.Add(new TextBlock
+        {
+            Text = "A loop keeps a held note sounding; LOOP END at 0 plays the sample once. Effect 9xx starts it xx × 256 frames in.",
+            Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, FontSize = 11
+        });
 
         // ── FILTER ──
         var filter = Card(cards, "FILTER", 400);
@@ -406,6 +436,53 @@ public partial class TrackerWindow : Window
         tableCard.Children.Add(table);
         _instrumentRefresh.Add(() => table.Text = string.Join("\n", CurrentInstrument?.Table ?? new List<string>()));
         AddNumber(tableCard, "Loop from step", -1, 255, 1, "0", i => i.TableLoop, (i, v) => i.TableLoop = (int)v);
+    }
+
+    private static string NoteName(double note)
+    {
+        string[] names = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" };
+        int n = (int)Math.Round(note);
+        return $"{names[((n % 12) + 12) % 12]}{n / 12 - 1}";
+    }
+
+    // The loop points as percent of the sample, and back to frames
+    private static double LoopPercent(TrackerInstrument i, int frame)
+    {
+        int length = SampleBank.Get(i.Sample)?.Data.Length ?? 0;
+        return length == 0 ? 0 : 100.0 * frame / length;
+    }
+
+    private static int LoopFrame(TrackerInstrument i, double percent)
+    {
+        int length = SampleBank.Get(i.Sample)?.Data.Length ?? 0;
+        return (int)Math.Round(Math.Clamp(percent, 0, 100) / 100.0 * length);
+    }
+
+    // A WAV file for the instrument; kept relative to the working folder when it is inside it
+    private async Task LoadSampleAsync()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Load Sample",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound, "Samples"),
+            FileTypeFilter = new[] { new FilePickerFileType("WAV sound") { Patterns = new[] { "*.wav" } } }
+        });
+        if (files.Count == 0 || files[0].TryGetLocalPath() is not { } path) return;
+        string root = Path.GetFullPath(Workspace.Root) + Path.DirectorySeparatorChar;
+        string stored = Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase)
+            ? Path.GetRelativePath(Workspace.Root, path).Replace('\\', '/') : path;
+        SampleBank.Forget(stored);
+        var sample = SampleBank.Get(stored);
+        if (sample == null) { SetStatus($"Could not read {Path.GetFileName(path)}: is it a WAV file?"); return; }
+        EditInstrument("sample", i =>
+        {
+            i.Wave = "Sample";
+            i.Sample = stored;
+            i.LoopStart = 0;
+            i.LoopEnd = 0;
+        });
+        RefreshInstrumentPanel();
+        SetStatus($"Sample {Path.GetFileName(path)}: {sample.Seconds:0.00} s at {sample.Rate} Hz");
     }
 
     // An LFO: what it moves, its wave, speed (in Hz or in rows of the song) and depth

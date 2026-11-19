@@ -1,0 +1,14 @@
+{
+  "Name": "Sampled Bell",
+  "Wave": "Sample",
+  "Sample": "Sound/Samples/bell.wav",
+  "SampleNote": 72,
+  "Volume": 0.28,
+  "Attack": 0,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 900,
+  "EchoMix": 25,
+  "EchoSyncRows": 3,
+  "EchoFeedback": 35
+}

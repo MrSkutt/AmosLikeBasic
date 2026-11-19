@@ -410,17 +410,24 @@ The effect is a letter or digit and two hex digits. Most only apply on their own
 | `4xy` | vibrato: x is the rate, y the depth; `400` carries on |
 | `5xy` | carries on `3` and changes the volume like `A` |
 | `6xy` | carries on `4` and changes the volume like `A` |
+| `7xy` | tremolo: the volume swings, x is the rate, y the depth; `700` carries on |
 | `Axy` | the volume goes up by x or down by y per tick |
 | `Bxx` | jumps to place xx in the order list |
 | `Cxx` | volume 00 – 40 (hex, 40 is full volume) |
 | `Dxy` | goes on to row xy (decimal) in the next pattern |
+| `E1x`, `E2x` | slides up or down x sixteenths of a semitone once, on the row |
+| `E6x` | pattern loop: `E60` marks a row, `E6x` goes back to it x times |
+| `E9x` | strikes the note again every x ticks (drum rolls) |
+| `EAx`, `EBx` | the volume up or down by x once, on the row |
 | `ECx` | goes silent on tick x |
 | `EDx` | the note starts on tick x instead of straight away |
+| `EEx` | the row lasts x rows longer (its effects go on, no new notes) |
 | `Fxx` | 01 – 1F sets the speed, 20 – FF the tempo |
 | `Gxx` | filter frequency: 00 is 20 Hz, 80 about 640 Hz and FF 18 000 Hz; turns on low-pass if the filter is off |
 | `Hxx` | filter resonance, 00 – FF |
 | `Ixx` | pulse width, 80 is 50 % |
 | `8xx` | pan: 00 left, 80 the middle, FF right |
+| `9xx` | a sampled instrument starts xx × 256 frames into its sample |
 
 `G`, `H`, `I` and `8` stay on the channel until it changes instrument, so a filter can open slowly over many notes.
 
@@ -438,9 +445,17 @@ That table is a kick drum: a short click of square wave and then a triangle wave
 
 #### The instrument library
 
-**LIBRARY...** under the instrument list opens over sixty ready-made instruments, sorted like on a synth: **Bass, Lead, Pad, Keys, Pluck, Brass & Strings, Chip, Drums, Percussion** and **FX**. Choose one and you hear it straight away (on the channel the cursor is in, in the octave chosen). **Add to song** makes it a new instrument in the song (double-clicking does the same), and **Replace current** puts it in place of the instrument chosen in the tracker, so the notes already written get the new sound. Then you can change it on the instrument page like any other.
+**LIBRARY...** under the instrument list opens seventy ready-made instruments, sorted like on a synth: **Bass, Lead, Pad, Keys, Pluck, Brass & Strings, Chip, Drums, Percussion, Samples** and **FX**. Choose one and you hear it straight away (on the channel the cursor is in, in the octave chosen). **Add to song** makes it a new instrument in the song (double-clicking does the same), and **Replace current** puts it in place of the instrument chosen in the tracker, so the notes already written get the new sound. Then you can change it on the instrument page like any other.
 
 **Save current...** puts the tracker's current instrument in the library, in a category you choose or a new one you type. **Load file...** and **Save file...** read and write single instrument files (`.amosinst`) anywhere, for sharing a sound with a friend. The library is the folder `Sound/Instruments`, one folder per category, so you can also tidy it in Finder or Explorer.
+
+#### Sampled instruments
+
+An instrument can play a **sample**, a recorded sound from a WAV file, instead of oscillator 1, like the instruments of an Amiga module. Choose **SAMPLE** as the wave and **Load sample...** on the SAMPLE card (WAV files in 8, 16, 24 or 32 bits, mono or stereo). The sample is played at the note's pitch: **NOTE** says which note the file sounds at as it is recorded, so a sample of an A-3 played as A-4 sounds an octave higher. Slides, vibrato and the LFOs bend it like any other sound, and the envelope, filter, echo, pan and oscillator 2 work as usual.
+
+A sample plays once and then is quiet. A **loop** keeps a held note sounding: **LOOP START** and **LOOP END** (in percent of the sample) mark the part that repeats, shown in the picture of the wave. With **LOOP END** at 0 there is no loop. Effect `9xx` starts the sample further in, as in ProTracker.
+
+The library's **Samples** category has a plucked string, a bell and a choir, made by `Tools/build_samples.py`. In the file a sampled instrument is written `"Wave": "Sample", "Sample": "Sound/Samples/choir.wav", "SampleNote": 57, "LoopStart": 0, "LoopEnd": 44000`.
 
 #### Oscillator 2
 

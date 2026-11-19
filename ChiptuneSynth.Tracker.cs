@@ -47,6 +47,9 @@ namespace AmosLikeBasic
             public double EchoTime = 0.3, EchoFeedback = 0.4, EchoMix;
             public int EchoSyncRows;
             public double Pan;
+            public SampleData? Sample;
+            public double SampleBaseFreq = 261.63;
+            public int LoopStart, LoopEnd;
             public TableStep[] Table = Array.Empty<TableStep>();
             public int TableLoop = -1;
         }
@@ -85,6 +88,8 @@ namespace AmosLikeBasic
             public double PortaTarget;
             public int PortaSpeed;
             public int VibSpeed, VibDepth, VibPhase;
+            public int TremSpeed, TremDepth, TremPhase;   // effect 7
+            public int LoopRow, LoopCount;                // effect E6: the row a pattern loop goes back to
             public int Vol = 64;           // 0 – 64 as in ProTracker
             public char Effect;
             public int Param;
@@ -121,6 +126,9 @@ namespace AmosLikeBasic
         private static int _trackOrder, _trackRow, _trackTick, _trackSpeed, _trackTempo;
         private static double _trackTickLeft;
         private static bool _trackJump;
+        // Effect EE: the row is played this many more times (its effects, not its notes)
+        private static int _trackRowDelay;
+        private static bool _trackRepeatingRow;
         private static int _trackJumpOrder, _trackBreakRow;
         private static int _trackPosOrder, _trackPosRow;
         private static double _trackVolume = 1.0;
@@ -404,6 +412,9 @@ namespace AmosLikeBasic
                 steps.Add(ParseTableStep(text, number));
 
             var wave = ParseWave(src.Wave ?? "Pulse");
+            // A sampled instrument plays its file instead of oscillator 1 (a missing file is silent)
+            var sample = (src.Wave ?? "").Equals("Sample", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(src.Sample)
+                ? SampleBank.Get(src.Sample) ?? new SampleData(Array.Empty<float>(), 44100) : null;
             return new TrackInstrument
             {
                 Wave = wave == WaveformType.Drums ? WaveformType.Noise : wave,
@@ -434,6 +445,10 @@ namespace AmosLikeBasic
                 EchoFeedback = Math.Clamp(src.EchoFeedback / 100.0, 0, 0.9),
                 EchoMix = Math.Clamp(src.EchoMix / 100.0, 0, 1),
                 Pan = Math.Clamp(src.Pan / 100.0, -1, 1),
+                Sample = sample,
+                SampleBaseFreq = 440.0 * Math.Pow(2, (Math.Clamp(src.SampleNote, 0, 127) - 69) / 12.0),
+                LoopStart = sample == null ? 0 : Math.Clamp(src.LoopStart, 0, sample.Data.Length - 1),
+                LoopEnd = sample == null || src.LoopEnd <= src.LoopStart ? 0 : Math.Min(src.LoopEnd, sample.Data.Length),
                 Table = steps.ToArray(),
                 TableLoop = src.TableLoop < steps.Count ? src.TableLoop : -1
             };
@@ -561,6 +576,7 @@ namespace AmosLikeBasic
                 ch.Vol = 64;
                 ch.Effect = '\0';
                 ch.VibSpeed = ch.VibDepth = ch.VibPhase = ch.PortaSpeed = 0;
+                ch.TremSpeed = ch.TremDepth = ch.TremPhase = ch.LoopRow = ch.LoopCount = 0;
                 ch.DelayNote = TrackerCell.NoNote;
                 ch.Cutoff = ch.Resonance = ch.PulseWidth = ch.Pan = null;
             }
@@ -574,6 +590,8 @@ namespace AmosLikeBasic
             _trackTick = 0;
             _trackTickLeft = 0;
             _trackJump = false;
+            _trackRowDelay = 0;
+            _trackRepeatingRow = false;
             Volatile.Write(ref _track, req.Data);
         }
 
@@ -630,7 +648,8 @@ namespace AmosLikeBasic
                     if (!_trackChannels[c].Sfx) UpdateTrackVoice(c);
                 return;
             }
-            if (_trackTick == 0) ReadRow(d);
+            // A row repeated by EE plays its effects again, but not its notes
+            if (_trackTick == 0 && !_trackRepeatingRow) ReadRow(d);
             else
                 for (int c = 0; c < d.Channels; c++)
                     if (!_trackChannels[c].Sfx) TickEffects(c);
@@ -641,7 +660,16 @@ namespace AmosLikeBasic
             if (++_trackTick >= _trackSpeed)
             {
                 _trackTick = 0;
-                AdvanceRow(d);
+                if (_trackRowDelay > 0)
+                {
+                    _trackRowDelay--;
+                    _trackRepeatingRow = true;
+                }
+                else
+                {
+                    _trackRepeatingRow = false;
+                    AdvanceRow(d);
+                }
             }
         }
 
@@ -708,8 +736,31 @@ namespace AmosLikeBasic
                     case 'D':
                         breakRow = x * 10 + y;   // as in ProTracker: decimal
                         break;
+                    case '7':
+                        if (x > 0) ch.TremSpeed = x;
+                        if (y > 0) ch.TremDepth = y;
+                        break;
                     case 'E':
-                        if (x == 0xC && y == 0) ch.Vol = 0;
+                        switch (x)
+                        {
+                            case 0x1: ch.Note += y / 16.0; ch.PortaTarget = ch.Note; break;   // fine slide up, once
+                            case 0x2: ch.Note -= y / 16.0; ch.PortaTarget = ch.Note; break;   // fine slide down
+                            case 0xA: ch.Vol = Math.Min(64, ch.Vol + y); break;               // fine volume up
+                            case 0xB: ch.Vol = Math.Max(0, ch.Vol - y); break;                // fine volume down
+                            case 0xC: if (y == 0) ch.Vol = 0; break;
+                            case 0x6:
+                                // Pattern loop: E60 marks the start, E6x plays from there x times more
+                                if (y == 0) ch.LoopRow = _trackRow;
+                                else
+                                {
+                                    ch.LoopCount = ch.LoopCount == 0 ? y : ch.LoopCount - 1;
+                                    if (ch.LoopCount > 0) { jumpOrder = _trackOrder; breakRow = ch.LoopRow; }
+                                }
+                                break;
+                            case 0xE:
+                                if (!_trackRepeatingRow) _trackRowDelay = y;   // the row lasts y rows longer
+                                break;
+                        }
                         break;
                     case 'F':
                         if (p > 0 && p < 0x20) _trackSpeed = p;
@@ -729,6 +780,10 @@ namespace AmosLikeBasic
                         break;
                     case 'I':
                         _voices[c].PulseWidth = (ch.PulseWidth = Math.Clamp(p / 255.0, 0.01, 0.99)).Value;
+                        break;
+                    case '9':
+                        // Sample offset as in ProTracker: the note starts xx × 256 frames into the sample
+                        if (cell.Note >= 0) _voices[c].SamplePos = p * 256;
                         break;
                     case '8':
                         // Pan as in ProTracker: 00 left, 80 the middle, FF right
@@ -774,8 +829,13 @@ namespace AmosLikeBasic
                 case 'A':
                     VolumeSlide(ch, x, y);
                     break;
+                case '7':
+                    ch.TremPhase += ch.TremSpeed;
+                    break;
                 case 'E':
                     if (x == 0xC && _trackTick == y) ch.Vol = 0;
+                    // Retrigger: the note is struck again every y ticks (drum rolls)
+                    if (x == 0x9 && y > 0 && _trackTick % y == 0 && ch.Active) TriggerTrackNote(c, (int)Math.Round(ch.Note));
                     if (x == 0xD && _trackTick == y && ch.DelayNote >= 0)
                     {
                         TriggerTrackNote(c, ch.DelayNote);
@@ -826,6 +886,7 @@ namespace AmosLikeBasic
             v.Stage = EnvStage.Attack;   // from the current level, without a click
             v.FilterEnvRising = true;
             v.LfoPhase = 0;
+            v.SamplePos = 0;
         }
 
         // The instrument's sound settings on the voice. Used when a note starts, and when the instrument
@@ -862,6 +923,11 @@ namespace AmosLikeBasic
             v.EchoFeedback = inst.EchoFeedback;
             v.EchoMix = inst.EchoMix;
             v.Pan = ch.Pan ?? inst.Pan;
+            if (v.Sample != inst.Sample) v.SamplePos = 0;   // another sample: from its start
+            v.Sample = inst.Sample;
+            v.SampleBaseFreq = inst.SampleBaseFreq;
+            v.LoopStart = inst.LoopStart;
+            v.LoopEnd = inst.LoopEnd;
         }
 
         // An instrument (from 1) of the song was changed: the notes that sound with it take the new
@@ -918,8 +984,11 @@ namespace AmosLikeBasic
 
             double freq = 440.0 * Math.Pow(2, (semis - 69) / 12.0);
             v.Freq = v.TargetFreq = Math.Clamp(freq, 1, SampleRate * 0.45);
+            double vol = ch.Vol;
+            if (ch.Effect == '7')   // tremolo: the volume swings by up to depth × 4 of 64
+                vol = Math.Clamp(vol + Math.Sin(ch.TremPhase * 2 * Math.PI / 64) * ch.TremDepth * 4, 0, 64);
             v.Volume = ch.Sfx ? inst.Volume * _sfxVolume
-                : _trackMute[c] ? 0 : inst.Volume * ch.Vol / 64.0 * _trackVolume;
+                : _trackMute[c] ? 0 : inst.Volume * vol / 64.0 * _trackVolume;
         }
 
         private static void AdvanceRow(TrackData d)

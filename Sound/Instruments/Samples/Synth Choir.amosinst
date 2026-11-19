@@ -1,0 +1,27 @@
+{
+  "Name": "Synth Choir",
+  "Wave": "Sample",
+  "Sample": "Sound/Samples/choir.wav",
+  "SampleNote": 57,
+  "LoopStart": 0,
+  "LoopEnd": 44000,
+  "Volume": 0.2,
+  "Attack": 400,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 900,
+  "Osc2Wave": "Sawtooth",
+  "Osc2Detune": 8,
+  "Osc2Mix": 25,
+  "Filter": "Low",
+  "Cutoff": 3000,
+  "Lfo1": {
+    "Target": "Pan",
+    "Shape": "Sine",
+    "Depth": 50,
+    "Rate": 0.25,
+    "SyncRows": 0,
+    "Delay": 0,
+    "Retrigger": false
+  }
+}

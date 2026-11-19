@@ -15,7 +15,7 @@ public static class InstrumentLibrary
 
     // The categories in the order a synth lists them; others (your own) come after, A – Z
     private static readonly string[] Order =
-        { "Bass", "Lead", "Pad", "Keys", "Pluck", "Brass & Strings", "Chip", "Drums", "Percussion", "FX" };
+        { "Bass", "Lead", "Pad", "Keys", "Pluck", "Brass & Strings", "Chip", "Drums", "Percussion", "Samples", "FX" };
 
     private static readonly JsonSerializerOptions Json = new()
     {

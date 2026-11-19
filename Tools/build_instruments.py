@@ -179,6 +179,19 @@ LIBRARY = {
         inst("Bongo", Wave="Sine", Volume=0.4, Attack=0, Decay=160, Sustain=0, Release=40,
              Table=["+7", "+4", "+2", "+1", "0"]),
     ],
+    # Sampled instruments: the WAV files made by Tools/build_samples.py, played at the note's pitch
+    "Samples": [
+        inst("Sampled Guitar", Wave="Sample", Sample="Sound/Samples/pluck.wav", SampleNote=57, Volume=0.32,
+             Attack=0, Decay=0, Sustain=100, Release=300, EchoMix=15, EchoTime=180, EchoFeedback=25),
+        inst("Sampled Bell", Wave="Sample", Sample="Sound/Samples/bell.wav", SampleNote=72, Volume=0.28,
+             Attack=0, Decay=0, Sustain=100, Release=900, EchoMix=25, EchoSyncRows=3, EchoFeedback=35),
+        inst("Sampled Choir", Wave="Sample", Sample="Sound/Samples/choir.wav", SampleNote=57, LoopStart=0, LoopEnd=44000,
+             Volume=0.24, Attack=250, Decay=0, Sustain=100, Release=600, Filter="Low", Cutoff=4500,
+             Lfo1=lfo("Pitch", "Sine", depth=14, rate=5, delay=400)),
+        inst("Synth Choir", Wave="Sample", Sample="Sound/Samples/choir.wav", SampleNote=57, LoopStart=0, LoopEnd=44000,
+             Volume=0.2, Attack=400, Decay=0, Sustain=100, Release=900, Osc2Wave="Sawtooth", Osc2Detune=8, Osc2Mix=25,
+             Filter="Low", Cutoff=3000, Lfo1=lfo("Pan", "Sine", depth=50, rate=0.25, retrigger=False)),
+    ],
     "FX": [
         inst("Laser", Wave="Sawtooth", Volume=0.2, Attack=0, Decay=300, Sustain=0, Release=50,
              Table=["+36", "+30", "+24", "+18", "+12", "+6", "0", "-6", "-12"]),

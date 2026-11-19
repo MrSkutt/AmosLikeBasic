@@ -1,0 +1,14 @@
+{
+  "Name": "Sampled Guitar",
+  "Wave": "Sample",
+  "Sample": "Sound/Samples/pluck.wav",
+  "SampleNote": 57,
+  "Volume": 0.32,
+  "Attack": 0,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 300,
+  "EchoMix": 15,
+  "EchoTime": 180,
+  "EchoFeedback": 25
+}

@@ -1,0 +1,24 @@
+{
+  "Name": "Sampled Choir",
+  "Wave": "Sample",
+  "Sample": "Sound/Samples/choir.wav",
+  "SampleNote": 57,
+  "LoopStart": 0,
+  "LoopEnd": 44000,
+  "Volume": 0.24,
+  "Attack": 250,
+  "Decay": 0,
+  "Sustain": 100,
+  "Release": 600,
+  "Filter": "Low",
+  "Cutoff": 4500,
+  "Lfo1": {
+    "Target": "Pitch",
+    "Shape": "Sine",
+    "Depth": 14,
+    "Rate": 5,
+    "SyncRows": 0,
+    "Delay": 400,
+    "Retrigger": true
+  }
+}

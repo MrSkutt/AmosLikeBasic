@@ -96,6 +96,10 @@ namespace AmosLikeBasic
             public double EchoTime = 0.3, EchoFeedback = 0.4, EchoMix;
             public int EchoSyncRows;
             public double Pan;                             // -1 left, 0 middle, 1 right
+            // A sample instead of oscillator 1: its frames, the pitch it sounds at, and the loop (end 0: none)
+            public SampleData? Sample;
+            public double SampleBaseFreq = 261.63;
+            public int LoopStart, LoopEnd;
 
             // Slides from {SWEEP} and {FADE}: change per sample and number of samples left
             public double CutoffSlide, VolumeSlide;
@@ -124,6 +128,7 @@ namespace AmosLikeBasic
             public readonly float[] EchoBuffer = new float[MaxEchoSamples];
             public int EchoPos;
             public double PanNow;   // the pan with the LFOs, worked out each sample
+            public double SamplePos;   // where in the sample, in frames
             public int ArpIndex;
             public double ArpCounter;
             public float[]? Drum;
@@ -151,6 +156,7 @@ namespace AmosLikeBasic
                 Lfos = s.Lfos;
                 EchoTime = s.EchoTime; EchoFeedback = s.EchoFeedback; EchoMix = s.EchoMix; EchoSyncRows = s.EchoSyncRows;
                 Pan = s.Pan;
+                Sample = s.Sample; SampleBaseFreq = s.SampleBaseFreq; LoopStart = s.LoopStart; LoopEnd = s.LoopEnd;
             }
 
             public void ResetSettings()
@@ -171,6 +177,7 @@ namespace AmosLikeBasic
                 Lfos = NoLfos;
                 EchoTime = 0.3; EchoFeedback = 0.4; EchoMix = 0; EchoSyncRows = 0;
                 Pan = 0;
+                Sample = null; LoopStart = LoopEnd = 0;
             }
         }
 
@@ -1012,7 +1019,8 @@ namespace AmosLikeBasic
                     if (v.Wave != WaveformType.Square) width += v.PwmDepth * Math.Sin(2 * Math.PI * v.PwmPhase);
                 }
                 width = Math.Clamp(width + mod.PulseWidth, 0.01, 0.99);
-                sample = Oscillator(v.Wave, t, inc, width, ref v.NoiseClock, ref v.Lfsr, ref v.NoiseOut);
+                sample = v.Sample != null ? NextSampleFrame(v, freq)
+                    : Oscillator(v.Wave, t, inc, width, ref v.NoiseClock, ref v.Lfsr, ref v.NoiseOut);
 
                 // The second oscillator, at its own pitch, mixed in
                 if (v.Osc2Wave is { } wave2)
@@ -1043,6 +1051,25 @@ namespace AmosLikeBasic
                 sample = ApplyFilter(v, sample, NextFilterEnvelope(v, dt));
 
             return sample;
+        }
+
+        // The voice's sample at its position, smoothed between frames, then the position moves on at the
+        // note's pitch (so slides, vibrato and LFOs bend it); a loop jumps back, and without one it ends
+        private static double NextSampleFrame(Voice v, double freq)
+        {
+            var d = v.Sample!.Data;
+            double pos = v.SamplePos;
+            if (pos < 0 || pos >= d.Length) return 0;
+            bool loops = v.LoopEnd > v.LoopStart;
+            int i = (int)pos;
+            double frac = pos - i;
+            double a = d[i];
+            double b = i + 1 < d.Length && !(loops && i + 1 >= v.LoopEnd) ? d[i + 1] : loops ? d[v.LoopStart] : 0;
+            pos += v.Sample.Rate / (double)SampleRate * freq / v.SampleBaseFreq;
+            if (loops && pos >= v.LoopEnd)
+                pos = v.LoopStart + (pos - v.LoopEnd) % (v.LoopEnd - v.LoopStart);
+            v.SamplePos = pos;
+            return a + (b - a) * frac;
         }
 
         // One oscillator at phase t; width is the pulse width (for Pulse). The noise state is passed in,

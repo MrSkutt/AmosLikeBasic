@@ -97,6 +97,15 @@ public sealed class WaveGraph : InstrumentGraph
         string wave2 = (inst.Osc2Wave ?? "Off").ToUpperInvariant();
         string wave1 = (inst.Wave ?? "Pulse").ToUpperInvariant();
         double width = Math.Clamp(inst.PulseWidth / 100.0, 0.01, 0.99);
+        if (wave1 == "SAMPLE")
+        {
+            // Oscillator 1 is the sample, drawn on its own card; oscillator 2 alone here
+            if (wave2 != "OFF") ctx.DrawGeometry(null, new Pen(Faint, 1.5), Polyline(Points(a, mid, half, wave2, width,
+                Math.Pow(2, (inst.Osc2Semitones + inst.Osc2Detune / 100.0) / 12.0))));
+            ctx.DrawText(Text("OSC 1: SAMPLE (see the SAMPLE card)" + (wave2 != "OFF" ? $"  + {wave2} {inst.Osc2Mix:0} %" : ""), Label),
+                new Point(a.Left, a.Bottom + 3));
+            return;
+        }
         if (wave2 == "OFF")
         {
             // Only oscillator 1 sounds: its wave alone
@@ -331,6 +340,53 @@ public sealed class LfoGraph : InstrumentGraph
         else if (lfo.Target.StartsWith("Osc 2", StringComparison.Ordinal) && (inst.Osc2Wave ?? "Off").Equals("Off", StringComparison.OrdinalIgnoreCase))
             speed += "  (turn oscillator 2 on)";
         ctx.DrawText(Text($"{lfo.Target.ToUpperInvariant()}  ±{Math.Abs(lfo.Depth):0.#} {TrackerLfo.UnitOf(lfo.Target)}  {speed}", Label),
+            new Point(a.Left, a.Bottom + 3));
+    }
+}
+
+// The sample's wave from start to end, with the loop marked; the length and rate below
+public sealed class SampleGraph : InstrumentGraph
+{
+    protected override void Draw(DrawingContext ctx, TrackerInstrument inst, Rect a)
+    {
+        double mid = a.Center.Y, half = a.Height / 2 - 2;
+        ctx.DrawLine(new Pen(Grid, 1), new Point(a.Left, mid), new Point(a.Right, mid));
+        var sample = string.IsNullOrEmpty(inst.Sample) ? null : SampleBank.Get(inst.Sample);
+        if (sample == null || sample.Data.Length == 0)
+        {
+            ctx.DrawText(Text(string.IsNullOrEmpty(inst.Sample) ? "NO SAMPLE  (load a WAV file)" : "THE SAMPLE COULD NOT BE READ", Label),
+                new Point(a.Left, a.Bottom + 3));
+            return;
+        }
+
+        // The loudest point in each column, so the whole sound fits
+        var d = sample.Data;
+        int columns = Math.Max(1, (int)a.Width);
+        var geo = new StreamGeometry();
+        using (var g = geo.Open())
+        {
+            for (int x = 0; x < columns; x++)
+            {
+                int from = (int)((long)x * d.Length / columns), to = Math.Max(from + 1, (int)((long)(x + 1) * d.Length / columns));
+                float lo = 0, hi = 0;
+                for (int i = from; i < to && i < d.Length; i++) { lo = Math.Min(lo, d[i]); hi = Math.Max(hi, d[i]); }
+                g.BeginFigure(new Point(a.Left + x + 0.5, mid - hi * half), false);
+                g.LineTo(new Point(a.Left + x + 0.5, mid - lo * half));
+                g.EndFigure(false);
+            }
+        }
+        ctx.DrawGeometry(null, new Pen(Line, 1), geo);
+
+        if (inst.LoopEnd > inst.LoopStart)
+        {
+            double x0 = a.Left + a.Width * inst.LoopStart / d.Length, x1 = a.Left + a.Width * Math.Min(inst.LoopEnd, d.Length) / d.Length;
+            ctx.FillRectangle(new SolidColorBrush(Color.FromArgb(40, 255, 220, 120)), new Rect(x0, a.Top, Math.Max(1, x1 - x0), a.Height));
+            var pen = new Pen(Faint, 1, new DashStyle(new double[] { 3, 3 }, 0));
+            ctx.DrawLine(pen, new Point(x0, a.Top), new Point(x0, a.Bottom));
+            ctx.DrawLine(pen, new Point(x1, a.Top), new Point(x1, a.Bottom));
+        }
+        string loop = inst.LoopEnd > inst.LoopStart ? "  loop" : "";
+        ctx.DrawText(Text($"{System.IO.Path.GetFileName(inst.Sample)}  {sample.Seconds:0.00} s  {sample.Rate} Hz{loop}", Label),
             new Point(a.Left, a.Bottom + 3));
     }
 }

@@ -183,6 +183,14 @@ namespace AmosLikeBasic
         public double Osc2Detune { get; set; }             // cent
         public double Osc2Mix { get; set; } = 50;          // procent of oscillator 2 in the sound
 
+        // A sampled instrument (Wave "Sample"): a WAV file played at the note's pitch. SampleNote is the
+        // note the file sounds at (60 = C-4); a loop from LoopStart to LoopEnd (in sample frames) keeps
+        // a held note sounding, LoopEnd 0 plays the sample once.
+        public string Sample { get; set; } = "";
+        public int SampleNote { get; set; } = 60;
+        public int LoopStart { get; set; }
+        public int LoopEnd { get; set; }
+
         // Where in stereo: -100 left, 0 the middle, 100 right (effect 8xx changes it in a song)
         public double Pan { get; set; }
 

@@ -463,4 +463,153 @@ public class SynthTests : IDisposable
         S.TrackPreviewRelease(1);
         S.TrackPreviewStop();
     }
+
+    // ── Sampled instruments ──────────────────────────────────────────
+
+    // A WAV file with a 220 Hz sine (A-3), 16-bit mono, written to the temp folder
+    private static string SineWav(double seconds, int rate = 44100)
+    {
+        int n = (int)(seconds * rate);
+        var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write("RIFF"u8); w.Write(36 + n * 2); w.Write("WAVE"u8);
+        w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write((short)1); w.Write(rate); w.Write(rate * 2); w.Write((short)2); w.Write((short)16);
+        w.Write("data"u8); w.Write(n * 2);
+        for (int i = 0; i < n; i++) w.Write((short)(Math.Sin(2 * Math.PI * 220 * i / rate) * 20000));
+        string path = Path.Combine(Path.GetTempPath(), "amos-sample-" + Guid.NewGuid().ToString("N") + ".wav");
+        File.WriteAllBytes(path, ms.ToArray());
+        return path;
+    }
+
+    private static string SampleInstrument(string file, string extra = "") =>
+        $"\"Wave\":\"Sample\",\"Sample\":{System.Text.Json.JsonSerializer.Serialize(file)},\"SampleNote\":57" + (extra.Length > 0 ? "," + extra : "");
+
+    [Fact]
+    public void ASampleIsPlayedAtTheNotesPitch()
+    {
+        // The file is A-3 (220 Hz); played as A-4 it sounds an octave up
+        var file = SineWav(1);
+        S.TrackPlay(SongWith(SampleInstrument(file)), loop: false);
+        var b = Render(0.3);
+        Assert.InRange(Semitones(Pitch(b, 0.05, 0.25), 440), -0.1, 0.1);
+        File.Delete(file);
+    }
+
+    [Fact]
+    public void ASampleWithoutALoopEndsAndOneWithALoopGoesOn()
+    {
+        var file = SineWav(0.1);   // 0.1 s at A-3, 0.05 s at A-4
+        S.TrackPlay(SongWith(SampleInstrument(file)), loop: false);
+        var once = Render(0.3);
+        Assert.True(Loudness(once, 0.01, 0.04) > 0.05);
+        Assert.True(Loudness(once, 0.1, 0.2) < 0.001);
+
+        SampleBank.Forget(file);
+        S.TrackPlay(SongWith(SampleInstrument(file, "\"LoopStart\":0,\"LoopEnd\":4400")), loop: false);
+        var looped = Render(0.3);
+        Assert.True(Loudness(looped, 0.15, 0.25) > 0.05);
+        File.Delete(file);
+    }
+
+    [Fact]
+    public void Effect9StartsTheSampleFurtherIn()
+    {
+        // A sample that is silent for its first 0.5 s: from the start nothing is heard at first, with
+        // 9xx (xx × 256 frames in) the sound is there at once
+        var file = SineWav(1);
+        var sample = SampleBank.ReadWav(File.ReadAllBytes(file));
+        Array.Clear(sample.Data, 0, 22050);
+        string silentStart = Path.ChangeExtension(file, ".start.wav");
+        S.WriteWav(silentStart, sample.Data.SelectMany(x => new[] { x, x }).ToArray());   // stereo, read back as mono
+        S.TrackPlay(SongWith(SampleInstrument(silentStart), "A-4 01 ...", "--- .. ..."), loop: false);
+        Assert.True(Loudness(Render(0.1), 0.02, 0.08) < 0.001);
+        S.TrackStop(); Render(0.02);
+        S.TrackPlay(SongWith(SampleInstrument(silentStart), "A-4 01 958", "--- .. ..."), loop: false);   // 0x58 × 256 = 22528
+        Assert.True(Loudness(Render(0.1), 0.02, 0.08) > 0.05);
+        File.Delete(file); File.Delete(silentStart);
+    }
+
+    [Fact]
+    public void WavFilesInEveryCommonFormatAreRead()
+    {
+        // 8-bit unsigned, and 24-bit stereo: both come back as the same mono wave
+        byte[] Wav(short channels, short bits, byte[] data) =>
+            "RIFF"u8.ToArray().Concat(BitConverter.GetBytes(36 + data.Length)).Concat("WAVEfmt "u8.ToArray())
+                .Concat(BitConverter.GetBytes(16)).Concat(BitConverter.GetBytes((short)1)).Concat(BitConverter.GetBytes(channels))
+                .Concat(BitConverter.GetBytes(8000)).Concat(BitConverter.GetBytes(8000 * channels * bits / 8))
+                .Concat(BitConverter.GetBytes((short)(channels * bits / 8))).Concat(BitConverter.GetBytes(bits))
+                .Concat("data"u8.ToArray()).Concat(BitConverter.GetBytes(data.Length)).Concat(data).ToArray();
+        var eight = SampleBank.ReadWav(Wav(1, 8, new byte[] { 128, 255, 0 }));
+        Assert.Equal(8000, eight.Rate);
+        Assert.Equal(new[] { 0f, 127 / 128f, -1f }, eight.Data);
+        // 24-bit stereo: left 0x400000 (0.5), right 0 → 0.25
+        var twentyFour = SampleBank.ReadWav(Wav(2, 24, new byte[] { 0, 0, 0x40, 0, 0, 0 }));
+        Assert.Equal(0.25f, twentyFour.Data[0], 4);
+    }
+
+    // ── More ProTracker effects ──────────────────────────────────────
+
+    [Fact]
+    public void FineSlideMovesOnceOnTheRow()
+    {
+        // E18: up half a semitone once (8 sixteenths), and it stays there
+        S.TrackPlay(SongWith("", "A-4 01 E18", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.3);
+        Assert.InRange(Semitones(Pitch(b, 0.03, 0.11), 440), 0.4, 0.6);
+        Assert.InRange(Semitones(Pitch(b, 0.15, 0.28), 440), 0.4, 0.6);
+    }
+
+    [Fact]
+    public void FineVolumeChangesTheVolumeOnce()
+    {
+        // C20 is half volume; EA8 on the next row brings it to 40 (of 64)
+        S.TrackPlay(SongWith("", "A-4 01 C20", "--- .. EA8", "--- .. ..."), loop: false);
+        var b = Render(0.3);
+        double ratio = Loudness(b, 0.16, 0.22) / Loudness(b, 0.04, 0.1);
+        Assert.InRange(ratio, 40.0 / 32 * 0.95, 40.0 / 32 * 1.05);
+    }
+
+    [Fact]
+    public void RetriggerStrikesTheNoteAgain()
+    {
+        // A note that dies quickly, struck again every 2 ticks (40 ms) by E92
+        S.TrackPlay(SongWith("\"Decay\":15,\"Sustain\":0,\"Release\":5", "A-4 01 E92", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.12);
+        Assert.True(Loudness(b, 0.040, 0.046) > Loudness(b, 0.030, 0.038) * 3);
+    }
+
+    [Fact]
+    public void PatternLoopPlaysRowsAgain()
+    {
+        // E60 marks row 0, E62 on row 1 goes back twice: rows 0 1 0 1 0 1 2
+        S.TrackPlay(SongWith("", "A-4 01 E60", "--- .. E62", "C-5 01 ...", "--- .. ..."), loop: false);
+        var rows = new List<int>();
+        for (int i = 0; i < 7; i++)
+        {
+            Render(0.12);
+            rows.Add(S.TrackRow);
+        }
+        Assert.Equal(new[] { 1, 0, 1, 0, 1, 2, 3 }, rows);
+    }
+
+    [Fact]
+    public void PatternDelayHoldsTheRow()
+    {
+        // EE2: row 0 lasts three rows (0.36 s) before row 1
+        S.TrackPlay(SongWith("", "A-4 01 EE2", "--- .. ...", "--- .. ..."), loop: false);
+        Render(0.3);
+        Assert.Equal(0, S.TrackRow);
+        Render(0.1);
+        Assert.Equal(1, S.TrackRow);
+    }
+
+    [Fact]
+    public void TremoloMovesTheVolume()
+    {
+        // 74F: the volume swings by a lot; the loudness differs much between parts of a row
+        S.TrackPlay(SongWith("", "A-4 01 78F", "--- .. 700", "--- .. 700"), loop: false);
+        var b = Render(0.36);
+        var parts = Enumerable.Range(0, 12).Select(k => Loudness(b, 0.02 + k * 0.025, 0.035 + k * 0.025)).ToList();
+        Assert.True(parts.Max() > parts.Min() * 2);
+    }
 }
