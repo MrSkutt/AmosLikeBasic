@@ -139,7 +139,7 @@ public class SynthTests : IDisposable
     {
         var song = TrackerSong.FromJson("{\"Speed\":6,\"Tempo\":125,\"Order\":[0,1,1]," +
             "\"Patterns\":[[\"A-4 01 D02\",\"--- .. ...\"],[\"--- .. ...\",\"--- .. ...\",\"C-5 01 ...\",\"--- .. B00\"]]}");
-        S.TrackPlay(song, loop: false);
+        S.TrackPlay(song, loop: true);
         var positions = new List<string>();
         for (int i = 0; i < 6; i++)
         {
@@ -611,5 +611,17 @@ public class SynthTests : IDisposable
         var b = Render(0.36);
         var parts = Enumerable.Range(0, 12).Select(k => Loudness(b, 0.02 + k * 0.025, 0.035 + k * 0.025)).ToList();
         Assert.True(parts.Max() > parts.Min() * 2);
+    }
+
+    [Fact]
+    public void AJumpBackEndsASongPlayedOnce()
+    {
+        // B00 on the last row goes back to the start: the song loops, so played once it ends there
+        S.TrackPlay(SongWith("", "A-4 01 ...", "--- .. B00"), loop: false);
+        Render(0.3);
+        Assert.False(S.IsTrackPlaying());
+        S.TrackPlay(SongWith("", "A-4 01 ...", "--- .. B00"), loop: true);
+        Render(0.3);
+        Assert.True(S.IsTrackPlaying());
     }
 }

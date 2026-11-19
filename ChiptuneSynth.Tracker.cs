@@ -50,6 +50,7 @@ namespace AmosLikeBasic
             public SampleData? Sample;
             public double SampleBaseFreq = 261.63;
             public int LoopStart, LoopEnd;
+            public int DefaultVolume = 64;
             public TableStep[] Table = Array.Empty<TableStep>();
             public int TableLoop = -1;
         }
@@ -126,6 +127,7 @@ namespace AmosLikeBasic
         private static int _trackOrder, _trackRow, _trackTick, _trackSpeed, _trackTempo;
         private static double _trackTickLeft;
         private static bool _trackJump;
+        private static bool _trackPatternLoop;   // the jump is an E6 loop inside the pattern, not to another place
         // Effect EE: the row is played this many more times (its effects, not its notes)
         private static int _trackRowDelay;
         private static bool _trackRepeatingRow;
@@ -446,6 +448,7 @@ namespace AmosLikeBasic
                 EchoMix = Math.Clamp(src.EchoMix / 100.0, 0, 1),
                 Pan = Math.Clamp(src.Pan / 100.0, -1, 1),
                 Sample = sample,
+                DefaultVolume = Math.Clamp(src.DefaultVolume, 0, 64),
                 SampleBaseFreq = 440.0 * Math.Pow(2, (Math.Clamp(src.SampleNote, 0, 127) - 69) / 12.0),
                 LoopStart = sample == null ? 0 : Math.Clamp(src.LoopStart, 0, sample.Data.Length - 1),
                 LoopEnd = sample == null || src.LoopEnd <= src.LoopStart ? 0 : Math.Min(src.LoopEnd, sample.Data.Length),
@@ -680,6 +683,7 @@ namespace AmosLikeBasic
             Volatile.Write(ref _trackPosRow, _trackRow);
 
             int? jumpOrder = null, breakRow = null;
+            bool patternLoop = false;
             for (int c = 0; c < d.Channels; c++)
             {
                 var cell = row[c];
@@ -703,7 +707,7 @@ namespace AmosLikeBasic
                     if (inst != ch.Inst) ch.Cutoff = ch.Resonance = ch.PulseWidth = ch.Pan = null;
                     ch.Inst = inst;
                     ch.InstNumber = cell.Instrument;
-                    ch.Vol = 64;
+                    ch.Vol = inst.DefaultVolume;
                 }
 
                 if (cell.Note == TrackerCell.NoteOff)
@@ -754,7 +758,7 @@ namespace AmosLikeBasic
                                 else
                                 {
                                     ch.LoopCount = ch.LoopCount == 0 ? y : ch.LoopCount - 1;
-                                    if (ch.LoopCount > 0) { jumpOrder = _trackOrder; breakRow = ch.LoopRow; }
+                                    if (ch.LoopCount > 0) { jumpOrder = _trackOrder; breakRow = ch.LoopRow; patternLoop = true; }
                                 }
                                 break;
                             case 0xE:
@@ -797,6 +801,7 @@ namespace AmosLikeBasic
                 _trackJump = true;
                 _trackJumpOrder = jumpOrder ?? _trackOrder + 1;
                 _trackBreakRow = breakRow ?? 0;
+                _trackPatternLoop = patternLoop;
             }
         }
 
@@ -996,6 +1001,14 @@ namespace AmosLikeBasic
             if (_trackJump)
             {
                 _trackJump = false;
+                // A jump back to a place already played is how a song loops; played once, it ends there
+                bool back = _trackJumpOrder < _trackOrder || (_trackJumpOrder == _trackOrder && !_trackPatternLoop);
+                if (back && !_trackLoop)
+                {
+                    ReleaseTrackVoices();
+                    Volatile.Write(ref _track, null);
+                    return;
+                }
                 _trackOrder = _trackJumpOrder;
                 _trackRow = _trackBreakRow;
             }

@@ -1175,7 +1175,12 @@ public partial class TrackerWindow : Window
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Load song",
-            FileTypeFilter = new[] { SongFileType },
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("Songs and MOD files") { Patterns = new[] { "*.amostrk", "*.mod" } },
+                SongFileType,
+                new FilePickerFileType("ProTracker modules") { Patterns = new[] { "*.mod" } }
+            },
             SuggestedStartLocation = await StartFolderAsync()
         });
         if (files.Count == 0) return;
@@ -1185,6 +1190,11 @@ public partial class TrackerWindow : Window
 
     public void LoadFile(string path)
     {
+        if (Path.GetExtension(path).Equals(".mod", StringComparison.OrdinalIgnoreCase) || IsModFile(path))
+        {
+            ImportMod(path);
+            return;
+        }
         try
         {
             var song = TrackerSong.Load(path);
@@ -1202,6 +1212,52 @@ public partial class TrackerWindow : Window
         catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
         {
             SetStatus("Could not load: " + ex.Message);
+        }
+    }
+
+    // A ProTracker module ("M.K." at byte 1080), whatever its file name
+    private static bool IsModFile(string path)
+    {
+        try
+        {
+            using var f = File.OpenRead(path);
+            if (f.Length < 1084) return false;
+            var tag = new byte[4];
+            f.Seek(1080, SeekOrigin.Begin);
+            f.ReadExactly(tag);
+            return System.Text.Encoding.ASCII.GetString(tag) is "M.K." or "M!K!" or "FLT4" or "4CHN" or "6CHN" or "8CHN";
+        }
+        catch (Exception) { return false; }
+    }
+
+    // A MOD file becomes a new, unsaved song; its samples are written as WAV files in
+    // Sound/Samples/<module name>/, which the song refers to
+    private void ImportMod(string path)
+    {
+        try
+        {
+            string name = Path.GetFileNameWithoutExtension(path);
+            string safe = new string(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
+            string folder = Path.Combine(Workspace.Sound, "Samples", safe);
+            string inSong = Path.GetRelativePath(Workspace.Root, folder).Replace('\\', '/');
+            if (inSong.StartsWith("..")) inSong = folder;   // the Sound folder is moved outside the working folder
+            var result = ModImport.Import(File.ReadAllBytes(path), name, folder, inSong);
+            Stop();
+            _song = result.Song;
+            _path = null;   // saved as a tracker song the first time SAVE is pressed
+            _undo.Clear();
+            _redo.Clear();
+            LoadSongIntoUi();
+            _dirty = true;
+            UpdateTitle();
+            UpdateStatus();
+            KeepTypingFocus();
+            SetStatus($"Read {Path.GetFileName(path)}: {result.Song.Patterns.Count} patterns, {result.Samples} samples (in Sound/Samples/{safe}). " +
+                      string.Join(" ", result.Notes) + " Save it to keep it as a tracker song.");
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            SetStatus("Could not read the module: " + ex.Message);
         }
     }
 
@@ -1260,6 +1316,8 @@ public partial class TrackerWindow : Window
             });
             path = file?.TryGetLocalPath();
             if (path == null) return false;
+            // Some save dialogs add the extension to a name that already has it
+            while (path.EndsWith(".amostrk.amostrk", StringComparison.OrdinalIgnoreCase)) path = path[..^".amostrk".Length];
         }
         try
         {

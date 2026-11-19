@@ -187,6 +187,8 @@ namespace AmosLikeBasic
         // note the file sounds at (60 = C-4); a loop from LoopStart to LoopEnd (in sample frames) keeps
         // a held note sounding, LoopEnd 0 plays the sample once.
         public string Sample { get; set; } = "";
+        // The volume a note starts at when it gets this instrument (0 – 64), as a MOD file's samples have
+        public int DefaultVolume { get; set; } = 64;
         public int SampleNote { get; set; } = 60;
         public int LoopStart { get; set; }
         public int LoopEnd { get; set; }

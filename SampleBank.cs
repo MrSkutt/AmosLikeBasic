@@ -39,6 +39,19 @@ public static class SampleBank
         });
     }
 
+    // A sample as a 16-bit mono WAV file at its own rate
+    public static void WriteWav(string path, SampleData sample)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        using var w = new BinaryWriter(File.Create(path));
+        int bytes = sample.Data.Length * 2;
+        w.Write("RIFF"u8); w.Write(36 + bytes); w.Write("WAVE"u8);
+        w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write((short)1);
+        w.Write(sample.Rate); w.Write(sample.Rate * 2); w.Write((short)2); w.Write((short)16);
+        w.Write("data"u8); w.Write(bytes);
+        foreach (var s in sample.Data) w.Write((short)Math.Round(Math.Clamp(s, -1f, 1f) * 32767));
+    }
+
     // Forgets a file, so that a changed one is read again
     public static void Forget(string file) => Cache.TryRemove(file, out _);
 

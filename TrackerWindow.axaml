@@ -24,23 +24,36 @@
                 <Button Content="PLAY SONG" Classes="amos-button" Click="PlaySong_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F5"/>
                 <Button Content="PLAY PATTERN" Classes="amos-button" Click="PlayPattern_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F6"/>
                 <Button Content="STOP" Classes="amos-button" Click="Stop_OnClick" Focusable="False" Margin="0,0,14,0" ToolTip.Tip="Esc"/>
-                <ToggleButton Name="EditToggle" Content="EDIT" Classes="amos-button" IsChecked="False" Focusable="False" Margin="0,0,4,0"
-                              Click="EditToggle_OnClick" ToolTip.Tip="Space"/>
-                <CheckBox Name="FollowCheck" Content="Follow" IsChecked="True" Focusable="False" Margin="4,0,14,0" Foreground="{DynamicResource AmosLabelFg}"/>
-
-                <TextBlock Text="Title" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <TextBox Name="TitleBox" Width="140" Margin="0,0,12,0"/>
-                <TextBlock Text="Speed" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <NumericUpDown Name="SpeedBox" Minimum="1" Maximum="31" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0"/>
-                <TextBlock Text="Tempo" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <NumericUpDown Name="TempoBox" Minimum="32" Maximum="255" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0"/>
-                <TextBlock Text="Octave" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <NumericUpDown Name="OctaveBox" Minimum="0" Maximum="8" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0" ToolTip.Tip="F1 / F2"/>
-                <TextBlock Text="Step" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <NumericUpDown Name="StepBox" Minimum="0" Maximum="16" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0"/>
-                <TextBlock Text="Channels" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                <NumericUpDown Name="ChannelsBox" Minimum="4" Maximum="8" Increment="1" FormatString="0" Width="110"
-                               ToolTip.Tip="How many channels the song uses, 4 – 8. Sound effects (TRACK SFX) use the synth channels above them."/>
+                <StackPanel Orientation="Horizontal">
+                    <ToggleButton Name="EditToggle" Content="EDIT" Classes="amos-button" IsChecked="False" Focusable="False" Margin="0,0,4,0"
+                                  Click="EditToggle_OnClick" ToolTip.Tip="Space"/>
+                    <CheckBox Name="FollowCheck" Content="Follow" IsChecked="True" Focusable="False" Margin="4,0,14,0" Foreground="{DynamicResource AmosLabelFg}"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Title" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <TextBox Name="TitleBox" Width="140" Margin="0,0,12,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Speed" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <NumericUpDown Name="SpeedBox" Minimum="1" Maximum="31" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Tempo" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <NumericUpDown Name="TempoBox" Minimum="32" Maximum="255" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Octave" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <NumericUpDown Name="OctaveBox" Minimum="0" Maximum="8" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0" ToolTip.Tip="F1 / F2"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Step" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <NumericUpDown Name="StepBox" Minimum="0" Maximum="16" Increment="1" FormatString="0" Width="110" Margin="0,0,8,0"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Channels" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                    <NumericUpDown Name="ChannelsBox" Minimum="4" Maximum="8" Increment="1" FormatString="0" Width="110"
+                                   ToolTip.Tip="How many channels the song uses, 4 – 8. Sound effects (TRACK SFX) use the synth channels above them."/>
+                </StackPanel>
             </WrapPanel>
         </Border>
 

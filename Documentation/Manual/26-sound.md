@@ -516,6 +516,16 @@ The file is JSON, so it can be opened in an ordinary text editor. Each row of a 
 
 An error in the file gives an error message that tells you the pattern, row and channel.
 
+### Reading MOD files
+
+**LOAD** also opens ProTracker modules (`.mod`, with 4, 6 or 8 channels), so you can open a song from the Amiga and change it. The patterns, the order list and the effects are read as they are, since the tracker's effects are ProTracker's. Each sample becomes a sampled instrument with its loop, its volume and its finetune; the samples are written as WAV files in `Sound/Samples/<module name>/`, which the song refers to. The pitches are kept: ProTracker's C-2 is C-4 here.
+
+The module becomes a new song that is not saved yet. **SAVE** keeps it as a tracker song (`.amostrk`), and from then on it is an ordinary song: you can change notes, swap a sample for a synth sound, or play it from your program with `TRACK PLAY`.
+
+A few things differ from the Amiga. `E0x` (the Amiga's filter), `E3x`, `E4x`, `E5x`, `E7x`, `E8x` and `EFx` are left out, and the status line says if the module used any. A slide is turned into sixteenths of a semitone at the note it starts from, so a very long slide can end slightly off. XM, S3M and IT files cannot be read into the tracker, but `MUSIC PLAY` plays them.
+
+A song played once (not looping) ends when it jumps back to a place it has already played, with `Bxx` or `Dxx`, as in ProTracker; that is how a song says it repeats.
+
 ## Your own sound effects
 
 On the C64 sound effects were made the same way as instruments: a table that changes the pitch and waveform every frame. A jump is a note that rises, an explosion noise that falls. In AMOS Like Basic you make them in the tracker and play them with `TRACK SFX`.
@@ -587,7 +597,7 @@ You can also play recorded sounds and ready-made music:
 | `MUSIC STOP` | stops the music |
 
 ```basic nocheck
-MUSIC PLAY "Sound/mus2.mod"
+MUSIC PLAY "Sound/Tracker/MODs/mus2.mod"
 SAM PLAY "Sound/ding.mp3"
 ```
 
