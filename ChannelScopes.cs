@@ -106,7 +106,7 @@ public sealed class ChannelScopes : Control
         base.OnPointerPressed(e);
         if (Pattern == null) return;
         double x = e.GetPosition(this).X;
-        for (int c = 0; c < Pattern.ChannelCount; c++)
+        for (int c = Pattern.FirstChannel; c < Pattern.FirstChannel + Pattern.VisibleChannels; c++)
             if (x >= Pattern.ChannelLeft(c) && x < Pattern.ChannelLeft(c) + Pattern.ChannelSpan)
             {
                 Pattern.ToggleMute(c, solo: e.GetCurrentPoint(this).Properties.IsRightButtonPressed);
@@ -129,7 +129,7 @@ public sealed class ChannelScopes : Control
         var dimPen = new Pen(new SolidColorBrush(Color.FromArgb(90, 128, 128, 128)), 1.5);
         double h = Bounds.Height;
 
-        for (int c = 0; c < Pattern.ChannelCount; c++)
+        for (int c = Pattern.FirstChannel; c < Pattern.FirstChannel + Pattern.VisibleChannels; c++)
         {
             double left = Pattern.ChannelLeft(c) + 3;
             double width = Pattern.ChannelSpan - 6;

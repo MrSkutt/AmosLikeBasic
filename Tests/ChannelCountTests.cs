@@ -71,9 +71,48 @@ public class ChannelCountTests : IDisposable
 
     [Theory]
     [InlineData(1, 4)]
-    [InlineData(12, 8)]
-    public void The_number_of_channels_stays_within_4_and_8(int asked, int got) =>
+    [InlineData(12, 12)]
+    [InlineData(40, 32)]
+    public void The_number_of_channels_stays_within_4_and_32(int asked, int got) =>
         Assert.Equal(got, new TrackerSong { Channels = asked }.Channels);
+
+    [Fact]
+    public void A_32_channel_song_plays_on_channel_32()
+    {
+        S.TrackPlay(SongWithNoteIn(32), loop: false);
+        Render(0.2);
+        Assert.True(ScopePeak(32) > 0.1, "channel 32 sounds");
+        Assert.True(ScopePeak(8) < 1e-6, "channel 8 is silent");
+    }
+
+    [AvaloniaFact]
+    public void The_editor_scrolls_sideways_to_the_cursors_channel()
+    {
+        var w = new TrackerWindow { Width = 1280, Height = 820 };
+        w.Show();
+        Dispatcher.UIThread.RunJobs();
+        var pattern = w.FindControl<PatternView>("Pattern")!;
+        w.FindControl<NumericUpDown>("ChannelsBox")!.Value = 32;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(32, pattern.ChannelCount);
+        Assert.True(pattern.VisibleChannels < 32, "not all 32 fit");
+        Assert.Equal(0, pattern.FirstChannel);
+
+        pattern.Focus();
+        Dispatcher.UIThread.RunJobs();
+        for (int i = 0; i < 19; i++)
+        {
+            w.KeyPress(Key.Tab, RawInputModifiers.None, PhysicalKey.None, null);
+            w.KeyRelease(Key.Tab, RawInputModifiers.None, PhysicalKey.None, null);
+        }
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(19, pattern.CursorChannel);
+        Assert.True(pattern.IsChannelVisible(19) && pattern.FirstChannel > 0, $"first {pattern.FirstChannel}, {pattern.VisibleChannels} shown");
+        Assert.True(pattern.PreferredWidth <= pattern.Bounds.Width + 1);
+
+        typeof(TrackerWindow).GetField("_dirty", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(w, false);
+        w.Close();
+    }
 
     [Fact]
     public void An_eight_channel_song_plays_on_synth_channel_8()

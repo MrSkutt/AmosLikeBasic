@@ -35,8 +35,15 @@ public class PatternView : Control
     public int PlayRow { get; set; } = -1;     // the row being played, -1 = none
     public bool[] Muted { get; } = new bool[TrackerSong.MaxChannels];
 
-    // How many channels the song has (4 – 8)
+    // How many channels the song has (4 – 32)
     public int ChannelCount => Song?.Channels ?? TrackerSong.DefaultChannels;
+
+    // When the channels do not all fit, the view shows VisibleChannels of them from FirstChannel and
+    // follows the cursor sideways
+    public int FirstChannel { get; private set; }
+    public int VisibleChannels => Math.Max(1, Math.Min(_fits, ChannelCount));
+    private int _fits = TrackerSong.MaxChannels;
+    public bool IsChannelVisible(int c) => c >= FirstChannel && c < FirstChannel + VisibleChannels;
 
     // Events to the window
     public event Action? BeforeEdit;                 // before the pattern changes, for undo
@@ -88,7 +95,7 @@ public class PatternView : Control
 
     private int Rows => Pattern?.Rows ?? TrackerSong.DefaultRows;
 
-    public double PreferredWidth => (RowNumberChars + ChannelCount * (CellChars + ChannelGapChars)) * _charW + 16;
+    public double PreferredWidth => (RowNumberChars + VisibleChannels * (CellChars + ChannelGapChars)) * _charW + 16;
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -106,18 +113,40 @@ public class PatternView : Control
     private void FitFont(double width)
     {
         double size = MaxFontSize;
+        int fits = TrackerSong.MaxChannels;
         if (!double.IsInfinity(width) && width > 0)
         {
             double charsWide = RowNumberChars + ChannelCount * (CellChars + ChannelGapChars);
             double charAtMax = MeasureCharWidth(MaxFontSize);
             size = Math.Clamp(Math.Floor((width - 16) / charsWide / charAtMax * MaxFontSize * 2) / 2, MinFontSize, MaxFontSize);
+            // At the smallest size, as many as fit
+            fits = Math.Max(1, (int)(((width - 16) / MeasureCharWidth(size) - RowNumberChars) / (CellChars + ChannelGapChars)));
         }
-        if (size == FontSize) return;
-        FontSize = size;
-        _textCache.Clear();
-        MeasureFont();
-        InvalidateVisual();
-        ChannelsMoved?.Invoke();
+        bool changed = size != FontSize || fits != _fits;
+        _fits = fits;
+        if (size != FontSize)
+        {
+            FontSize = size;
+            _textCache.Clear();
+            MeasureFont();
+        }
+        if (KeepCursorChannelInView() || changed)
+        {
+            InvalidateVisual();
+            ChannelsMoved?.Invoke();
+        }
+    }
+
+    // Scrolls sideways so that the cursor's channel shows; true if the view moved
+    private bool KeepCursorChannelInView()
+    {
+        int first = FirstChannel;
+        if (CursorChannel < first) first = CursorChannel;
+        else if (CursorChannel >= first + VisibleChannels) first = CursorChannel - VisibleChannels + 1;
+        first = Math.Clamp(first, 0, Math.Max(0, ChannelCount - VisibleChannels));
+        if (first == FirstChannel) return false;
+        FirstChannel = first;
+        return true;
     }
 
     private double MeasureCharWidth(double size) =>
@@ -131,6 +160,8 @@ public class PatternView : Control
     {
         CursorChannel = Math.Min(CursorChannel, ChannelCount - 1);
         if (_anchorRow >= 0) _anchorChannel = Math.Min(_anchorChannel, ChannelCount - 1);
+        FitFont(Bounds.Width);
+        KeepCursorChannelInView();
         InvalidateMeasure();
         InvalidateVisual();
         ChannelsMoved?.Invoke();
@@ -154,6 +185,7 @@ public class PatternView : Control
         CursorRow = ((row % rows) + rows) % rows;
         CursorChannel = Math.Clamp(channel, 0, ChannelCount - 1);
         CursorColumn = Math.Clamp(column, 0, ColumnsPerChannel - 1);
+        if (KeepCursorChannelInView()) ChannelsMoved?.Invoke();
         InvalidateVisual();
         CursorMoved?.Invoke();
     }
@@ -198,7 +230,7 @@ public class PatternView : Control
         return ft;
     }
 
-    private double ChannelX(int c) => 8 + (RowNumberChars + c * (CellChars + ChannelGapChars)) * _charW;
+    private double ChannelX(int c) => 8 + (RowNumberChars + (c - FirstChannel) * (CellChars + ChannelGapChars)) * _charW;
 
     // Where channel c's column starts (at the line before it) and how wide it is, for ChannelScopes
     public double ChannelLeft(int c) => ChannelX(c) - _charW;
@@ -253,7 +285,7 @@ public class PatternView : Control
 
             ctx.DrawText(Text(r.ToString("D2", CultureInfo.InvariantCulture), r % 4 == 0 ? title : label), new Point(8, y + 1));
 
-            for (int c = 0; c < ChannelCount; c++)
+            for (int c = FirstChannel; c < FirstChannel + VisibleChannels; c++)
             {
                 double x = ChannelX(c);
                 if (r >= s0 && r <= s1 && c >= sc0 && c <= sc1)
@@ -282,16 +314,20 @@ public class PatternView : Control
         // Kanalrubriker
         ctx.FillRectangle(panel, new Rect(0, 0, w, headerH));
         ctx.DrawLine(new Pen(border, 1), new Point(0, headerH - 1), new Point(w, headerH - 1));
-        for (int c = 0; c < ChannelCount; c++)
+        for (int c = FirstChannel; c < FirstChannel + VisibleChannels; c++)
         {
             string h = Muted[c] ? $"CH{c + 1} MUTE" : $"CH{c + 1}";
             ctx.DrawText(Text(h, Muted[c] ? dim : title), new Point(ChannelX(c), 3));
         }
+        // More channels to the side: an arrow where they are
+        if (FirstChannel > 0) ctx.DrawText(Text("<", title), new Point(ChannelX(FirstChannel) - 1.8 * _charW, 3));
+        if (FirstChannel + VisibleChannels < ChannelCount)
+            ctx.DrawText(Text(">", title), new Point(ChannelX(FirstChannel + VisibleChannels) - 1.8 * _charW, 3));
         ctx.DrawText(Text(PatternIndex.ToString("D2", CultureInfo.InvariantCulture), label), new Point(8, 3));
 
         // Lines between the channels
         var linePen = new Pen(new SolidColorBrush(Color.FromArgb(70, 128, 160, 255)), 1);
-        for (int c = 0; c < ChannelCount; c++)
+        for (int c = FirstChannel; c < FirstChannel + VisibleChannels; c++)
         {
             double x = ChannelX(c) - _charW;
             ctx.DrawLine(linePen, new Point(x, 0), new Point(x, Bounds.Height));
@@ -306,8 +342,8 @@ public class PatternView : Control
     {
         int visible = Math.Max(1, (int)((Bounds.Height - HeaderH) / _rowH));
         int row = CursorRow - visible / 2 + (int)Math.Floor((p.Y - HeaderH) / _rowH);
-        int channel = 0;
-        for (int c = ChannelCount - 1; c >= 0; c--)
+        int channel = FirstChannel;
+        for (int c = FirstChannel + VisibleChannels - 1; c >= FirstChannel; c--)
             if (p.X >= ChannelX(c) - _charW) { channel = c; break; }
         double local = (p.X - ChannelX(channel)) / _charW;
         int column = 0;
@@ -390,6 +426,14 @@ public class PatternView : Control
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
+        // Sideways (or Shift and the wheel): to the next channel
+        if (Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y) || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            double d = Math.Abs(e.Delta.X) > Math.Abs(e.Delta.Y) ? e.Delta.X : e.Delta.Y;
+            SetCursor(CursorRow, CursorChannel + (d > 0 ? -1 : 1), CursorColumn);
+            e.Handled = true;
+            return;
+        }
         int steps = (int)Math.Round(-e.Delta.Y * 3);
         if (steps == 0) steps = e.Delta.Y > 0 ? -1 : 1;
         SetCursor(Math.Clamp(CursorRow + steps, 0, Rows - 1), CursorChannel, CursorColumn, HasSelection);

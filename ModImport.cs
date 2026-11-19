@@ -6,7 +6,7 @@ using System.Text;
 
 namespace AmosLikeBasic;
 
-// Reads a ProTracker module (.mod with 4 – 8 channels) into a tracker song: the patterns, the order
+// Reads a ProTracker module (.mod with 4 – 32 channels) into a tracker song: the patterns, the order
 // list and the effects, and every sample as a sampled instrument (written as a WAV file, since the
 // song refers to its samples by file). The pitches are kept: the Amiga's period 428 (C-2 in
 // ProTracker) is note 60 here, played at the sample's own rate of 8287 Hz.

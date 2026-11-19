@@ -94,6 +94,14 @@ public class ModImportTests : IDisposable
     }
 
     [Fact]
+    public void An_XM_with_22_channels_keeps_them_all()
+    {
+        var r = XmImport.Import(File.ReadAllBytes(Repo.PathOf("Sound/Tracker/XM/Cube.XM")), "cube", _temp, _temp);
+        Assert.Equal(22, r.Song.Channels);
+        Assert.DoesNotContain(r.Notes, n => n.Contains("were kept"));
+    }
+
+    [Fact]
     public void Not_a_mod_file_says_so()
     {
         var e = Assert.Throws<InvalidDataException>(() => ModImport.Import(new byte[2000], "x", _temp, _temp));

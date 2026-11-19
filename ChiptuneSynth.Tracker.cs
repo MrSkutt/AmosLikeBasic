@@ -119,14 +119,14 @@ namespace AmosLikeBasic
 
         private static readonly TrackInstrument DefaultInstrument = new();
         private static readonly TrackRequest TrackStopRequest = new(null, 0, 0, false);
-        // Channels 1 – _trackUsed play the song (4 – 8), the ones above are used by the sound effects
-        // (TRACK SFX). A song with 8 channels lends channel 8 to an effect while it sounds.
+        // Channels 1 – _trackUsed play the song (4 – 32), the ones above (up to 8) are used by the sound
+        // effects (TRACK SFX). A song with 8 or more channels lends channel 8 to an effect while it sounds.
         private static readonly TrackChannel[] _trackChannels = CreateTrackChannels();
         private static int _trackUsed = TrackerSong.DefaultChannels;
 
         private static TrackChannel[] CreateTrackChannels()
         {
-            var a = new TrackChannel[Channels];
+            var a = new TrackChannel[Voices];
             for (int i = 0; i < a.Length; i++) a[i] = new TrackChannel();
             return a;
         }
@@ -148,7 +148,7 @@ namespace AmosLikeBasic
 
         // Changes from the editor that the audio thread makes at the next sample
         private static readonly ConcurrentQueue<Action> _trackCommands = new();
-        private static readonly bool[] _trackMute = new bool[Channels];
+        private static readonly bool[] _trackMute = new bool[Voices];
 
         // ════════════════════════════════════════════════════════════════
         //  From BASIC and the editor
@@ -458,8 +458,8 @@ namespace AmosLikeBasic
                 FilterEnvDecay = Math.Max(1, src.FilterEnvDecay) / 1000.0,
                 VibratoDepth = Math.Max(0, src.Vibrato) / 100.0,
                 VibratoRate = Math.Max(0, src.VibratoRate),
-                RingSource = src.Ring <= 0 ? -1 : ChIdx(src.Ring),
-                SyncSource = src.Sync <= 0 ? -1 : ChIdx(src.Sync),
+                RingSource = src.Ring <= 0 ? -1 : Math.Clamp(src.Ring - 1, 0, Voices - 1),
+                SyncSource = src.Sync <= 0 ? -1 : Math.Clamp(src.Sync - 1, 0, Voices - 1),
                 Osc2Wave = CompileOsc2Wave(src.Osc2Wave),
                 Osc2Ratio = Math.Pow(2, (Math.Clamp(src.Osc2Semitones, -48, 48) + Math.Clamp(src.Osc2Detune, -1200, 1200) / 100.0) / 12.0),
                 Osc2Mix = Math.Clamp(src.Osc2Mix / 100.0, 0, 1),

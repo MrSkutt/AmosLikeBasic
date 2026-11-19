@@ -16,7 +16,8 @@ namespace AmosLikeBasic
     public partial class ChiptuneSynth
     {
         public const int SampleRate = 44100;
-        public const int Channels = 8;
+        public const int Channels = 8;    // the channels BASIC plays on (PLAY, TRACK SFX)
+        public const int Voices = 32;     // all of them: a tracker song can have up to 32 channels
         private const int SfxSlots = 4;
 
         public enum WaveformType
@@ -271,8 +272,8 @@ namespace AmosLikeBasic
 
         private static Voice[] CreateVoices()
         {
-            var v = new Voice[Channels];
-            for (int i = 0; i < Channels; i++) v[i] = new Voice();
+            var v = new Voice[Voices];
+            for (int i = 0; i < Voices; i++) v[i] = new Voice();
             return v;
         }
 
@@ -873,7 +874,7 @@ namespace AmosLikeBasic
             TrackSample();
             left = right = 0;
             int pos = _scopePos;
-            for (int c = 0; c < Channels; c++)
+            for (int c = 0; c < Voices; c++)
             {
                 var v = _voices[c];
                 double s = RenderVoice(v);
@@ -904,16 +905,16 @@ namespace AmosLikeBasic
 
         private static float[][] CreateScopes()
         {
-            var s = new float[Channels][];
-            for (int c = 0; c < Channels; c++) s[c] = new float[ScopeSize];
+            var s = new float[Voices][];
+            for (int c = 0; c < Voices; c++) s[c] = new float[ScopeSize];
             return s;
         }
 
-        // Copies the latest samples of a channel (1 – 8), oldest first, into dest (at most ScopeSize).
+        // Copies the latest samples of a channel (1 – 32), oldest first, into dest (at most ScopeSize).
         // Read while the audio thread writes, so the oldest few may already be a lap newer; fine for a picture.
         public static void ReadScope(int channel, Span<float> dest)
         {
-            var buf = _scope[ChIdx(channel)];
+            var buf = _scope[Math.Clamp(channel - 1, 0, Voices - 1)];
             int n = Math.Min(dest.Length, ScopeSize);
             int start = (Volatile.Read(ref _scopePos) - n) & (ScopeSize - 1);
             for (int i = 0; i < n; i++) dest[i] = buf[(start + i) & (ScopeSize - 1)];

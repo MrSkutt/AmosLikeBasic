@@ -14,11 +14,11 @@ namespace AmosLikeBasic
     //   "C-4 01 A04|--- .. ...|=== .. ...|E-3 02 C20"
     // Each cell is note, instrument (hex) and effect (letter/digit + two hex digits).
     //
-    // A song has 4 – 8 channels (Channels); files from before that have 4. The patterns always
+    // A song has 4 – 32 channels (Channels); files from before that have 4. The patterns always
     // hold MaxChannels channels, so that fewer channels and back again loses nothing until saving.
     public sealed class TrackerSong
     {
-        public const int MaxChannels = 8;
+        public const int MaxChannels = 32;
         public const int MinChannels = 4;
         public const int DefaultChannels = 4;
         public const int DefaultRows = 64;

@@ -309,7 +309,7 @@ GOTO Loop
 | `TRACKPOS()` | the place in the order list being played, from 0 |
 | `TRACKROW()` | the row in the pattern being played, from 0 |
 
-A tracker song has 4 to 8 channels and uses that many synth channels, from channel 1. A song with four channels uses channels 1 – 4, and channels 5 – 8 are free for `PLAY MUSIC` and sound effects while it plays. A song with more channels takes more of them: with six, channels 7 and 8 are left. Sound effects such as `PLAY COIN` do not affect the song.
+A tracker song has 4 to 32 channels and uses that many synth channels, from channel 1 (the synth has 32 for songs; `PLAY` and the other BASIC commands use channels 1 – 8). A song with four channels uses channels 1 – 4, and channels 5 – 8 are free for `PLAY MUSIC` and sound effects while it plays. A song with more channels takes more of them: with six, channels 7 and 8 are left. Sound effects such as `PLAY COIN` do not affect the song.
 
 The project `Projects/trackerdemo.amosproj` plays Forest Song, the song from Forest Hop.
 
@@ -352,7 +352,7 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **Instruments, volume and effects.** With the arrow keys the cursor goes to the instrument, volume and effect columns. There you type digits and letters directly: `0`–`9` and `A`–`F` for hex digits, and in the first column of the effect also `G`, `H` and `I`. `Delete` or `Backspace` clears whatever the cursor is on.
 
-**Playing.** `F5` plays the song from the place selected in the order list. `F6` plays the pattern over and over, `F7` plays the pattern from the cursor row and `Esc` stops. With **Follow** the pattern follows along while the song plays. Click a channel's oscilloscope (or its heading) to mute the channel, and right-click to hear only that channel (solo); right-click it again and all are heard. A muted channel's oscilloscope says MUTE, and the one heard alone says SOLO.
+**Playing.** `F5` plays the song from the place selected in the order list. `F6` plays the pattern over and over, `F7` plays the pattern from the cursor row and `Esc` stops. With **Follow** the pattern follows along while the song plays. When the song has more channels than fit in the window, the pattern shows as many as fit and follows the cursor sideways (`Tab`, the arrow keys, or Shift and the mouse wheel); an arrow in the heading shows that there are more. Click a channel's oscilloscope (or its heading) to mute the channel, and right-click to hear only that channel (solo); right-click it again and all are heard. A muted channel's oscilloscope says MUTE, and the one heard alone says SOLO.
 
 **Saving as a sound file.** **WAV** in the toolbar saves the song as a WAV file, to use the music in a video, send it to a friend or play it anywhere. It is made much faster than the song plays, and it is the song as you hear it: muted channels are left out, so you can also save the drums or the melody on their own.
 
@@ -532,7 +532,7 @@ An error in the file gives an error message that tells you the pattern, row and 
 
 ### Reading MOD and XM files
 
-**LOAD** also opens ProTracker modules (`.mod`, with 4, 6 or 8 channels) and FastTracker 2 modules (`.xm`), so you can open a song from the Amiga or the PC and change it, or add chip sounds on the channels it does not use. The patterns, the order list and the effects are read as they are, since the tracker's effects are ProTracker's. Each sample becomes a sampled instrument with its loop, its volume and its tuning; the samples are written as WAV files in `Sound/Samples/<module name>/`, which the song refers to. The pitches are kept: ProTracker's C-2 and FastTracker's C-4 are C-4 here.
+**LOAD** also opens ProTracker modules (`.mod`, with 4 – 32 channels) and FastTracker 2 modules (`.xm`), so you can open a song from the Amiga or the PC and change it, or add chip sounds on the channels it does not use. The patterns, the order list and the effects are read as they are, since the tracker's effects are ProTracker's. Each sample becomes a sampled instrument with its loop, its volume and its tuning; the samples are written as WAV files in `Sound/Samples/<module name>/`, which the song refers to. The pitches are kept: ProTracker's C-2 and FastTracker's C-4 are C-4 here.
 
 The module becomes a new song that is not saved yet. **SAVE** keeps it as a tracker song (`.amostrk`), and from then on it is an ordinary song: you can change notes, swap a sample for a synth sound, or play it from your program with `TRACK PLAY`. To save it as a MOD or XM file again, use another tracker.
 
@@ -543,7 +543,7 @@ A few things differ from the originals, and the status line says what a module u
 - An XM instrument with several samples over the keys becomes one instrument per sample, and a note gets the one its key plays.
 - XM's volume envelope is kept as an envelope of points, with its sustain point, loop and fadeout. The panning envelope and the auto-vibrato are left out.
 - A volume in XM's volume column goes in the tracker's volume column. Its other commands (volume slides, vibrato, pan and glide) go in the effect column when that is free, and are left out when it is not.
-- The tracker plays at most 8 channels, so of an XM with more, the first 8 that play something are kept.
+- The tracker plays at most 32 channels, as FastTracker 2 does.
 
 S3M and IT files cannot be read into the tracker, but `MUSIC PLAY` plays them.
 
@@ -588,7 +588,7 @@ WAIT 800
 | `Step` | footsteps |
 | `Complete` | level complete |
 
-The sounds play on synth channels 5 – 8, and each new sound takes the channel that becomes free first. A tracker song on channels 1 – 4 therefore carries on undisturbed. While a song with more channels plays, the sounds only use the channels above the song's; with six channels, 7 and 8. A song with all eight channels lends channel 8 to the sound while it plays, as in many C64 games, and that channel of the song comes back at its next note. If you use `PLAY MUSIC` on channels 5 – 8, the sound effect borrows the channel and gives it back with the same settings afterwards.
+The sounds play on synth channels 5 – 8, and each new sound takes the channel that becomes free first. A tracker song on channels 1 – 4 therefore carries on undisturbed. While a song with more channels plays, the sounds only use the channels above the song's; with six channels, 7 and 8. A song with eight channels or more lends channel 8 to the sound while it plays, as in many C64 games, and that channel of the song comes back at its next note. If you use `PLAY MUSIC` on channels 5 – 8, the sound effect borrows the channel and gives it back with the same settings afterwards.
 
 Without a length the sound lasts as long as the instrument is made for: a sound with sustain 0 until it has faded, one with a table until the table ends, and otherwise a quarter of a second. The note decides the pitch, so the same sound can be played higher or lower, for example a coin that sounds brighter for each coin in a row.
 
