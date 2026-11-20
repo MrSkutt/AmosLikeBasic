@@ -1391,21 +1391,7 @@ public partial class MainWindow : Window
     
     private void ApplyThemeByName(string themeName)
     {
-        var theme = themeName switch
-        {
-            "LightClean" => AmosThemes.LightClean,
-            "DarkPro" => AmosThemes.DarkPro,
-            "Workbench" => AmosThemes.Workbench,
-            "C64" => AmosThemes.C64,
-            "StosClassic"  => AmosThemes.StosClassic,
-            "StosEditor"   => AmosThemes.StosEditor,
-            "Emerald" => AmosThemes.Emerald,
-            "NeonNight" => AmosThemes.NeonNight,
-            "CatppuccinMocha" => AmosThemes.CatppuccinMocha,
-            _ => AmosThemes.ClassicBlue
-        };
-    
-        ApplyTheme(theme);
+        ApplyTheme(AmosThemes.ByName(themeName));
 
         // Save the theme in the config
         configService.Config.DefaultTheme = themeName;

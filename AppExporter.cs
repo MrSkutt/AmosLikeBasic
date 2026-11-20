@@ -16,21 +16,7 @@ public static class AppExporter
 
     // The folder with AmosLikeBasic.csproj and Tools/export_app.py, searched upwards from the program
     // (e.g. bin/Debug/net9.0/osx-arm64 -> the project folder). null if the source code is not there.
-    public static string? FindSourceRoot()
-    {
-        foreach (var start in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
-        {
-            var dir = new DirectoryInfo(start);
-            while (dir != null)
-            {
-                if (File.Exists(Path.Combine(dir.FullName, "AmosLikeBasic.csproj")) &&
-                    File.Exists(Path.Combine(dir.FullName, ScriptPath)))
-                    return dir.FullName;
-                dir = dir.Parent;
-            }
-        }
-        return null;
-    }
+    public static string? FindSourceRoot() => Workspace.FindSourceRoot();
 
     // Runs the export. Returns the exit code of the process (0 = success).
     public static async Task<int> RunAsync(string sourceRoot, string projectFile, string name, string platform,

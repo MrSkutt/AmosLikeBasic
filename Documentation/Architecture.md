@@ -11,6 +11,17 @@ plus the test project in `Tests/`.
 
 ## 1. The big picture
 
+The code is in four projects in this repository:
+
+| Project | What it is |
+|---|---|
+| `AmosLikeBasic.Core` | The engine, no windows: `ChiptuneSynth` (the synth, tracker playback, sound effects, WAV export), `TrackerSong` and its instruments, `SampleBank`, the `Ym2149` with `YmFile` / `YmPlayer`, the readers `ModImport`, `XmImport`, `YmImport`, `InstrumentSimplifier`, and the basics: `Workspace`, `ResourceLoader`, `ConfigService`, `AudioOutput` |
+| `AmosLikeBasic.Tracker` | The tracker's windows and controls (`TrackerWindow`, `PatternView`, `ChannelScopes`, `Knob`, `InstrumentGraphs`, `InstrumentLibraryWindow`, `YmBrowserWindow`) and the AMOS look shared by both apps: `AmosStyles.axaml` (theme colours and control styles), `AmosThemes`, `ThemeResources` |
+| `AmosLikeBasic` | The IDE: `MainWindow`, the interpreter, graphics, the sprite and map editors, `AudioEngine` for `SAM` and `MUSIC` |
+| `AmosTracker` | AMOS Tracker: the tracker as an app of its own, with the same settings, theme and sound card |
+
+The IDE uses both libraries, the tracker app only the two libraries; the tests use the IDE (and so all of them). All the code is in the namespace `AmosLikeBasic`.
+
 ```mermaid
 flowchart TB
     subgraph IDE["IDE windows (UI thread)"]

@@ -40,9 +40,27 @@ public static class Workspace
     public static string DefaultOf(WorkspaceFolder folder) => Path.Combine(Root, folder.ToString());
 
     public static void Setup() =>
-        Setup(AppExporter.FindSourceRoot(), AppContext.BaseDirectory,
+        Setup(FindSourceRoot(), AppContext.BaseDirectory,
               Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
               Path.Combine(ConfigService.GetConfigFolder("AmosProject"), "folders.json"));
+
+    // The repository, when the program runs from the source code (a folder above with the project and
+    // the export script), otherwise null
+    public static string? FindSourceRoot()
+    {
+        foreach (var start in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
+        {
+            var dir = new DirectoryInfo(start);
+            while (dir != null)
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "AmosLikeBasic.csproj")) &&
+                    File.Exists(Path.Combine(dir.FullName, "Tools", "export_app.py")))
+                    return dir.FullName;
+                dir = dir.Parent;
+            }
+        }
+        return null;
+    }
 
     // sourceRoot is the repository when run from the source code, otherwise null.
     // appDir is where the app's own files are, documents the user's Documents folder,

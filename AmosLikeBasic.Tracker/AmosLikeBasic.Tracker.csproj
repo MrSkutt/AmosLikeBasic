@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- The tracker's windows and controls, and the AMOS look (colours, styles, themes) that the IDE
+         and the stand-alone tracker share -->
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+        <RootNamespace>AmosLikeBasic</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Avalonia" Version="12.1.6" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../AmosLikeBasic.Core/AmosLikeBasic.Core.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="AmosLikeBasic" />
+        <InternalsVisibleTo Include="AmosTracker" />
+        <InternalsVisibleTo Include="AmosLikeBasic.Tests" />
+    </ItemGroup>
+</Project>

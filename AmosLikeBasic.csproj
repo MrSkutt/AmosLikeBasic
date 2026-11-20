@@ -16,8 +16,9 @@
         <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx-arm64</RuntimeIdentifier>
         <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</RuntimeIdentifier>
 
-        <!-- The test project lives in Tests/ under this folder and must not be compiled into the app -->
-        <DefaultItemExcludes>$(DefaultItemExcludes);Tests/**</DefaultItemExcludes>
+        <!-- The test project, the libraries and the stand-alone tracker live in folders under this one
+             and must not be compiled into the app -->
+        <DefaultItemExcludes>$(DefaultItemExcludes);Tests/**;AmosLikeBasic.Core/**;AmosLikeBasic.Tracker/**;AmosTracker/**</DefaultItemExcludes>
     </PropertyGroup>
 
     <PropertyGroup>
@@ -39,6 +40,12 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="AmosLikeBasic.Tests" />
+    </ItemGroup>
+
+    <!-- The engine (synth, songs, file readers) and the tracker, shared with the stand-alone tracker -->
+    <ItemGroup>
+        <ProjectReference Include="AmosLikeBasic.Core/AmosLikeBasic.Core.csproj" />
+        <ProjectReference Include="AmosLikeBasic.Tracker/AmosLikeBasic.Tracker.csproj" />
     </ItemGroup>
 
     <!-- Resources -->

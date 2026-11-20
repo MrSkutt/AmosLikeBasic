@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- AMOS Tracker: the tracker of AMOS Like Basic as an app of its own -->
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+        <RootNamespace>AmosLikeBasic</RootNamespace>
+        <ApplicationIcon>../Assets/AmosLikeBasic.ico</ApplicationIcon>
+        <RuntimeIdentifiers>osx-arm64;win-x64</RuntimeIdentifiers>
+        <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx-arm64</RuntimeIdentifier>
+        <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('Windows'))">win-x64</RuntimeIdentifier>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Avalonia" Version="12.1.6" />
+        <PackageReference Include="Avalonia.Desktop" Version="12.1.6" />
+        <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.6" />
+        <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.6" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="../AmosLikeBasic.Tracker/AmosLikeBasic.Tracker.csproj" />
+    </ItemGroup>
+
+    <!-- The sound library (BASS) for each platform -->
+    <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('win'))">
+        <None Include="../libs/windows/bass*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+    </ItemGroup>
+    <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+        <None Include="../libs/mac/libbass*.dylib" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+    </ItemGroup>
+</Project>

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <!-- The engine shared by the IDE and the tracker: the chiptune synth, tracker songs and their
+         instruments, samples, the YM2149, the readers of MOD, XM and YM files, and the basics around
+         them (the working folder, finding files, settings, the sound output). No windows. -->
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RootNamespace>AmosLikeBasic</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Avalonia only for the storage types the working folder's dialogs use -->
+        <PackageReference Include="Avalonia" Version="12.1.6" />
+        <PackageReference Include="ManagedBass" Version="3.1.4" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="AmosLikeBasic" />
+        <InternalsVisibleTo Include="AmosLikeBasic.Tracker" />
+        <InternalsVisibleTo Include="AmosTracker" />
+        <InternalsVisibleTo Include="AmosLikeBasic.Tests" />
+    </ItemGroup>
+</Project>

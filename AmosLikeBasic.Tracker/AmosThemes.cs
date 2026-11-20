@@ -31,6 +31,21 @@ public record AmosTheme(
 
 public static class AmosThemes
 {
+    // The theme by the name it is saved under in the settings (Classic Blue if it is not known)
+    public static AmosTheme ByName(string? name) => name switch
+    {
+        "LightClean" => LightClean,
+        "DarkPro" => DarkPro,
+        "Workbench" => Workbench,
+        "C64" => C64,
+        "StosClassic" => StosClassic,
+        "StosEditor" => StosEditor,
+        "Emerald" => Emerald,
+        "NeonNight" => NeonNight,
+        "CatppuccinMocha" => CatppuccinMocha,
+        _ => ClassicBlue
+    };
+
     public static readonly AmosTheme LightClean = new(
         "Light Clean",
         Color.Parse("#F0F2F5"), // WindowBg

@@ -95,6 +95,12 @@ dotnet run
 
 NuGet packages are restored automatically. The native audio and input libraries for your platform (`libs/mac` or `libs/windows`) are copied next to the executable at build time.
 
+The tracker also runs as an app of its own, **AMOS Tracker**, with the same songs, instruments and settings:
+
+```bash
+dotnet run --project AmosTracker
+```
+
 ### Running the tests
 
 ```bash
@@ -139,15 +145,17 @@ To build the same zip files on your own Mac, run `python3 Tools/build_release.py
 
 | Path | Contents |
 |---|---|
+| `AmosLikeBasic.csproj` (this folder) | The IDE: editor, interpreter, graphics, editors |
+| `AmosLikeBasic.Core/` | The engine shared with the tracker: the synth (`ChiptuneSynth*.cs`), tracker songs (`Tracker.cs`), samples, the YM2149 and the MOD, XM and YM readers, and the working folders, file finding, settings and sound output |
+| `AmosLikeBasic.Tracker/` | The tracker's windows and controls (`TrackerWindow`, `PatternView`, the instrument page, library and YM browser) and the AMOS look (`AmosStyles.axaml`, themes) |
+| `AmosTracker/` | AMOS Tracker, the tracker as an app of its own |
 | `AmosRunner.cs`, `AmosRunner.Compiled.cs` | The BASIC interpreter, and its expression compiler |
 | `AmosGraphics.cs` | Screens, layers, sprites, fonts, raster bars, effects and GPU rendering |
 | `Shaders.cs` | SkSL shaders for raster bars, weather and full-screen effects |
 | `DisplayClock.cs` | `WAIT VBL`: frames in step with the screen's refreshes |
-| `ChiptuneSynth.cs`, `ChiptuneSynth.Tracker.cs`, `ChiptuneSynth.Export.cs`, `AudioEngine.cs`, `LibXmp.cs` | Sound effects, synth, tracker playback, WAV export and music |
-| `Tracker.cs`, `TrackerWindow.axaml`, `PatternView.cs`, `ChannelScopes.cs`, `Knob.cs`, `InstrumentGraphs.cs`, `InstrumentLibrary.cs` | The tracker song format, editor, instrument page and library |
+| `AudioEngine.cs`, `LibXmp.cs` | Sample files and music modules (`SAM`, `MUSIC`) |
 | `MainWindow.axaml(.cs)` | The IDE |
 | `SpriteEditorWindow`, `MapEditorWindow`, `GridTools.cs`, `SheetGuess.cs`, `ProgramAssets.cs` | Built-in editors, their drawing tools, and the pictures a program loads |
-| `Workspace.cs`, `ResourceLoader.cs` | The working folders and finding files |
 | `Projects/` | Example programs (`.amosproj`) |
 | `Tests/` | Automated tests (xUnit, Avalonia headless) |
 | `Graphics/`, `Sound/`, `fonts/` | Assets used by the examples; `Sound/Instruments` is the instrument library |
