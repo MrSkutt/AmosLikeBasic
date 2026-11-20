@@ -565,9 +565,17 @@ The window that shows what was found has a **Simplify instruments** button, whic
 
 When the notes differ too much to share instruments (a song would need more than 255), the file is read one row per frame instead: each frame gets the nearest note and a fine slide (`E1x`, `E2x`), the volume goes in the volume column, and five instruments (*YM tone*, *YM noise*, *YM tone + noise*, *YM buzzer saw*, *YM buzzer triangle*) follow what the chip's mixer lets through. The status line says which way the file was read.
 
-The special effects of YM5 and YM6 files (digidrums, SID voice, sync buzzer) are left out, and the status line says so. SNDH files, which are Atari programs rather than registers, cannot be read.
+YM5 and YM6 files can have the Atari's special effects, made with a timer:
 
-`MUSIC PLAY "music.ym"` plays a YM file as it is, through a copy of the chip in the program.
+- **Digidrums**, short samples played through a channel's volume, become sampled instruments called *Digidrum*: the samples are written as WAV files in `Sound/Samples/<song name>/`, and each hit is a note, a few ticks late (`EDx`) when it does not fall on the start of a row.
+- **SID voice**, the volume switched on and off fast, is played as a square wave at its pitch.
+- **Sync buzzer**, the envelope started again and again, is played as a buzzer at the timer's pitch.
+
+The buzzer itself (the envelope repeated fast) is played with a sample of the chip's own envelope, 32 steps of its volume, so it has the edge a smooth wave lacks. SNDH files, which are Atari programs rather than registers, cannot be read.
+
+**YM...** next to LOAD opens the YM music in `Sound/Tracker/YM` (or another folder, with **Folder...**), by the folders in it. Choose a song and it plays at once, as the chip played it; a search finds songs by name or folder. **Open in tracker** (or a double-click) reads it into the tracker.
+
+`MUSIC PLAY "music.ym"` plays a YM file as it is, through a copy of the chip in the program, special effects and all.
 
 A song played once (not looping) ends when it jumps back to a place it has already played, with `Bxx` or `Dxx`, as in ProTracker; that is how a song says it repeats.
 

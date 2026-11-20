@@ -1,10 +1,14 @@
 using System;
+using System.Collections.Generic;
 
 namespace AmosLikeBasic;
 
 // The YM2149 (and AY-3-8910) sound chip: three square-wave tones, one noise generator and one
 // envelope, mixed per channel by register 7. It is run at its own rate (the clock / 8) and the
 // output is averaged over each sample, so very high tones and volume tricks sound as they should.
+// The Atari's tricks with a timer (YM5/YM6 effects) are here too: SID voice (the volume switched on
+// and off), sinus SID, digidrums (a sample written to the volume) and sync buzzer (the envelope
+// started again and again).
 public sealed class Ym2149
 {
     private readonly double _ticksPerSample;
@@ -16,6 +20,15 @@ public sealed class Ym2149
     private bool _envHold, _envAlternate, _envHolding;
     private readonly byte[] _r = new byte[16];
     private double _dcIn, _dcOut;   // a gentle high-pass, as the chip's output has a DC level
+    private readonly double _clockTicks;   // chip ticks a second (the clock / 8)
+
+    // Timer effects per channel: the timer's step per chip tick and where it is (0 – 1)
+    private readonly double[] _sidStep = new double[3], _sidPhase = new double[3];
+    private readonly int[] _sidVolume = new int[3];
+    private readonly bool[] _sidSine = new bool[3];
+    private readonly float[]?[] _drum = new float[]?[3];
+    private readonly double[] _drumPos = new double[3], _drumStep = new double[3];
+    private double _syncStep, _syncPhase;
 
     // The 32 volume steps of the YM2149, about 1.5 dB apart (a 4-bit volume v is step 2v + 1)
     private static readonly double[] Level = BuildLevels();
@@ -29,8 +42,39 @@ public sealed class Ym2149
 
     public Ym2149(int clock, int sampleRate)
     {
-        _ticksPerSample = clock / 8.0 / sampleRate;
+        _clockTicks = clock / 8.0;
+        _ticksPerSample = _clockTicks / sampleRate;
+        // As after a reset: envelope shape 0, which falls once to silence and stays there
+        Write(13, 0);
+        _envStep = 0;
+        _envHolding = true;
     }
+
+    public static double VolumeLevel(int volume) => Level[(volume & 15) == 0 ? 0 : (volume & 15) * 2 + 1];
+
+    // ── The timer effects (frequencies in Hz; a volume is 0 – 15) ──
+
+    // The timer switches the volume on or off each time it runs, so the sound is half its frequency
+    public void StartSid(int channel, double frequency, int volume, bool sine = false)
+    {
+        _sidStep[channel] = frequency / 2 / _clockTicks;
+        _sidVolume[channel] = volume & 15;
+        _sidSine[channel] = sine;
+    }
+
+    public void StopSid(int channel) => _sidStep[channel] = 0;
+
+    public void StartDrum(int channel, float[] sample, double frequency)
+    {
+        _drum[channel] = sample;
+        _drumPos[channel] = 0;
+        _drumStep[channel] = frequency / _clockTicks;
+    }
+
+    public void StartSyncBuzzer(double frequency) { _syncStep = frequency / _clockTicks; _syncPhase = 0; }
+    public void StopSyncBuzzer() => _syncStep = 0;
+
+    private void RestartEnvelope() => Write(13, (byte)(_r[13] & 15));
 
     public void Write(int register, byte value)
     {
@@ -85,14 +129,44 @@ public sealed class Ym2149
                 _envCount = 0;
                 StepEnvelope();
             }
+            if (_syncStep > 0 && (_syncPhase += _syncStep) >= 1)
+            {
+                _syncPhase -= 1;
+                RestartEnvelope();
+            }
             int envLevel = _envStep ^ _envAttack;
             for (int c = 0; c < 3; c++)
             {
+                // A digidrum is the channel's volume, whatever the mixer says
+                if (_drum[c] is { } drum)
+                {
+                    int i = (int)_drumPos[c];
+                    if (i < drum.Length)
+                    {
+                        sum += drum[i];
+                        _drumPos[c] += _drumStep[c];
+                        continue;
+                    }
+                    _drum[c] = null;
+                }
                 bool tone = (mixer & (1 << c)) != 0 || _toneOut[c] != 0;
                 bool noise = (mixer & (8 << c)) != 0 || _noiseOut != 0;
-                if (!(tone && noise)) continue;
-                int v = _r[8 + c];
-                sum += (v & 16) != 0 ? Level[envLevel] : Level[(v & 15) == 0 ? 0 : (v & 15) * 2 + 1];
+                double level;
+                if (_sidStep[c] > 0)
+                {
+                    // SID voice: the volume on in the timer's first half and off in the other (or a sine)
+                    _sidPhase[c] += _sidStep[c];
+                    if (_sidPhase[c] >= 1) _sidPhase[c] -= 1;
+                    level = VolumeLevel(_sidVolume[c]) * (_sidSine[c]
+                        ? 0.5 - 0.5 * Math.Cos(_sidPhase[c] * 2 * Math.PI)
+                        : _sidPhase[c] < 0.5 ? 1 : 0);
+                }
+                else
+                {
+                    int v = _r[8 + c];
+                    level = (v & 16) != 0 ? Level[envLevel] : VolumeLevel(v);
+                }
+                if (tone && noise) sum += level;
             }
         }
         double x = sum / ticks / 3;
@@ -125,6 +199,68 @@ public sealed class Ym2149
 // A YM file played frame by frame through the chip
 public sealed class YmPlayer
 {
+    // The Atari's MFP timer: 2.4576 MHz, divided by a predivisor (from three bits) and a count
+    private const double MfpClock = 2457600;
+    private static readonly int[] Predivisor = { 0, 4, 10, 16, 50, 64, 100, 200 };
+
+    private static double TimerFrequency(int predivisorBits, int count)
+    {
+        int divide = Predivisor[predivisorBits & 7] * count;
+        return divide > 0 ? MfpClock / divide : 0;
+    }
+
+    public enum EffectKind { Sid, SineSid, Drum, SyncBuzzer }
+
+    // An effect a frame asks for: on which channel, at what frequency, and the volume (SID) or the
+    // digidrum's number
+    public readonly record struct Effect(EffectKind Kind, int Channel, double Frequency, int Value);
+
+    // The effects of a frame: in YM5 the SID voice (register 1) and a digidrum (register 3), in YM6
+    // two effects of any kind, described by registers 1 and 3
+    public static List<Effect> Effects(YmFile ym, byte[] r)
+    {
+        var list = new List<Effect>(2);
+        if (ym.Version == 5)
+        {
+            int sid = (r[1] >> 4) & 3;
+            if (sid > 0) list.Add(new Effect(EffectKind.Sid, sid - 1, TimerFrequency(r[6] >> 5, r[14]), r[8 + sid - 1] & 15));
+            int drum = (r[3] >> 4) & 3;
+            if (drum > 0) list.Add(new Effect(EffectKind.Drum, drum - 1, TimerFrequency(r[8] >> 5, r[15]), r[8 + drum - 1] & 31));
+        }
+        else if (ym.Version >= 6)
+        {
+            foreach (var (code, predivisor, count) in new[] { (r[1], r[6], r[14]), (r[3], r[8], r[15]) })
+            {
+                int voice = ((code & 0x30) >> 4) - 1;
+                if (voice < 0) continue;
+                double frequency = TimerFrequency(predivisor >> 5, count);
+                var kind = (code & 0xC0) switch { 0x00 => EffectKind.Sid, 0x80 => EffectKind.SineSid, 0x40 => EffectKind.Drum, _ => EffectKind.SyncBuzzer };
+                list.Add(new Effect(kind, voice, frequency, kind == EffectKind.Drum ? r[8 + voice] & 31 : r[8 + voice] & 15));
+            }
+        }
+        return list;
+    }
+
+    // The SID voices and the sync buzzer only last while the frames ask for them; a digidrum plays to its end
+    private void ApplyEffects(byte[] r)
+    {
+        for (int c = 0; c < 3; c++) _chip.StopSid(c);
+        _chip.StopSyncBuzzer();
+        foreach (var e in Effects(_ym, r))
+            switch (e.Kind)
+            {
+                case EffectKind.Sid: _chip.StartSid(e.Channel, e.Frequency, e.Value); break;
+                case EffectKind.SineSid: _chip.StartSid(e.Channel, e.Frequency, e.Value, sine: true); break;
+                case EffectKind.Drum: StartDrum(e.Channel, e.Value, e.Frequency); break;
+                case EffectKind.SyncBuzzer: _chip.StartSyncBuzzer(e.Frequency); break;
+            }
+    }
+
+    private void StartDrum(int voice, int number, double frequency)
+    {
+        if (number < _ym.Drums.Count && frequency > 0) _chip.StartDrum(voice, _ym.Drums[number], frequency);
+    }
+
     private readonly YmFile _ym;
     private readonly Ym2149 _chip;
     private readonly double _samplesPerFrame;
@@ -157,7 +293,9 @@ public sealed class YmPlayer
                         return;
                     }
                 }
-                _chip.WriteFrame(_ym.Frames[_frame++]);
+                var regs = _ym.Frames[_frame++];
+                _chip.WriteFrame(regs);
+                ApplyEffects(regs);
                 _frameLeft += _samplesPerFrame;
             }
             _frameLeft--;

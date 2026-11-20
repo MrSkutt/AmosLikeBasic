@@ -8,8 +8,8 @@ namespace AmosLikeBasic;
 
 // A YM file: the sound chip of the Atari ST (and the ZX Spectrum's AY) recorded as its registers,
 // 14 (or 16) of them for every frame, usually 50 times a second. Most YM files are packed with LHA
-// (-lh5-), which is unpacked here. YM2, YM3, YM3b, YM4, YM5 and YM6 are read; the special effects
-// of YM5 and YM6 (digidrums, SID voice, sync buzzer) are left out.
+// (-lh5-), which is unpacked here. YM2, YM3, YM3b, YM4, YM5 and YM6 are read, with the special
+// effects of YM5 and YM6 (digidrums, SID voice, sync buzzer), which Ym2149 plays.
 public sealed class YmFile
 {
     public byte[][] Frames = Array.Empty<byte[]>();   // [frame][register 0 – 15]
@@ -17,7 +17,10 @@ public sealed class YmFile
     public int FrameRate = 50;
     public int LoopFrame;
     public string Title = "", Author = "", Comment = "";
-    public bool UsesSpecialEffects;                    // digidrums or other YM5/YM6 effects, left out
+    public bool UsesSpecialEffects;                    // digidrums or other YM5/YM6 effects
+    public int Version;                                // 5 or 6 for the files with effects, else 0
+    // The digidrums: short samples played through a channel's volume, as levels 0 – 1
+    public List<float[]> Drums = new();
 
     public double Seconds => Frames.Length / (double)Math.Max(1, FrameRate);
 
@@ -58,6 +61,8 @@ public sealed class YmFile
     {
         int frames = (int)U32(b, 12);
         uint attributes = U32(b, 16);
+        ym.Version = id[2] - '0';
+        bool drum4Bits = (attributes & 4) != 0, drumSigned = (attributes & 2) != 0;
         int drums = U16(b, 20);
         int p = 22;
         if (id != "YM4!")
@@ -72,7 +77,19 @@ public sealed class YmFile
             ym.LoopFrame = (int)U32(b, 22);
             p = 26;
         }
-        for (int d = 0; d < drums; d++) p += 4 + (int)U32(b, p);   // the digidrums' samples
+        // The digidrums: a size and the samples, as 4-bit volume steps or 8-bit levels
+        for (int d = 0; d < drums; d++)
+        {
+            int size = (int)U32(b, p);
+            p += 4;
+            if (size < 0 || p + size > b.Length) throw new InvalidDataException("the YM file ends inside a digidrum");
+            var drum = new float[size];
+            for (int i = 0; i < size; i++)
+                drum[i] = drum4Bits ? (float)Ym2149.VolumeLevel(b[p + i] & 15)
+                    : drumSigned ? ((sbyte)b[p + i] + 128) / 255f : b[p + i] / 255f;
+            ym.Drums.Add(drum);
+            p += size;
+        }
         if (drums > 0) ym.UsesSpecialEffects = true;
         ym.Title = Text(b, ref p);
         ym.Author = Text(b, ref p);

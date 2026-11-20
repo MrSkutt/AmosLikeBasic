@@ -346,6 +346,7 @@ namespace AmosLikeBasic
         public static void Panic()
         {
             TrackStop();
+            PlayChipMusic(null);
             StopMusic();
             StopSfx(restore: false);
             TrackPreviewStop();

@@ -886,6 +886,17 @@ namespace AmosLikeBasic
             }
             _scopePos = (pos + 1) & (ScopeSize - 1);
 
+            // A YM file played next to the synth (the tracker's YM browser)
+            var chip = Volatile.Read(ref _chipMusic);
+            if (chip != null)
+            {
+                if (chip != _chipPlaying) { _chipPlaying = chip; _chipPos = _chipBuffer.Length; }
+                if (_chipPos >= _chipBuffer.Length) { chip.Render(_chipBuffer); _chipPos = 0; }
+                float x = _chipBuffer[_chipPos++];
+                left += x;
+                right += x;
+            }
+
             foreach (var x in _sfx)
             {
                 var b = x.Buffer;
@@ -898,6 +909,18 @@ namespace AmosLikeBasic
         // ════════════════════════════════════════════════════════════════
         //  What each channel sounds like right now, for the tracker's oscilloscopes and meters
         // ════════════════════════════════════════════════════════════════
+
+        // ── A YM file played by the YM2149 next to the synth ──
+        private static YmPlayer? _chipMusic, _chipPlaying;
+        private static readonly float[] _chipBuffer = new float[256];
+        private static int _chipPos = 256;
+
+        // Plays a YM file (null stops it); the player is the audio thread's from then on
+        public static void PlayChipMusic(YmPlayer? player)
+        {
+            Volatile.Write(ref _chipMusic, player);
+            if (player != null) EnsureStarted();
+        }
 
         public const int ScopeSize = 2048;   // about 46 ms; a power of two
         private static readonly float[][] _scope = CreateScopes();

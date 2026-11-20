@@ -1163,6 +1163,21 @@ public partial class TrackerWindow : Window
     private InstrumentLibraryWindow? _library;
 
     // LIBRARY: one window at a time, which adds to or replaces in the song open here
+    // YM...: a window of YM music to hear and open
+    private YmBrowserWindow? _ymBrowser;
+
+    private void YmBrowser_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_ymBrowser != null) { _ymBrowser.Activate(); return; }
+        _ymBrowser = new YmBrowserWindow(async path =>
+        {
+            if (!await ConfirmDiscardAsync()) return;
+            LoadFile(path);
+        });
+        _ymBrowser.Closed += (_, _) => _ymBrowser = null;
+        _ymBrowser.Show(this);
+    }
+
     private void InstLibrary_OnClick(object? sender, RoutedEventArgs e)
     {
         if (_library != null) { _library.Activate(); return; }
@@ -1329,7 +1344,7 @@ public partial class TrackerWindow : Window
             if (inSong.StartsWith("..")) inSong = folder;   // the Sound folder is moved outside the working folder
             var bytes = File.ReadAllBytes(path);
             var result = XmImport.IsXm(bytes) ? XmImport.Import(bytes, name, folder, inSong)
-                : YmFile.IsYm(bytes) ? YmImport.Import(YmFile.Read(bytes), name)
+                : YmFile.IsYm(bytes) ? YmImport.Import(YmFile.Read(bytes), name, true, folder, inSong)
                 : ModImport.Import(bytes, name, folder, inSong);
             Stop();
             _song = result.Song;

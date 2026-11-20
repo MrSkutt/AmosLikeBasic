@@ -1,3 +1,4 @@
+using Avalonia.VisualTree;
 using System.Text;
 using S = AmosLikeBasic.ChiptuneSynth;
 
@@ -38,15 +39,17 @@ public class YmTests : IDisposable
 
     private static double Rms(float[] b) => Math.Sqrt(b.Average(x => (double)x * x));
 
-    // A YM5 file with its header and texts, registers interleaved
-    private static byte[] Ym5(byte[][] frames, int loop = 0)
+    // A YM5 (or YM6) file with its header, digidrums (8-bit) and texts, registers interleaved
+    private static byte[] Ym5(byte[][] frames, int loop = 0, byte[][]? drums = null, int version = 5)
     {
         var o = new List<byte>();
         void Text(string s) { o.AddRange(Encoding.ASCII.GetBytes(s)); o.Add(0); }
         void U32(int v) { o.Add((byte)(v >> 24)); o.Add((byte)(v >> 16)); o.Add((byte)(v >> 8)); o.Add((byte)v); }
         void U16(int v) { o.Add((byte)(v >> 8)); o.Add((byte)v); }
-        o.AddRange("YM5!LeOnArD!"u8.ToArray());
-        U32(frames.Length); U32(1); U16(0); U32(2000000); U16(50); U32(loop); U16(0);
+        o.AddRange(System.Text.Encoding.ASCII.GetBytes($"YM{version}!LeOnArD!"));
+        drums ??= Array.Empty<byte[]>();
+        U32(frames.Length); U32(1); U16(drums.Length); U32(2000000); U16(50); U32(loop); U16(0);
+        foreach (var d in drums) { U32(d.Length); o.AddRange(d); }
         Text("Test tune"); Text("Me"); Text("Made in a test");
         for (int r = 0; r < 16; r++) foreach (var f in frames) o.Add(f[r]);
         o.AddRange("End!"u8.ToArray());
@@ -188,6 +191,145 @@ public class YmTests : IDisposable
         var dump = Play(YmImport.Import(ym, "arp", analyse: false).Song);
         Assert.InRange(Rms(analysed) / Rms(dump), 0.9, 1.1);
         Assert.InRange(Frequency(analysed.AsSpan(0, SR).ToArray()) / Frequency(dump.AsSpan(0, SR).ToArray()), 0.97, 1.03);
+    }
+
+    // ── YM5 / YM6 effects ──
+
+    // A digidrum: 4000 frames of a square wave between levels 0.2 and 0.8, hit on channel C in frame 10.
+    // In YM5 register 3's bits 4 – 5 pick the channel, the volume register the drum, and register 8's top
+    // bits with register 15 the timer: predivisor 4 (bits 001) × count 61 = 2.4576 MHz / 244 ≈ 10 kHz.
+    private static (YmFile ym, byte[] file) DrumTune()
+    {
+        var drum = Enumerable.Range(0, 4000).Select(i => (byte)(i / 20 % 2 == 0 ? 51 : 204)).ToArray();
+        var frames = new List<byte[]>();
+        for (int f = 0; f < 50; f++)
+        {
+            var r = Frame(a: 284, mixer: 0x3E, va: 15);
+            if (f == 10) { r[3] |= 0x30; r[10] = 0; r[8] |= 1 << 5; r[15] = 61; }
+            frames.Add(r);
+        }
+        var file = Ym5(frames.ToArray(), drums: new[] { drum });
+        return (YmFile.Read(file), file);
+    }
+
+    [Fact]
+    public void A_digidrum_is_read_and_played()
+    {
+        var (ym, _) = DrumTune();
+        Assert.Equal(5, ym.Version);
+        var drum = Assert.Single(ym.Drums);
+        Assert.Equal(4000, drum.Length);
+        Assert.Equal((0.2f, 0.8f), (drum[0], drum[20]), new Tolerance());
+
+        var withDrum = new float[SR / 2];
+        new YmPlayer(ym, SR).Render(withDrum);
+        ym.Drums.Clear();
+        var without = new float[SR / 2];
+        new YmPlayer(YmFile.Read(Ym5(ym.Frames)), SR).Render(without);
+        // Frame 10 is 0.2 s in and the drum lasts 4000 / 10 kHz = 0.4 s: heard on top of the tone then, not before
+        float[] Difference(int from, int length) => Enumerable.Range(from, length).Select(i => withDrum[i] - without[i]).ToArray();
+        Assert.True(Rms(Difference((int)(0.25 * SR), SR / 10)) > 0.05, "the drum is heard");
+        Assert.True(Rms(Difference((int)(0.05 * SR), SR / 10)) < 1e-4, "and not before it is hit");
+    }
+
+    private sealed class Tolerance : IEqualityComparer<(float, float)>
+    {
+        public bool Equals((float, float) a, (float, float) b) => Math.Abs(a.Item1 - b.Item1) < 0.01 && Math.Abs(a.Item2 - b.Item2) < 0.01;
+        public int GetHashCode((float, float) o) => 0;
+    }
+
+    [Fact]
+    public void A_digidrum_becomes_a_sampled_instrument_and_a_note()
+    {
+        var (ym, _) = DrumTune();
+        string folder = Path.Combine(Path.GetTempPath(), "amos-ymdrum-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (bool analyse in new[] { false, true })
+            {
+                var r = YmImport.Import(ym, "drum", analyse, folder, folder);
+                var song = r.Song;
+                var drumInst = song.Instruments.FindIndex(i => i.Name == "Digidrum 1") + 1;
+                Assert.True(drumInst > 0, "a Digidrum instrument");
+                Assert.Equal("Sample", song.Instruments[drumInst - 1].Wave);
+                Assert.True(File.Exists(song.Instruments[drumInst - 1].Sample));
+                // The hit: the drum's note on channel 3, in the row of frame 10
+                var cells = song.Order.SelectMany(o => Enumerable.Range(0, song.Patterns[o].Rows).Select(row => song.Patterns[o][row, 2])).ToList();
+                var hit = cells.Single(c => c.Instrument == drumInst);
+                Assert.Equal(60, hit.Note);
+                Assert.Contains("digidrum", r.Report!);
+            }
+        }
+        finally { try { Directory.Delete(folder, true); } catch { } }
+    }
+
+    [Fact]
+    public void A_SID_voice_sounds_at_half_its_timer()
+    {
+        // YM6: register 1's top bits 0x10 = a SID voice on channel A; register 6's top bits 001 (predivisor 4)
+        // and register 14 = 140 make the timer 2.4576 MHz / 560 = 4389 Hz, heard as 2194 Hz. The tone is
+        // off, so the SID voice is the sound.
+        var frames = Enumerable.Range(0, 100).Select(_ =>
+        {
+            var r = Frame(mixer: 0x3F, va: 15);
+            r[1] |= 0x10;
+            r[6] = 1 << 5;
+            r[14] = 140;
+            return r;
+        }).ToArray();
+        var ym = YmFile.Read(Ym5(frames, version: 6));
+        var b = new float[SR];
+        new YmPlayer(ym, SR).Render(b);
+        Assert.InRange(Frequency(b), 2160, 2230);
+
+        var song = YmImport.Import(ym, "sid").Song;
+        var first = song.Patterns[song.Order[0]][0, 0];
+        Assert.InRange(first.Note, 96, 97);   // 2194 Hz is between C#7 (97) and C-7 (96)
+    }
+
+    [Avalonia.Headless.XUnit.AvaloniaFact]
+    public void The_YM_browser_lists_plays_and_opens_songs()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "amos-ymbrowse-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var tune = Ym5(Enumerable.Range(0, 100).Select(_ => Frame(a: 284, mixer: 0x3E, va: 15)).ToArray());
+            Directory.CreateDirectory(Path.Combine(root, "Hippel", "Games"));
+            Directory.CreateDirectory(Path.Combine(root, "Tao"));
+            File.WriteAllBytes(Path.Combine(root, "Hippel", "Games", "Wings.ym"), tune);
+            File.WriteAllBytes(Path.Combine(root, "Hippel", "Games", "Tiles.ym"), tune);
+            File.WriteAllBytes(Path.Combine(root, "Tao", "Stars.ym"), tune);
+            File.WriteAllText(Path.Combine(root, "Tao", "readme.txt"), "not a song");
+
+            string? opened = null;
+            var w = new YmBrowserWindow(p => opened = p, root);
+            w.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            var lists = w.GetVisualDescendants().OfType<Avalonia.Controls.ListBox>().ToList();
+            var folders = lists[0].ItemsSource!.Cast<object>().Select(o => o.ToString()).ToList();
+            Assert.Equal(new[] { "Hippel/Games (2)", "Tao (1)" }, folders);
+            Assert.Equal(new[] { "Tiles", "Wings" }, lists[1].ItemsSource!.Cast<object>().Select(o => o.ToString()));
+
+            // A search looks through every folder
+            w.GetVisualDescendants().OfType<Avalonia.Controls.TextBox>().First().Text = "star";
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new[] { "Tao/Stars" }, lists[1].ItemsSource!.Cast<object>().Select(o => o.ToString()));
+
+            // Choosing it plays it at once
+            lists[1].SelectedIndex = 0;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            var sound = new float[SR / 4];
+            S.Render(sound);
+            Assert.InRange(Frequency(sound), 430, 450);
+
+            w.GetVisualDescendants().OfType<Avalonia.Controls.Button>().First(b => b.Content as string == "Open in tracker")
+                .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+            Assert.Equal(Path.Combine(root, "Tao", "Stars.ym"), opened);
+            S.Render(sound);
+            Assert.True(Rms(sound) < 1e-3, "opening it stops the playing");
+            w.Close();
+        }
+        finally { try { Directory.Delete(root, true); } catch { } }
     }
 
     // An LHA-packed YM file from the Atari: only on a computer that has it

@@ -17,7 +17,9 @@ namespace AmosLikeBasic;
 //  - A dump, one row per frame (speed 1): the nearest note and a fine slide (E1x / E2x), the volume
 //    in the volume column, and five instruments for the kinds of sound. Used when the analysis
 //    would need more instruments than a song can have.
-// The YM5/YM6 special effects (digidrums, SID voice, sync buzzer) are left out.
+// The YM5/YM6 special effects: a digidrum becomes a sampled instrument (its sample written as a
+// WAV file), a note started where the drum is hit; a SID voice a square wave at the SID's pitch; and
+// a sync buzzer the buzzer at the timer's pitch. MUSIC PLAY plays them exactly.
 public static class YmImport
 {
     private enum Mode { Silent, Tone, Noise, ToneNoise, BuzzSaw, BuzzTriangle }
@@ -31,19 +33,149 @@ public static class YmImport
     private static readonly double[] Level = Enumerable.Range(0, 32).Select(i => i == 0 ? 0 : Math.Pow(10, (i - 31) * 1.5 / 20)).ToArray();
     private static int Volume(int step) => (int)Math.Round(Level[Math.Clamp(step, 0, 31)] * 64);
 
-    public static ModImport.Result Import(YmFile ym, string name, bool analyse = true)
+    // sampleFolder: where the digidrums are written as WAV files, sampleFolderInSong how the song
+    // refers to it (without them the drums are left out)
+    public static ModImport.Result Import(YmFile ym, string name, bool analyse = true,
+        string? sampleFolder = null, string? sampleFolderInSong = null)
     {
         var notes = new List<string>();
-        var sounds = Sounds(ym);
+        var fx = ReadEffects(ym);
+        var sounds = Sounds(ym, fx);
+        var drums = sampleFolder != null ? DrumInstruments(ym, fx, sampleFolder, sampleFolderInSong ?? sampleFolder) : new Drums();
+        var buzzers = sampleFolder != null ? BuzzerSamples(sampleFolder, sampleFolderInSong ?? sampleFolder) : ((string, string)?)null;
         var found = new Found();
-        TrackerSong? song = analyse ? Analyse(ym, sounds, notes, found) : null;
+        TrackerSong? song = analyse ? Analyse(ym, sounds, notes, found, drums, buzzers) : null;
         bool analysed = song != null;
-        song ??= Dump(ym, sounds);
+        song ??= Dump(ym, sounds, drums, buzzers);
         song.Title = ym.Title.Length > 0 ? ym.Title : name;
         song.Tempo = Math.Clamp((int)Math.Round(125.0 * ym.FrameRate / 50), 32, 255);
         if (ym.FrameRate * 2.5 > 255) notes.Add($"The file plays {ym.FrameRate} frames a second, faster than the tracker's top tempo; it plays slower.");
-        if (ym.UsesSpecialEffects) notes.Add("The file uses YM5/YM6 special effects (digidrums or SID voice); they were left out.");
-        return new ModImport.Result(song, 0, notes, Report(ym, song, analysed, found, analyse));
+        if (fx.Hits.Count > 0 && sampleFolder == null) notes.Add("The digidrums were left out.");
+        return new ModImport.Result(song, drums.Instruments.Count, notes, Report(ym, song, analysed, found, analyse, fx, drums));
+    }
+
+    // ── The effects of YM5 and YM6 ─────────────────────────────────────
+
+    private readonly record struct DrumHit(int Frame, int Channel, int Drum, double Frequency);
+
+    // The buzzer's sound: one round of the chip's envelope, 32 steps of its volume down (a sawtooth) or
+    // down and up (a triangle), written as WAV files that loop. The steps are the chip's own, about
+    // 1.5 dB apart, so the sound has the buzzer's edge that a smooth wave lacks.
+    private static (string saw, string triangle) BuzzerSamples(string folder, string inSong)
+    {
+        string Write(string file, float[] levels)
+        {
+            float mean = levels.Average();
+            var data = levels.Select(l => Math.Clamp((l - mean) * 2, -1f, 1f)).ToArray();
+            // The note C-4 (261.63 Hz) plays one round per cycle
+            SampleBank.WriteWav(System.IO.Path.Combine(folder, file), new SampleData(data, (int)Math.Round(261.63 * levels.Length)));
+            string path = inSong.TrimEnd('/') + "/" + file;
+            SampleBank.Forget(path);
+            return path;
+        }
+        // Each step 8 frames long, so that the sampler's smoothing between frames keeps the steps sharp
+        var down = Enumerable.Range(0, 32 * 8).Select(k => (float)Level[31 - k / 8]).ToArray();
+        var downUp = down.Concat(down.Reverse()).ToArray();
+        return (Write("ym buzzer saw.wav", down), Write("ym buzzer triangle.wav", downUp));
+    }
+
+    // An instrument that is only the buzzer plays its sample instead of a smooth wave
+    private static void UseBuzzerSample(TrackerInstrument inst, Mode mode, (string saw, string triangle)? buzzers)
+    {
+        if (buzzers is not { } b) return;
+        inst.Wave = "Sample";
+        inst.Sample = mode == Mode.BuzzTriangle ? b.triangle : b.saw;
+        inst.SampleNote = 60;
+        inst.LoopStart = 0;
+        inst.LoopEnd = mode == Mode.BuzzTriangle ? 512 : 256;
+        inst.Volume = 0.23;
+    }
+
+    private sealed class Effects
+    {
+        public double[,] SidFrequency = new double[0, 3];
+        public int[,] SidVolume = new int[0, 3];
+        public double[] SyncFrequency = Array.Empty<double>();
+        public bool[,] DrumPlaying = new bool[0, 3];
+        public List<DrumHit> Hits = new();
+        public int SidFrames, SyncFrames;
+    }
+
+    private static Effects ReadEffects(YmFile ym)
+    {
+        int frames = ym.Frames.Length;
+        var fx = new Effects
+        {
+            SidFrequency = new double[frames, 3], SidVolume = new int[frames, 3],
+            SyncFrequency = new double[frames], DrumPlaying = new bool[frames, 3]
+        };
+        if (ym.Version < 5) return fx;
+        for (int f = 0; f < frames; f++)
+            foreach (var e in YmPlayer.Effects(ym, ym.Frames[f]))
+                switch (e.Kind)
+                {
+                    case YmPlayer.EffectKind.Sid:
+                    case YmPlayer.EffectKind.SineSid:
+                        fx.SidFrequency[f, e.Channel] = e.Frequency;
+                        fx.SidVolume[f, e.Channel] = e.Value;
+                        fx.SidFrames++;
+                        break;
+                    case YmPlayer.EffectKind.SyncBuzzer:
+                        fx.SyncFrequency[f] = e.Frequency;
+                        fx.SyncFrames++;
+                        break;
+                    case YmPlayer.EffectKind.Drum:
+                        if (e.Value >= ym.Drums.Count || e.Frequency <= 0) break;
+                        fx.Hits.Add(new DrumHit(f, e.Channel, e.Value, e.Frequency));
+                        // The channel plays the drum until it ends: its own sound is not heard meanwhile
+                        int length = (int)Math.Ceiling(ym.Drums[e.Value].Length / e.Frequency * ym.FrameRate);
+                        for (int k = f; k < Math.Min(frames, f + Math.Max(1, length)); k++) fx.DrumPlaying[k, e.Channel] = true;
+                        break;
+                }
+        return fx;
+    }
+
+    // The digidrums as sampled instruments: a WAV file each, at the rate it is first played at
+    private sealed class Drums
+    {
+        public List<TrackerInstrument> Instruments = new();
+        public Dictionary<int, (int index, double rate)> Of = new();
+
+        // The drum's note: 60 (C-4) at the rate of its file, other rates as other notes
+        public TrackerCell Cell(DrumHit hit, int firstNumber, int delay = 0)
+        {
+            var (index, rate) = Of[hit.Drum];
+            int note = Math.Clamp(60 + (int)Math.Round(12 * Math.Log2(hit.Frequency / rate)), 12, 119);
+            return delay > 0
+                ? new TrackerCell(note, firstNumber + index, 'E', 0xD0 | Math.Min(delay, 15))
+                : new TrackerCell(note, firstNumber + index, '\0', 0);
+        }
+    }
+
+    private static Drums DrumInstruments(YmFile ym, Effects fx, string folder, string inSong)
+    {
+        var drums = new Drums();
+        foreach (var hit in fx.Hits)
+        {
+            if (drums.Of.ContainsKey(hit.Drum)) continue;
+            var levels = ym.Drums[hit.Drum];
+            if (levels.Length == 0) continue;
+            // The chip's levels go one way from silence; the sample sits around 0
+            float mean = levels.Average();
+            var data = levels.Select(l => Math.Clamp((l - mean) * 2, -1f, 1f)).ToArray();
+            int rate = (int)Math.Round(Math.Clamp(hit.Frequency, 1000, 96000));
+            string file = $"digidrum {hit.Drum + 1:00}.wav";
+            SampleBank.WriteWav(System.IO.Path.Combine(folder, file), new SampleData(data, rate));
+            string path = inSong.TrimEnd('/') + "/" + file;
+            SampleBank.Forget(path);
+            drums.Of[hit.Drum] = (drums.Instruments.Count, rate);
+            drums.Instruments.Add(new TrackerInstrument
+            {
+                Name = $"Digidrum {hit.Drum + 1}", Wave = "Sample", Sample = path, SampleNote = 60,
+                Volume = 0.23, Attack = 0, Decay = 0, Sustain = 100, Release = 5
+            });
+        }
+        return drums;
     }
 
     // What the analysis found, for the report
@@ -54,7 +186,7 @@ public static class YmImport
         public int LoopOrder = -1;
     }
 
-    private static string Report(YmFile ym, TrackerSong song, bool analysed, Found found, bool triedAnalysis)
+    private static string Report(YmFile ym, TrackerSong song, bool analysed, Found found, bool triedAnalysis, Effects fx, Drums drums)
     {
         var lines = new List<string>();
         string by = ym.Author.Length > 0 ? " by " + ym.Author : "";
@@ -84,13 +216,19 @@ public static class YmImport
                 : "Read one row per frame (speed 1).");
             lines.Add($"{rows} rows in {song.Patterns.Count} patterns; the pitch is the nearest note and a fine slide, the volume is in the volume column.");
         }
-        if (ym.UsesSpecialEffects) { lines.Add(""); lines.Add("The file uses YM5/YM6 special effects (digidrums or SID voice); they were left out."); }
+        var effects = new List<string>();
+        if (drums.Instruments.Count > 0)
+            effects.Add($"{drums.Instruments.Count} digidrum{(drums.Instruments.Count == 1 ? "" : "s")} became sampled instruments (Digidrum), hit {fx.Hits.Count} times.");
+        else if (fx.Hits.Count > 0) effects.Add("The digidrums were left out.");
+        if (fx.SidFrames > 0) effects.Add("The SID voice is played as a square wave at its pitch (MUSIC PLAY plays the real thing).");
+        if (fx.SyncFrames > 0) effects.Add("The sync buzzer is played as a buzzer at the timer's pitch (MUSIC PLAY plays the real thing).");
+        if (effects.Count > 0) { lines.Add(""); lines.AddRange(effects); }
         return string.Join("\n", lines);
     }
 
     // ── Reading the frames ─────────────────────────────────────────────
 
-    private static Sound[,] Sounds(YmFile ym)
+    private static Sound[,] Sounds(YmFile ym, Effects fx)
     {
         int frames = ym.Frames.Length;
         var s = new Sound[frames, 3];
@@ -101,12 +239,15 @@ public static class YmImport
             // Register 13 is 0xFF in frames where it was not written; a write starts the envelope again
             bool written = r[13] != 0xFF;
             if (written) { envShape = r[13] & 15; envStart = f; }
-            for (int c = 0; c < 3; c++) s[f, c] = Read(ym, r, c, envShape, f - envStart, written);
+            for (int c = 0; c < 3; c++)
+                s[f, c] = fx.DrumPlaying[f, c] ? default
+                    : Read(ym, r, c, envShape, f - envStart, written, fx.SidFrequency[f, c], fx.SidVolume[f, c], fx.SyncFrequency[f]);
         }
         return s;
     }
 
-    private static Sound Read(YmFile ym, byte[] r, int c, int envShape, int framesSinceEnv, bool envWritten)
+    private static Sound Read(YmFile ym, byte[] r, int c, int envShape, int framesSinceEnv, bool envWritten,
+        double sidFrequency = 0, int sidVolume = 0, double syncFrequency = 0)
     {
         bool tone = (r[7] & (1 << c)) == 0, noise = (r[7] & (8 << c)) == 0;
         int v = r[8 + c];
@@ -117,11 +258,30 @@ public static class YmImport
         Mode mode;
         double freq;
         int step;
-        if (env && repeating && envPeriod < 4096)
+        if (sidFrequency > 0 && !env)
+        {
+            // SID voice: the volume switched on and off; with the tone off that is the sound (a square
+            // wave at half the timer's frequency), with it on the tone is what is heard
+            mode = tone ? noise ? Mode.ToneNoise : Mode.Tone : noise ? Mode.ToneNoise : Mode.Tone;
+            int tonePeriod = Math.Max(1, r[c * 2] | (r[c * 2 + 1] & 15) << 8);
+            freq = tone ? ym.Clock / 16.0 / tonePeriod : sidFrequency / 2;
+            step = sidVolume == 0 ? 0 : sidVolume * 2 + 1;
+            if (freq > 12000) mode = Mode.Silent;
+        }
+        else if (syncFrequency > 0 && env)
+        {
+            // Sync buzzer: the envelope started again at the timer's rate gives that pitch
+            mode = envShape is 10 or 14 ? Mode.BuzzTriangle : Mode.BuzzSaw;
+            freq = syncFrequency;
+            step = 31;
+        }
+        else if (env && repeating && envPeriod < 4096)
         {
             mode = envShape is 10 or 14 ? Mode.BuzzTriangle : Mode.BuzzSaw;
             freq = ym.Clock / (envShape is 10 or 14 ? 512.0 : 256.0) / envPeriod;
-            step = 31;
+            // A tone too high to hear, switched on with it, lets the envelope through half the time: 6 dB down
+            int tonePeriod = Math.Max(1, r[c * 2] | (r[c * 2 + 1] & 15) << 8);
+            step = tone && ym.Clock / 16.0 / tonePeriod > 12000 ? 27 : 31;
         }
         else
         {
@@ -155,7 +315,7 @@ public static class YmImport
         public int Note = -1, Fine, Volume = -1;
     }
 
-    private static TrackerSong Dump(YmFile ym, Sound[,] sounds)
+    private static TrackerSong Dump(YmFile ym, Sound[,] sounds, Drums drums, (string, string)? buzzers)
     {
         var song = new TrackerSong { Speed = 1, Channels = TrackerSong.DefaultChannels };
         song.Instruments.Clear();
@@ -164,6 +324,12 @@ public static class YmImport
         song.Instruments.Add(Instrument("YM tone + noise", "Square", "Noise"));
         song.Instruments.Add(Instrument("YM buzzer saw", "Sawtooth"));
         song.Instruments.Add(Instrument("YM buzzer triangle", "Triangle"));
+        UseBuzzerSample(song.Instruments[3], Mode.BuzzSaw, buzzers);
+        UseBuzzerSample(song.Instruments[4], Mode.BuzzTriangle, buzzers);
+        int firstDrum = song.Instruments.Count + 1;
+        song.Instruments.AddRange(drums.Instruments);
+        var hits = new Dictionary<(int, int), DrumHit>();
+        foreach (var h in ReadHits(ym, drums)) hits[(h.Frame, h.Channel)] = h;
 
         // Patterns of up to 256 rows; a loop back to the middle of the song starts a pattern of its own
         int frames = ym.Frames.Length;
@@ -184,7 +350,16 @@ public static class YmImport
             var pattern = new TrackerPattern(Math.Max(1, to - from));
             for (int f = from; f < to; f++)
                 for (int c = 0; c < 3; c++)
+                {
+                    if (hits.TryGetValue((f, c), out var hit))
+                    {
+                        // A digidrum: its note, and the channel's own sound starts afresh after it
+                        pattern[f - from, c] = drums.Cell(hit, firstDrum);
+                        state[c] = new DumpChannel();
+                        continue;
+                    }
                     pattern[f - from, c] = DumpCell(sounds[f, c], state[c]);
+                }
             song.Patterns.Add(pattern);
         }
         song.Order.Clear();
@@ -261,7 +436,11 @@ public static class YmImport
         public int Instrument;
     }
 
-    private static TrackerSong? Analyse(YmFile ym, Sound[,] sounds, List<string> notes, Found report)
+    private static IEnumerable<DrumHit> ReadHits(YmFile ym, Drums drums) =>
+        ReadEffects(ym).Hits.Where(h => drums.Of.ContainsKey(h.Drum));
+
+    private static TrackerSong? Analyse(YmFile ym, Sound[,] sounds, List<string> notes, Found report, Drums drums,
+        (string, string)? buzzers)
     {
         int frames = sounds.GetLength(0);
         if (frames == 0) return null;
@@ -333,8 +512,15 @@ public static class YmImport
         var song = new TrackerSong { Speed = phase > 0 ? 1 : speed, Channels = TrackerSong.DefaultChannels };
         song.Instruments.Clear();
         var kinds = new Dictionary<string, int>();
-        foreach (var shape in shapes) song.Instruments.Add(MakeInstrument(shape, kinds));
+        foreach (var shape in shapes) song.Instruments.Add(MakeInstrument(shape, kinds, buzzers));
         report.Kinds = kinds;
+        int firstDrum = song.Instruments.Count + 1;
+        if (firstDrum - 1 + drums.Instruments.Count > 255)
+        {
+            notes.Add("The music changes too much between notes for instruments; it was read one row per frame.");
+            return null;
+        }
+        song.Instruments.AddRange(drums.Instruments);
 
         // The rows, then patterns that repeat written once
         var cells = new TrackerCell[rows, 4];
@@ -344,6 +530,13 @@ public static class YmImport
         {
             int volume = Volume(n.Loudest);
             cells[rowOf[n.Frame], n.Channel] = new TrackerCell(n.Pitch, n.Instrument, '\0', 0, volume >= 64 ? TrackerCell.NoVolume : volume);
+        }
+        // The digidrums on the row they are hit in, a few ticks late (EDx) when that is not its start
+        foreach (var hit in ReadHits(ym, drums))
+        {
+            int start = hit.Frame;
+            while (rowOf[start] < 0) start--;
+            cells[rowOf[start], hit.Channel] = drums.Cell(hit, firstDrum, hit.Frame - start);
         }
         if (phase > 0) cells[phase, 3] = new TrackerCell(TrackerCell.NoNote, 0, 'F', speed);
         int loopRow = 0;
@@ -420,7 +613,7 @@ public static class YmImport
 
     // An instrument that plays the steps: the waves and pitches in its table, the volume in its envelope.
     // A repeating end (an arpeggio or vibrato held on) becomes a loop.
-    private static TrackerInstrument MakeInstrument(Step[] steps, Dictionary<string, int> kinds)
+    private static TrackerInstrument MakeInstrument(Step[] steps, Dictionary<string, int> kinds, (string, string)? buzzers)
     {
         var (loopStart, loopLength) = FindLoop(steps);
         int length = loopLength > 0 ? loopStart + loopLength : steps.Length;
@@ -453,6 +646,8 @@ public static class YmImport
         if (points.Count < 2) points.Add(new TrackerEnvelopePoint(1, level[^1]));
 
         var inst = Instrument(Kind(steps, kinds), "Square");
+        var modes = steps.Where(s => s.Mode != Mode.Silent).Select(s => s.Mode).Distinct().ToList();
+        if (modes.Count == 1 && modes[0] is Mode.BuzzSaw or Mode.BuzzTriangle) UseBuzzerSample(inst, modes[0], buzzers);
         inst.Table = table;
         inst.TableLoop = loopLength > 0 ? loopStart : -1;
         inst.Envelope = points;
