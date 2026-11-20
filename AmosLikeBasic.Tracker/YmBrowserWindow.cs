@@ -11,9 +11,10 @@ using Avalonia.Styling;
 
 namespace AmosLikeBasic;
 
-// The tracker's YM MUSIC: a folder of YM files (Sound/Tracker/YM unless another is chosen), by the
-// folders in it (often one a composer). Choosing a song plays it through the YM2149 at once; it can
-// then be opened in the tracker. A search finds songs by name or folder in all of them.
+// The tracker's chip music: a folder of Atari ST music, YM and SNDH files (Sound/Tracker unless another
+// is chosen), by the folders in it (often one a composer). Choosing a song plays it through the YM2149
+// at once (an SNDH file's player is run on an emulated 68000 first); it can then be opened in the
+// tracker. A search finds songs by name or folder in all of them.
 public class YmBrowserWindow : Window
 {
     private readonly Action<string> _open;
@@ -32,9 +33,9 @@ public class YmBrowserWindow : Window
     public YmBrowserWindow(Action<string> open, string? folder = null)
     {
         _open = open;
-        string ymFolder = Path.Combine(Workspace.Sound, "Tracker", "YM");
-        _root = folder ?? (Directory.Exists(ymFolder) ? ymFolder : Workspace.Sound);
-        Title = "YM Music";
+        string trackerFolder = Path.Combine(Workspace.Sound, "Tracker");
+        _root = folder ?? (Directory.Exists(trackerFolder) ? trackerFolder : Workspace.Sound);
+        Title = "Chip Music";
         Width = 820;
         Height = 560;
         MinWidth = 560;
@@ -61,7 +62,7 @@ public class YmBrowserWindow : Window
         var play = Button("▶ Play", "Play the song again from the start", () => Choose(play: true));
         var stop = Button("■ Stop", null, () => ChiptuneSynth.PlayChipMusic(null));
         var openButton = Button("Open in tracker", "Read the song into the tracker (or double-click it)", OpenChosen);
-        var folderButton = Button("Folder...", "Choose another folder of YM files", ChooseFolder);
+        var folderButton = Button("Folder...", "Choose another folder of YM or SNDH files", ChooseFolder);
         var close = Button("Close", null, Close);
 
         var searchRow = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
@@ -81,9 +82,9 @@ public class YmBrowserWindow : Window
         buttons.Children.Add(close);
         buttons.Children.Add(new WrapPanel { Children = { play, stop, openButton } });
 
-        var top = new StackPanel { Children = { Heading("YM MUSIC"), new TextBlock
+        var top = new StackPanel { Children = { Heading("ATARI CHIP MUSIC"), new TextBlock
         {
-            Text = "Choose a song to hear it, as the Atari ST's sound chip played it. Open it in the tracker to change it.",
+            Text = "Choose a song (YM or SNDH) to hear it, as the Atari ST's sound chip played it. Open it in the tracker to change it.",
             TextWrapping = TextWrapping.Wrap, FontSize = 12
         }, _where, searchRow } };
         var foot = new StackPanel { Children = { _info, buttons } };
@@ -129,7 +130,7 @@ public class YmBrowserWindow : Window
     {
         _files = Directory.Exists(_root)
             ? Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories)
-                .Where(f => Path.GetExtension(f).Equals(".ym", StringComparison.OrdinalIgnoreCase))
+                .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".ym" or ".sndh" or ".snd")
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList()
             : new List<string>();
         _where.Text = $"{_files.Count} songs in {_root}";
@@ -138,7 +139,7 @@ public class YmBrowserWindow : Window
             .OrderBy(i => i.Text, StringComparer.OrdinalIgnoreCase).ToList();
         _folders.ItemsSource = folders;
         if (folders.Count > 0) _folders.SelectedIndex = 0;
-        else _info.Text = "There are no YM files here. Choose a folder that has some with Folder...";
+        else _info.Text = "There are no YM or SNDH files here. Choose a folder that has some with Folder...";
     }
 
     private string Relative(string dir)
@@ -169,12 +170,14 @@ public class YmBrowserWindow : Window
         _chosen = song.Path;
         try
         {
-            var ym = YmFile.Read(File.ReadAllBytes(song.Path));
+            var bytes = File.ReadAllBytes(song.Path);
+            var ym = YmFile.ReadChipMusic(bytes);
+            string kind = SndhFile.IsSndh(bytes) ? "SNDH" : $"YM{(ym.Version > 0 ? ym.Version : 3)}";
             var length = TimeSpan.FromSeconds(ym.Seconds);
             string title = ym.Title.Length > 0 ? ym.Title : Path.GetFileNameWithoutExtension(song.Path);
             string by = ym.Author.Length > 0 ? " by " + ym.Author : "";
             string effects = ym.UsesSpecialEffects ? (ym.Drums.Count > 0 ? $", {ym.Drums.Count} digidrums" : ", special effects") : "";
-            _info.Text = $"\"{title}\"{by}\n{(int)length.TotalMinutes}:{length.Seconds:00}, {ym.FrameRate} Hz, YM{(ym.Version > 0 ? ym.Version : 3)}{effects}" +
+            _info.Text = $"\"{title}\"{by}\n{(int)length.TotalMinutes}:{length.Seconds:00}, {ym.FrameRate} Hz, {kind}{effects}" +
                          (ym.Comment.Length > 0 ? "\n" + ym.Comment : "");
             if (play) ChiptuneSynth.PlayChipMusic(new YmPlayer(ym, 44100) { Loop = true });
         }

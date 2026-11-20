@@ -55,7 +55,7 @@ public sealed class AudioEngine : IDisposable
             byte[] data = File.ReadAllBytes(fullPath);
             AmosLikeBasic.AudioOutput.UseDevice();
 
-            if (AmosLikeBasic.YmFile.IsYm(data))
+            if (AmosLikeBasic.YmFile.IsChipMusic(data))
             {
                 PlayYm(data, fullPath);
                 return;
@@ -191,7 +191,7 @@ public sealed class AudioEngine : IDisposable
     private void PlayYm(byte[] data, string fullPath)
     {
         AmosLikeBasic.YmFile ym;
-        try { ym = AmosLikeBasic.YmFile.Read(data); }
+        try { ym = AmosLikeBasic.YmFile.ReadChipMusic(data); }
         catch (InvalidDataException ex)
         {
             Console.WriteLine($"Could not read the YM file: {ex.Message}");

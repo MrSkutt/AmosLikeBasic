@@ -1275,10 +1275,10 @@ public partial class TrackerWindow : Window
             Title = "Load song",
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("Songs and modules") { Patterns = new[] { "*.amostrk", "*.mod", "*.xm", "*.ym" } },
+                new FilePickerFileType("Songs and modules") { Patterns = new[] { "*.amostrk", "*.mod", "*.xm", "*.ym", "*.sndh", "*.snd" } },
                 SongFileType,
                 new FilePickerFileType("Modules (MOD, XM)") { Patterns = new[] { "*.mod", "*.xm" } },
-                new FilePickerFileType("YM chip music (Atari ST, Spectrum)") { Patterns = new[] { "*.ym" } }
+                new FilePickerFileType("Atari ST chip music (YM, SNDH)") { Patterns = new[] { "*.ym", "*.sndh", "*.snd" } }
             },
             SuggestedStartLocation = await StartFolderAsync()
         });
@@ -1289,7 +1289,7 @@ public partial class TrackerWindow : Window
 
     public void LoadFile(string path)
     {
-        if (Path.GetExtension(path).ToLowerInvariant() is ".mod" or ".xm" or ".ym" || IsModFile(path))
+        if (Path.GetExtension(path).ToLowerInvariant() is ".mod" or ".xm" or ".ym" or ".sndh" || IsModFile(path))
         {
             ImportMod(path);
             return;
@@ -1321,7 +1321,7 @@ public partial class TrackerWindow : Window
         {
             using var f = File.OpenRead(path);
             var head = new byte[17];
-            if (f.Read(head, 0, 17) == 17 && (XmImport.IsXm(head) || YmFile.IsYm(head))) return true;
+            if (f.Read(head, 0, 17) == 17 && (XmImport.IsXm(head) || YmFile.IsChipMusic(head))) return true;
             if (f.Length < 1084) return false;
             var tag = new byte[4];
             f.Seek(1080, SeekOrigin.Begin);
@@ -1344,7 +1344,7 @@ public partial class TrackerWindow : Window
             if (inSong.StartsWith("..")) inSong = folder;   // the Sound folder is moved outside the working folder
             var bytes = File.ReadAllBytes(path);
             var result = XmImport.IsXm(bytes) ? XmImport.Import(bytes, name, folder, inSong)
-                : YmFile.IsYm(bytes) ? YmImport.Import(YmFile.Read(bytes), name, true, folder, inSong)
+                : YmFile.IsChipMusic(bytes) ? YmImport.Import(YmFile.ReadChipMusic(bytes), name, true, folder, inSong)
                 : ModImport.Import(bytes, name, folder, inSong);
             Stop();
             _song = result.Song;

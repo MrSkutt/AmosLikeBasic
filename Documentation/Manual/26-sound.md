@@ -571,11 +571,13 @@ YM5 and YM6 files can have the Atari's special effects, made with a timer:
 - **SID voice**, the volume switched on and off fast, is played as a square wave at its pitch.
 - **Sync buzzer**, the envelope started again and again, is played as a buzzer at the timer's pitch.
 
-The buzzer itself (the envelope repeated fast) is played with a sample of the chip's own envelope, 32 steps of its volume, so it has the edge a smooth wave lacks. SNDH files, which are Atari programs rather than registers, cannot be read.
+The buzzer itself (the envelope repeated fast) is played with a sample of the chip's own envelope, 32 steps of its volume, so it has the edge a smooth wave lacks.
 
-**YM...** next to LOAD opens the YM music in `Sound/Tracker/YM` (or another folder, with **Folder...**), by the folders in it. Choose a song and it plays at once, as the chip played it; a search finds songs by name or folder. **Open in tracker** (or a double-click) reads it into the tracker.
+**SNDH files** (`.sndh`, `.snd`) are Atari ST music as its original player: 68000 code with the notes, often packed with Pack-Ice. The program unpacks them, runs the player on an emulated 68000 and Atari ST, and records what it writes to the sound chip as YM frames; from there an SNDH file is read, played and opened in the tracker as a YM file is. Players that make their sound with the Atari's timer interrupts (SID voices and digidrums) are silent for now.
 
-`MUSIC PLAY "music.ym"` plays a YM file as it is, through a copy of the chip in the program, special effects and all.
+**YM...** next to LOAD opens the Atari music, YM and SNDH files, in `Sound/Tracker` (or another folder, with **Folder...**), by the folders in it. Choose a song and it plays at once, as the chip played it; a search finds songs by name or folder. **Open in tracker** (or a double-click) reads it into the tracker.
+
+`MUSIC PLAY "music.ym"` plays a YM file as it is, through a copy of the chip in the program, special effects and all; `MUSIC PLAY "music.sndh"` plays an SNDH file the same way.
 
 A song played once (not looping) ends when it jumps back to a place it has already played, with `Bxx` or `Dxx`, as in ProTracker; that is how a song says it repeats.
 

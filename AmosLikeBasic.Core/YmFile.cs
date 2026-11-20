@@ -24,6 +24,12 @@ public sealed class YmFile
 
     public double Seconds => Frames.Length / (double)Math.Max(1, FrameRate);
 
+    // A YM file or an SNDH file (whose player is run to record it as YM frames)
+    public static bool IsChipMusic(byte[] b) => SndhFile.IsSndh(b) || IsYm(b);
+
+    public static YmFile ReadChipMusic(byte[] bytes, int tune = 0) =>
+        SndhFile.IsSndh(bytes) ? SndhPlayer.Record(SndhFile.Read(bytes), tune) : Read(bytes);
+
     public static bool IsYm(byte[] b) =>
         (b.Length >= 4 && b[0] == 'Y' && b[1] == 'M' && b[3] == '!') || IsLha(b);
 
