@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace AmosLikeBasic;
 
@@ -441,6 +442,9 @@ public static class SndhPlayer
         return sndh.Seconds.Length >= tune && sndh.Seconds[tune - 1] > 0 ? sndh.Seconds[tune - 1] : otherwise;
     }
 
+    // Writes to one register in a frame, more than a player makes in one call: done by a timer interrupt
+    private const int TimerWrites = 6;
+
     public static YmFile Record(SndhFile sndh, int tune = 0, int seconds = 0)
     {
         if (seconds <= 0) seconds = LengthOf(sndh, tune);
@@ -448,9 +452,15 @@ public static class SndhPlayer
         var st = machine.St;
         int frames = seconds * machine.Rate;
         var list = new List<byte[]>(frames);
+        // Every write to the sound chip in each frame, to find what timer interrupts did between the frames
+        var writes = new List<(int register, byte value)>[frames];
+        List<(int, byte)> current = new();
+        st.YmWritten = (r, v) => current.Add((r, v));
         double cycle = machine.Cpu.Cycles, perFrame = SndhMachine.CpuClock / machine.Rate;
         for (int f = 0; f < frames; f++)
         {
+            current = new List<(int, byte)>();
+            writes[f] = current;
             st.EnvelopeWritten = false;
             cycle += perFrame;
             machine.RunUntil(cycle);
@@ -459,7 +469,7 @@ public static class SndhPlayer
             if (!st.EnvelopeWritten) regs[13] = 0xFF;   // not written this frame, as in a YM file
             list.Add(regs);
         }
-        return new YmFile
+        var ym = new YmFile
         {
             Frames = list.ToArray(),
             FrameRate = machine.Rate,
@@ -468,5 +478,89 @@ public static class SndhPlayer
             Author = sndh.Composer,
             Comment = sndh.Year
         };
+        FindTimerEffects(ym, writes);
+        return ym;
+    }
+
+    // What the timers did between the frames, as the effects of YM6 files, so that the tracker can make
+    // them into instruments:
+    //  - a channel's volume switched between two values many times a frame: a SID voice;
+    //  - its volume written with ever other values: a digidrum, its values the sample (the same sample
+    //    played again is the same drum);
+    //  - the envelope's shape written many times a frame: a sync buzzer.
+    private static void FindTimerEffects(YmFile ym, List<(int register, byte value)>[] writes)
+    {
+        int frames = writes.Length;
+        var effects = new List<YmPlayer.Effect>[frames];
+        for (int f = 0; f < frames; f++) effects[f] = new List<YmPlayer.Effect>();
+        bool any = false;
+        var drumOf = new Dictionary<string, int>();
+
+        for (int c = 0; c < 3; c++)
+        {
+            List<byte>? drum = null;   // the volumes of a digidrum being played, over its frames
+            int drumStart = 0;
+            double drumRate = 0;
+            for (int f = 0; f <= frames; f++)
+            {
+                var volumes = new List<byte>();
+                if (f < frames)
+                    foreach (var (r, v) in writes[f]) if (r == 8 + c) volumes.Add(v);
+                bool timer = volumes.Count >= TimerWrites;
+                bool toggling = timer && Alternates(volumes);
+                if (drum != null && (!timer || toggling))
+                {
+                    // The drum ends: keep it (once) and mark where it started
+                    string key = Convert.ToBase64String(drum.ToArray());
+                    if (!drumOf.TryGetValue(key, out int number))
+                    {
+                        number = ym.Drums.Count;
+                        drumOf[key] = number;
+                        ym.Drums.Add(drum.Select(v => (float)Ym2149.VolumeLevel(v)).ToArray());
+                    }
+                    effects[drumStart].Add(new YmPlayer.Effect(YmPlayer.EffectKind.Drum, c, drumRate, number));
+                    drum = null;
+                    any = true;
+                }
+                if (f == frames || !timer) continue;
+                double rate = volumes.Count * (double)ym.FrameRate;   // writes a second: the timer's frequency
+                if (toggling)
+                {
+                    effects[f].Add(new YmPlayer.Effect(YmPlayer.EffectKind.Sid, c, rate, volumes.Max(v => v & 15)));
+                    any = true;
+                }
+                else
+                {
+                    if (drum == null) { drum = new List<byte>(); drumStart = f; drumRate = rate; }
+                    drum.AddRange(volumes.Select(v => (byte)(v & 15)));
+                }
+            }
+        }
+        for (int f = 0; f < frames; f++)
+        {
+            int shapes = writes[f].Count(w => w.register == 13);
+            if (shapes < TimerWrites) continue;
+            effects[f].Add(new YmPlayer.Effect(YmPlayer.EffectKind.SyncBuzzer, 0, shapes * (double)ym.FrameRate, 0));
+            any = true;
+        }
+        if (!any) return;
+        ym.FrameEffects = effects;
+        ym.UsesSpecialEffects = true;
+        ym.Version = 6;
+    }
+
+    // Switched on and off: every other value is the same (the "off", usually 0) and the ones between are
+    // louder (the "on", which may change as the note fades)
+    private static bool Alternates(List<byte> values)
+    {
+        for (int start = 0; start < 2; start++)
+        {
+            int off = values[start] & 31;
+            bool same = true, louder = true;
+            for (int i = start; i < values.Count && same; i += 2) same = (values[i] & 31) == off;
+            for (int i = 1 - start; i < values.Count && louder; i += 2) louder = (values[i] & 15) > (off & 15);
+            if (same && louder) return true;
+        }
+        return false;
     }
 }

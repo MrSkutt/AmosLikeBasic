@@ -39,6 +39,8 @@ public static class YmImport
         string? sampleFolder = null, string? sampleFolderInSong = null)
     {
         var notes = new List<string>();
+        // Faster than the tracker's top tempo (255, about 100 rows a second): frames taken together
+        if (ym.FrameRate * 2.5 > 255) ym = Slower(ym, (int)Math.Ceiling(ym.FrameRate * 2.5 / 255));
         var fx = ReadEffects(ym);
         var sounds = Sounds(ym, fx);
         var drums = sampleFolder != null ? DrumInstruments(ym, fx, sampleFolder, sampleFolderInSong ?? sampleFolder) : new Drums();
@@ -49,9 +51,34 @@ public static class YmImport
         song ??= Dump(ym, sounds, drums, buzzers);
         song.Title = ym.Title.Length > 0 ? ym.Title : name;
         song.Tempo = Math.Clamp((int)Math.Round(125.0 * ym.FrameRate / 50), 32, 255);
-        if (ym.FrameRate * 2.5 > 255) notes.Add($"The file plays {ym.FrameRate} frames a second, faster than the tracker's top tempo; it plays slower.");
         if (fx.Hits.Count > 0 && sampleFolder == null) notes.Add("The digidrums were left out.");
         return new ModImport.Result(song, drums.Instruments.Count, notes, Report(ym, song, analysed, found, analyse, fx, drums));
+    }
+
+    // Every `n` frames as one: the registers of the last, the envelope started again if any of them did,
+    // and the effects of all of them
+    private static YmFile Slower(YmFile ym, int n)
+    {
+        int frames = (ym.Frames.Length + n - 1) / n;
+        var regs = new byte[frames][];
+        List<YmPlayer.Effect>[]? effects = ym.FrameEffects != null || ym.Version >= 5 ? new List<YmPlayer.Effect>[frames] : null;
+        for (int f = 0; f < frames; f++)
+        {
+            int last = Math.Min(ym.Frames.Length, (f + 1) * n) - 1;
+            regs[f] = (byte[])ym.Frames[last].Clone();
+            byte shape = 0xFF;
+            for (int k = f * n; k <= last; k++) if (ym.Frames[k][13] != 0xFF) shape = ym.Frames[k][13];
+            regs[f][13] = shape;
+            if (effects == null) continue;
+            effects[f] = new List<YmPlayer.Effect>();
+            for (int k = f * n; k <= last; k++) effects[f].AddRange(YmPlayer.Effects(ym, k));
+        }
+        return new YmFile
+        {
+            Frames = regs, FrameRate = (int)Math.Round(ym.FrameRate / (double)n), Clock = ym.Clock,
+            LoopFrame = ym.LoopFrame / n, Title = ym.Title, Author = ym.Author, Comment = ym.Comment,
+            UsesSpecialEffects = ym.UsesSpecialEffects, Version = ym.Version, Drums = ym.Drums, FrameEffects = effects
+        };
     }
 
     // ── The effects of YM5 and YM6 ─────────────────────────────────────
@@ -109,9 +136,9 @@ public static class YmImport
             SidFrequency = new double[frames, 3], SidVolume = new int[frames, 3],
             SyncFrequency = new double[frames], DrumPlaying = new bool[frames, 3]
         };
-        if (ym.Version < 5) return fx;
+        if (ym.Version < 5 && ym.FrameEffects == null) return fx;
         for (int f = 0; f < frames; f++)
-            foreach (var e in YmPlayer.Effects(ym, ym.Frames[f]))
+            foreach (var e in YmPlayer.Effects(ym, f))
                 switch (e.Kind)
                 {
                     case YmPlayer.EffectKind.Sid:

@@ -1163,7 +1163,7 @@ public partial class TrackerWindow : Window
     private InstrumentLibraryWindow? _library;
 
     // LIBRARY: one window at a time, which adds to or replaces in the song open here
-    // YM...: a window of YM music to hear and open
+    // CHIP...: a window of Atari chip music (YM and SNDH) to hear and open
     private YmBrowserWindow? _ymBrowser;
 
     private void YmBrowser_OnClick(object? sender, RoutedEventArgs e)

@@ -175,4 +175,17 @@ public class SndhTests
         // 0.9 s of a 5036 Hz square wave
         Assert.InRange(crossings, 4400, 4660);
     }
+
+    [Fact]
+    public void A_SID_voice_made_by_a_timer_is_recognised_for_the_tracker()
+    {
+        // The volume flipped about 10 000 times a second: a SID voice on channel A at the timer's frequency
+        var ym = SndhPlayer.Record(SndhFile.Read(TimerTune()), seconds: 2);
+        Assert.NotNull(ym.FrameEffects);
+        var sids = ym.FrameEffects!.SelectMany(e => e).Where(e => e.Kind == YmPlayer.EffectKind.Sid).ToList();
+        Assert.True(sids.Count > 50, "nearly every frame");
+        Assert.All(sids, e => Assert.Equal(0, e.Channel));
+        Assert.InRange(sids.Average(e => e.Frequency), 9800, 10300);
+        Assert.Empty(ym.Drums);
+    }
 }

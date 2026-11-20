@@ -19,9 +19,11 @@ public class YmBrowserWindow : Window
 {
     private readonly Action<string> _open;
     private string _root;
-    private List<string> _files = new();
+    private List<string> _all = new();      // every YM and SNDH file under the folder
+    private List<string> _files = new();    // the ones of the kinds shown
     private readonly ListBox _folders, _songs;
     private readonly TextBox _search;
+    private readonly CheckBox _showYm, _showSndh;
     private readonly TextBlock _info, _where;
     private string? _chosen;
 
@@ -56,6 +58,13 @@ public class YmBrowserWindow : Window
         _songs.DoubleTapped += (_, _) => OpenChosen();
         _search = new TextBox { PlaceholderText = "Search songs and folders", Margin = new Thickness(0, 0, 8, 0) };
         _search.TextChanged += (_, _) => ShowFolder();
+        // Which kinds to list: YM files (recorded registers) and SNDH files (the Atari's own players)
+        _showYm = new CheckBox { Content = "YM", IsChecked = true, Margin = new Thickness(0, 0, 8, 0), Focusable = false };
+        _showSndh = new CheckBox { Content = "SNDH", IsChecked = true, Margin = new Thickness(0, 0, 8, 0), Focusable = false };
+        ToolTip.SetTip(_showYm, "Show YM files: the sound chip's registers, recorded");
+        ToolTip.SetTip(_showSndh, "Show SNDH files: the Atari's own music players, run here (they play exactly; in the tracker some sound simpler)");
+        _showYm.IsCheckedChanged += (_, _) => Filter();
+        _showSndh.IsCheckedChanged += (_, _) => Filter();
         _where = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
         _info = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0), MinHeight = 48 };
 
@@ -68,6 +77,9 @@ public class YmBrowserWindow : Window
         var searchRow = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
         DockPanel.SetDock(folderButton, Dock.Right);
         searchRow.Children.Add(folderButton);
+        var kinds = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { _showYm, _showSndh } };
+        DockPanel.SetDock(kinds, Dock.Right);
+        searchRow.Children.Add(kinds);
         searchRow.Children.Add(_search);
 
         var lists = new Grid { ColumnDefinitions = new ColumnDefinitions("2*,3*"), Margin = new Thickness(0, 6, 0, 0) };
@@ -125,21 +137,39 @@ public class YmBrowserWindow : Window
         return b;
     }
 
-    // All the YM files under the folder, and the folders that have them
+    // All the YM and SNDH files under the folder
     private void Scan()
     {
-        _files = Directory.Exists(_root)
+        _all = Directory.Exists(_root)
             ? Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories)
                 .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".ym" or ".sndh" or ".snd")
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList()
             : new List<string>();
+        Filter();
+    }
+
+    private static bool IsSndhFile(string f) => Path.GetExtension(f).ToLowerInvariant() is ".sndh" or ".snd";
+
+    // The files of the kinds ticked, and the folders that have them (the chosen folder kept if it still has some)
+    private void Filter()
+    {
+        bool ym = _showYm.IsChecked == true, sndh = _showSndh.IsChecked == true;
+        _files = _all.Where(f => IsSndhFile(f) ? sndh : ym).ToList();
         _where.Text = $"{_files.Count} songs in {_root}";
-        var folders = _files.Select(f => Path.GetDirectoryName(f)!).Distinct()
-            .Select(d => new Item($"{Relative(d)} ({_files.Count(f => Path.GetDirectoryName(f) == d)})", d))
+        string? chosen = (_folders.SelectedItem as Item)?.Path;
+        var folders = _files.GroupBy(f => Path.GetDirectoryName(f)!)
+            .Select(g => new Item($"{Relative(g.Key)} ({g.Count()})", g.Key))
             .OrderBy(i => i.Text, StringComparer.OrdinalIgnoreCase).ToList();
         _folders.ItemsSource = folders;
-        if (folders.Count > 0) _folders.SelectedIndex = 0;
-        else _info.Text = "There are no YM or SNDH files here. Choose a folder that has some with Folder...";
+        int keep = folders.FindIndex(i => i.Path == chosen);
+        if (folders.Count > 0) _folders.SelectedIndex = keep >= 0 ? keep : 0;
+        else
+        {
+            _songs.ItemsSource = null;
+            _info.Text = !ym && !sndh ? "Tick YM or SNDH to see songs."
+                : "There are no such files here. Choose a folder that has some with Folder...";
+        }
+        ShowFolder();
     }
 
     private string Relative(string dir)

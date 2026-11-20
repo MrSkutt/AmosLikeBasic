@@ -18,7 +18,7 @@
             <WrapPanel Orientation="Horizontal">
                 <Button Content="NEW" Classes="amos-button" Click="New_OnClick" Focusable="False" Margin="0,0,4,0"/>
                 <Button Content="LOAD" Classes="amos-button" Click="Load_OnClick" Focusable="False" Margin="0,0,4,0"/>
-                <Button Content="YM..." Classes="amos-button" Click="YmBrowser_OnClick" Focusable="False" Margin="0,0,4,0"
+                <Button Content="CHIP..." Classes="amos-button" Click="YmBrowser_OnClick" Focusable="False" Margin="0,0,4,0"
                         ToolTip.Tip="Browse Atari ST chip music (YM and SNDH files): hear a song by choosing it, and open it in the tracker"/>
                 <Button Content="SAVE" Classes="amos-button" Click="Save_OnClick" Focusable="False" Margin="0,0,4,0"/>
                 <Button Content="SAVE AS" Classes="amos-button" Click="SaveAs_OnClick" Focusable="False"/>

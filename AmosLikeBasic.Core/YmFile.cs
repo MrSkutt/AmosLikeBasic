@@ -21,6 +21,9 @@ public sealed class YmFile
     public int Version;                                // 5 or 6 for the files with effects, else 0
     // The digidrums: short samples played through a channel's volume, as levels 0 – 1
     public List<float[]> Drums = new();
+    // The timer effects of each frame, when they come from somewhere else than the registers' top bits
+    // (an SNDH file's player, recorded): null means they are read from the registers as in YM5 and YM6
+    public List<YmPlayer.Effect>[]? FrameEffects;
 
     public double Seconds => Frames.Length / (double)Math.Max(1, FrameRate);
 

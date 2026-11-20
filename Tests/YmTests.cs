@@ -310,6 +310,15 @@ public class YmTests : IDisposable
             Assert.Equal(new[] { "Hippel/Games (2)", "Tao (1)" }, folders);
             Assert.Equal(new[] { "Tiles", "Wings" }, lists[1].ItemsSource!.Cast<object>().Select(o => o.ToString()));
 
+            // Only SNDH files: these YM files go
+            var boxes = w.GetVisualDescendants().OfType<Avalonia.Controls.CheckBox>().ToList();
+            boxes.First(b => b.Content as string == "YM").IsChecked = false;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Empty(lists[0].ItemsSource!.Cast<object>());
+            boxes.First(b => b.Content as string == "YM").IsChecked = true;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Assert.Equal(2, lists[0].ItemsSource!.Cast<object>().Count());
+
             // A search looks through every folder
             w.GetVisualDescendants().OfType<Avalonia.Controls.TextBox>().First().Text = "star";
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();

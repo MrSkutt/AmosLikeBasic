@@ -223,8 +223,10 @@ public sealed class YmPlayer : IChipMusic
 
     // The effects of a frame: in YM5 the SID voice (register 1) and a digidrum (register 3), in YM6
     // two effects of any kind, described by registers 1 and 3
-    public static List<Effect> Effects(YmFile ym, byte[] r)
+    public static List<Effect> Effects(YmFile ym, int frame)
     {
+        if (ym.FrameEffects != null) return frame < ym.FrameEffects.Length ? ym.FrameEffects[frame] : new List<Effect>();
+        var r = ym.Frames[frame];
         var list = new List<Effect>(2);
         if (ym.Version == 5)
         {
@@ -248,11 +250,11 @@ public sealed class YmPlayer : IChipMusic
     }
 
     // The SID voices and the sync buzzer only last while the frames ask for them; a digidrum plays to its end
-    private void ApplyEffects(byte[] r)
+    private void ApplyEffects(int frame)
     {
         for (int c = 0; c < 3; c++) _chip.StopSid(c);
         _chip.StopSyncBuzzer();
-        foreach (var e in Effects(_ym, r))
+        foreach (var e in Effects(_ym, frame))
             switch (e.Kind)
             {
                 case EffectKind.Sid: _chip.StartSid(e.Channel, e.Frequency, e.Value); break;
@@ -299,9 +301,10 @@ public sealed class YmPlayer : IChipMusic
                         return;
                     }
                 }
-                var regs = _ym.Frames[_frame++];
+                int frame = _frame++;
+                var regs = _ym.Frames[frame];
                 _chip.WriteFrame(regs);
-                ApplyEffects(regs);
+                ApplyEffects(frame);
                 _frameLeft += _samplesPerFrame;
             }
             _frameLeft--;
