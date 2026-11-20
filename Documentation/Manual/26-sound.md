@@ -547,6 +547,20 @@ A few things differ from the originals, and the status line says what a module u
 
 S3M and IT files cannot be read into the tracker, but `MUSIC PLAY` plays them.
 
+### Reading YM files
+
+YM files are music from the Atari ST's sound chip (the YM2149, the same as the Spectrum's AY): not notes, but the chip's registers written down 50 times a second while the music played. **LOAD** turns one into a song with one row per frame (speed 1), so it plays as the original and can be edited. Packed files (most YM files are packed with LHA) are unpacked by themselves; YM2 – YM6 are read.
+
+- The chip's three channels become channels 1 – 3; channel 4 and up are free for your own sounds.
+- Each frame gets the nearest note, and the rest of the pitch as a fine slide (`E1x`, `E2x`), so vibrato and slides follow.
+- The volume goes in the volume column.
+- Tone, noise or both (as the chip's mixer lets them through) pick the instrument: *YM tone*, *YM noise* or *YM tone + noise*. The "buzzer", the chip's envelope repeated fast, becomes *YM buzzer saw* or *YM buzzer triangle* at its pitch; a single envelope fade becomes the volume it gives in each frame.
+- A note is only written when it changes, so the pattern shows the melody, but every frame of a fast arpeggio is a row of its own.
+
+The special effects of YM5 and YM6 files (digidrums, SID voice, sync buzzer) are left out, and the status line says so. SNDH files, which are Atari programs rather than registers, cannot be read.
+
+`MUSIC PLAY "music.ym"` plays a YM file as it is, through a copy of the chip in the program.
+
 A song played once (not looping) ends when it jumps back to a place it has already played, with `Bxx` or `Dxx`, as in ProTracker; that is how a song says it repeats.
 
 ## Your own sound effects
@@ -616,7 +630,7 @@ You can also play recorded sounds and ready-made music:
 | `SAM PLAY "file"` | plays a sound file (WAV, MP3, OGG) once |
 | `SAM LOOP "file"` | plays a sound file over and over |
 | `SAM STOP "file"` | stops the sound (`SAM STOP ""` stops all) |
-| `MUSIC PLAY "file"` | plays a music module (MOD, XM, S3M, IT) |
+| `MUSIC PLAY "file"` | plays a music module (MOD, XM, S3M, IT) or chip music from the Atari ST and the Spectrum (YM) |
 | `MUSIC STOP` | stops the music |
 
 ```basic nocheck

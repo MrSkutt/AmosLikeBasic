@@ -9,6 +9,10 @@ public sealed class AudioEngine : IDisposable
     private readonly int _mixer;
     private int _musicStream; 
     private bool _isDisposed;
+    // A YM file is played by our own YM2149 through a stream that asks for the sound as it goes
+    private AmosLikeBasic.YmPlayer? _ymPlayer;
+    private StreamProcedure? _ymProcedure;
+    private float[] _ymBuffer = Array.Empty<float>();
 
     private readonly Dictionary<string, int> _activeSamples = new(StringComparer.OrdinalIgnoreCase);
 
@@ -50,6 +54,12 @@ public sealed class AudioEngine : IDisposable
         {
             byte[] data = File.ReadAllBytes(fullPath);
             AmosLikeBasic.AudioOutput.UseDevice();
+
+            if (AmosLikeBasic.YmFile.IsYm(data))
+            {
+                PlayYm(data, fullPath);
+                return;
+            }
 
             // Use the overload that takes a byte array (data) instead of a file name
             // Parametrar: Data, Offset, Length, Flags, Frequency (0 = default)
@@ -175,6 +185,39 @@ public sealed class AudioEngine : IDisposable
             Bass.StreamFree(_musicStream);
             _musicStream = 0;
         }
+        _ymPlayer = null;
+    }
+
+    private void PlayYm(byte[] data, string fullPath)
+    {
+        AmosLikeBasic.YmFile ym;
+        try { ym = AmosLikeBasic.YmFile.Read(data); }
+        catch (InvalidDataException ex)
+        {
+            Console.WriteLine($"Could not read the YM file: {ex.Message}");
+            return;
+        }
+        var player = new AmosLikeBasic.YmPlayer(ym, 44100);
+        _ymPlayer = player;
+        // Kept in a field, so that the garbage collector does not take it while BASS calls it
+        _ymProcedure = (handle, buffer, length, user) =>
+        {
+            int frames = length / 8;   // stereo float
+            if (_ymBuffer.Length < frames) _ymBuffer = new float[frames];
+            var mono = _ymBuffer.AsSpan(0, frames);
+            player.Render(mono);
+            unsafe
+            {
+                var dest = new Span<float>((void*)buffer, frames * 2);
+                for (int i = 0; i < frames; i++) dest[i * 2] = dest[i * 2 + 1] = mono[i];
+            }
+            return player.Ended ? (frames * 8) | unchecked((int)StreamProcedureType.End) : frames * 8;
+        };
+        _musicStream = Bass.CreateStream(44100, 2, BassFlags.Decode | BassFlags.Float, _ymProcedure);
+        if (_musicStream != 0 && BassMix.MixerAddChannel(_mixer, _musicStream, BassFlags.Default | (BassFlags)0x2000))
+            Console.WriteLine($"Nu spelas: {fullPath} ({ym.Title}{(ym.Author.Length > 0 ? " by " + ym.Author : "")})");
+        else
+            Console.WriteLine($"Could not play the YM file ({Bass.LastError})");
     }
 
     public void Dispose()

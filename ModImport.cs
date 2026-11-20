@@ -104,7 +104,7 @@ public static class ModImport
                     int note = TrackerCell.NoNote;
                     if (per > 0)
                     {
-                        note = Math.Clamp(C2Note + (int)Math.Round(12 * Math.Log2((double)C2Period / per)), 0, 119);
+                        note = Math.Clamp(C2Note + (int)Math.Round(12 * Math.Log2((double)C2Period / per)), 12, 119);
                         if (effect != 3 && effect != 5) period[c] = per;   // a glide goes towards it instead
                     }
                     var (eff, prm) = Effect(effect, param, effect is 3 or 5 && per > 0 ? per : period[c], skipped);

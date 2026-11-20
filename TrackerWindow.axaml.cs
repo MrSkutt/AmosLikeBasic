@@ -1252,9 +1252,10 @@ public partial class TrackerWindow : Window
             Title = "Load song",
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("Songs and modules") { Patterns = new[] { "*.amostrk", "*.mod", "*.xm" } },
+                new FilePickerFileType("Songs and modules") { Patterns = new[] { "*.amostrk", "*.mod", "*.xm", "*.ym" } },
                 SongFileType,
-                new FilePickerFileType("Modules (MOD, XM)") { Patterns = new[] { "*.mod", "*.xm" } }
+                new FilePickerFileType("Modules (MOD, XM)") { Patterns = new[] { "*.mod", "*.xm" } },
+                new FilePickerFileType("YM chip music (Atari ST, Spectrum)") { Patterns = new[] { "*.ym" } }
             },
             SuggestedStartLocation = await StartFolderAsync()
         });
@@ -1265,7 +1266,7 @@ public partial class TrackerWindow : Window
 
     public void LoadFile(string path)
     {
-        if (Path.GetExtension(path).ToLowerInvariant() is ".mod" or ".xm" || IsModFile(path))
+        if (Path.GetExtension(path).ToLowerInvariant() is ".mod" or ".xm" or ".ym" || IsModFile(path))
         {
             ImportMod(path);
             return;
@@ -1297,7 +1298,7 @@ public partial class TrackerWindow : Window
         {
             using var f = File.OpenRead(path);
             var head = new byte[17];
-            if (f.Read(head, 0, 17) == 17 && XmImport.IsXm(head)) return true;
+            if (f.Read(head, 0, 17) == 17 && (XmImport.IsXm(head) || YmFile.IsYm(head))) return true;
             if (f.Length < 1084) return false;
             var tag = new byte[4];
             f.Seek(1080, SeekOrigin.Begin);
@@ -1319,8 +1320,8 @@ public partial class TrackerWindow : Window
             string inSong = Path.GetRelativePath(Workspace.Root, folder).Replace('\\', '/');
             if (inSong.StartsWith("..")) inSong = folder;   // the Sound folder is moved outside the working folder
             var bytes = File.ReadAllBytes(path);
-            var result = XmImport.IsXm(bytes)
-                ? XmImport.Import(bytes, name, folder, inSong)
+            var result = XmImport.IsXm(bytes) ? XmImport.Import(bytes, name, folder, inSong)
+                : YmFile.IsYm(bytes) ? YmImport.Import(YmFile.Read(bytes), name)
                 : ModImport.Import(bytes, name, folder, inSong);
             Stop();
             _song = result.Song;
@@ -1332,7 +1333,8 @@ public partial class TrackerWindow : Window
             UpdateTitle();
             UpdateStatus();
             KeepTypingFocus();
-            SetStatus($"Read {Path.GetFileName(path)}: {result.Song.Patterns.Count} patterns, {result.Samples} samples (in Sound/Samples/{safe}). " +
+            string samples = result.Samples > 0 ? $", {result.Samples} samples (in Sound/Samples/{safe})" : "";
+            SetStatus($"Read {Path.GetFileName(path)}: {result.Song.Patterns.Count} patterns{samples}. " +
                       string.Join(" ", result.Notes) + " Save it to keep it as a tracker song.");
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)

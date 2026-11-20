@@ -5585,6 +5585,12 @@ public static partial class AmosRunner
 
             // Find the file like all other graphics and sound (works in an exported app too)
             file = ResourceLoader.GetPath(file);
+            // YM files (Atari ST chip music) are played by our own YM2149, which libxmp does not know
+            if (File.Exists(file) && YmFile.IsYm(File.ReadAllBytes(file)))
+            {
+                engine.PlayMod(file);
+                return;
+            }
             IntPtr ctx = LibXmp.xmp_create_context();
             if (LibXmp.xmp_load_module(ctx, file) == 0)
             {
