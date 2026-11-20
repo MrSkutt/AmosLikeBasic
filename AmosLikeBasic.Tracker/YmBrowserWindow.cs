@@ -179,7 +179,9 @@ public class YmBrowserWindow : Window
             string effects = ym.UsesSpecialEffects ? (ym.Drums.Count > 0 ? $", {ym.Drums.Count} digidrums" : ", special effects") : "";
             _info.Text = $"\"{title}\"{by}\n{(int)length.TotalMinutes}:{length.Seconds:00}, {ym.FrameRate} Hz, {kind}{effects}" +
                          (ym.Comment.Length > 0 ? "\n" + ym.Comment : "");
-            if (play) ChiptuneSynth.PlayChipMusic(new YmPlayer(ym, 44100) { Loop = true });
+            if (play) ChiptuneSynth.PlayChipMusic(SndhFile.IsSndh(bytes)
+                ? new SndhSound(SndhFile.Read(bytes), 44100) { Loop = true }
+                : new YmPlayer(ym, 44100) { Loop = true });
         }
         catch (Exception e) when (e is InvalidDataException or IOException or UnauthorizedAccessException)
         {

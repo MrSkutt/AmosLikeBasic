@@ -573,7 +573,7 @@ YM5 and YM6 files can have the Atari's special effects, made with a timer:
 
 The buzzer itself (the envelope repeated fast) is played with a sample of the chip's own envelope, 32 steps of its volume, so it has the edge a smooth wave lacks.
 
-**SNDH files** (`.sndh`, `.snd`) are Atari ST music as its original player: 68000 code with the notes, often packed with Pack-Ice. The program unpacks them, runs the player on an emulated 68000 and Atari ST, and records what it writes to the sound chip as YM frames; from there an SNDH file is read, played and opened in the tracker as a YM file is. Players that make their sound with the Atari's timer interrupts (SID voices and digidrums) are silent for now.
+**SNDH files** (`.sndh`, `.snd`) are Atari ST music as its original player: 68000 code with the notes, often packed with Pack-Ice. The program unpacks them and runs the player on an emulated 68000 and Atari ST, with the MFP's timers and their interrupts. `MUSIC PLAY` and the browser play it live: every write to the sound chip is heard the moment the player makes it, so SID voices and digidrums, made with the timers thousands of times a second, sound as on the Atari. In the tracker, an SNDH file is read as the chip's registers at every call of the player, and from there it is a YM file; the timer effects are not in the tracker.
 
 **YM...** next to LOAD opens the Atari music, YM and SNDH files, in `Sound/Tracker` (or another folder, with **Folder...**), by the folders in it. Choose a song and it plays at once, as the chip played it; a search finds songs by name or folder. **Open in tracker** (or a double-click) reads it into the tracker.
 

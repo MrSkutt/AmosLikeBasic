@@ -76,13 +76,19 @@ public sealed class Ym2149
 
     private void RestartEnvelope() => Write(13, (byte)(_r[13] & 15));
 
+    // A register from a YM file, where 0xFF in register 13 means "not written this frame"
     public void Write(int register, byte value)
     {
+        if (register == 13 && value == 0xFF) return;
+        WriteLive(register, value);
+    }
+
+    // A register written by a program as it runs: every write to register 13 starts the envelope again
+    public void WriteLive(int register, byte value)
+    {
         if (register is < 0 or > 13) return;
-        // Register 13 starts the envelope again; in YM files 0xFF there means "not written"
         if (register == 13)
         {
-            if (value == 0xFF) return;
             int shape = value & 15;
             _envAttack = (shape & 4) != 0 ? 31 : 0;
             if ((shape & 8) == 0) { _envHold = true; _envAlternate = _envAttack != 0; }
@@ -197,7 +203,7 @@ public sealed class Ym2149
 }
 
 // A YM file played frame by frame through the chip
-public sealed class YmPlayer
+public sealed class YmPlayer : IChipMusic
 {
     // The Atari's MFP timer: 2.4576 MHz, divided by a predivisor (from three bits) and a count
     private const double MfpClock = 2457600;

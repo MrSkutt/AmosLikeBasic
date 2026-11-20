@@ -910,13 +910,13 @@ namespace AmosLikeBasic
         //  What each channel sounds like right now, for the tracker's oscilloscopes and meters
         // ════════════════════════════════════════════════════════════════
 
-        // ── A YM file played by the YM2149 next to the synth ──
-        private static YmPlayer? _chipMusic, _chipPlaying;
+        // ── Chip music (a YM or an SNDH file) played by the YM2149 next to the synth ──
+        private static IChipMusic? _chipMusic, _chipPlaying;
         private static readonly float[] _chipBuffer = new float[256];
         private static int _chipPos = 256;
 
         // Plays a YM file (null stops it); the player is the audio thread's from then on
-        public static void PlayChipMusic(YmPlayer? player)
+        public static void PlayChipMusic(IChipMusic? player)
         {
             Volatile.Write(ref _chipMusic, player);
             if (player != null) EnsureStarted();

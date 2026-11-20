@@ -30,6 +30,12 @@ public sealed class YmFile
     public static YmFile ReadChipMusic(byte[] bytes, int tune = 0) =>
         SndhFile.IsSndh(bytes) ? SndhPlayer.Record(SndhFile.Read(bytes), tune) : Read(bytes);
 
+    // To listen to: an SNDH file is run live (its timer effects heard as they happen), a YM file played frame by frame
+    public static IChipMusic PlayChipMusic(byte[] bytes, int sampleRate, bool loop, int tune = 0) =>
+        SndhFile.IsSndh(bytes)
+            ? new SndhSound(SndhFile.Read(bytes), sampleRate, tune) { Loop = loop }
+            : new YmPlayer(Read(bytes), sampleRate) { Loop = loop };
+
     public static bool IsYm(byte[] b) =>
         (b.Length >= 4 && b[0] == 'Y' && b[1] == 'M' && b[3] == '!') || IsLha(b);
 

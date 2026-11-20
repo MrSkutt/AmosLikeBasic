@@ -10,7 +10,7 @@ public sealed class AudioEngine : IDisposable
     private int _musicStream; 
     private bool _isDisposed;
     // A YM file is played by our own YM2149 through a stream that asks for the sound as it goes
-    private AmosLikeBasic.YmPlayer? _ymPlayer;
+    private AmosLikeBasic.IChipMusic? _ymPlayer;
     private StreamProcedure? _ymProcedure;
     private float[] _ymBuffer = Array.Empty<float>();
 
@@ -190,14 +190,13 @@ public sealed class AudioEngine : IDisposable
 
     private void PlayYm(byte[] data, string fullPath)
     {
-        AmosLikeBasic.YmFile ym;
-        try { ym = AmosLikeBasic.YmFile.ReadChipMusic(data); }
+        AmosLikeBasic.IChipMusic player;
+        try { player = AmosLikeBasic.YmFile.PlayChipMusic(data, 44100, loop: false); }
         catch (InvalidDataException ex)
         {
-            Console.WriteLine($"Could not read the YM file: {ex.Message}");
+            Console.WriteLine($"Could not read the chip music: {ex.Message}");
             return;
         }
-        var player = new AmosLikeBasic.YmPlayer(ym, 44100);
         _ymPlayer = player;
         // Kept in a field, so that the garbage collector does not take it while BASS calls it
         _ymProcedure = (handle, buffer, length, user) =>
@@ -215,7 +214,7 @@ public sealed class AudioEngine : IDisposable
         };
         _musicStream = Bass.CreateStream(44100, 2, BassFlags.Decode | BassFlags.Float, _ymProcedure);
         if (_musicStream != 0 && BassMix.MixerAddChannel(_mixer, _musicStream, BassFlags.Default | (BassFlags)0x2000))
-            Console.WriteLine($"Nu spelas: {fullPath} ({ym.Title}{(ym.Author.Length > 0 ? " by " + ym.Author : "")})");
+            Console.WriteLine($"Nu spelas: {fullPath}");
         else
             Console.WriteLine($"Could not play the YM file ({Bass.LastError})");
     }

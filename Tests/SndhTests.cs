@@ -122,4 +122,57 @@ public class SndhTests
         Assert.Equal((15u, 99u), (cpu.D[1] & 0xFFFF, cpu.D[2]));
         Assert.True(cpu.Stopped);
     }
+
+    // A SID voice made as Atari players make it: init sets Timer A of the MFP going (predivisor 4, count 61:
+    // 2.4576 MHz / 244 = 10 072 Hz) with a routine at $134 that flips channel A's volume between 15 and 0
+    // on every interrupt. The tone generators are off, so the flipping is the sound: 5036 Hz.
+    private static byte[] TimerTune()
+    {
+        var code = new List<ushort>();
+        int init = 0x40;
+        code.AddRange(new ushort[]
+        {
+            0x21FC, 0x0000, 0x0000, 0x0134,     // MOVE.L #handler,$134.W (the address is filled in below)
+            0x11FC, 0x0007, 0x8800,             // MOVE.B #7,$8800.W   (the mixer:
+            0x11FC, 0x003F, 0x8802,             // MOVE.B #$3F,$8802.W  everything off)
+            0x11FC, 0x0008, 0x8800,             // MOVE.B #8,$8800.W   (channel A's volume picked)
+            0x11FC, 0x003D, 0xFA1F,             // MOVE.B #61,$FA1F.W  (Timer A data)
+            0x11FC, 0x0001, 0xFA19,             // MOVE.B #1,$FA19.W   (Timer A control: predivisor 4)
+            0x08F8, 0x0005, 0xFA07,             // BSET #5,$FA07.W     (enable Timer A's interrupt)
+            0x08F8, 0x0005, 0xFA13,             // BSET #5,$FA13.W     (and unmask it)
+            0x4E75                              // RTS
+        });
+        int play = init + code.Count * 2;
+        code.Add(0x4E75);                       // play: RTS
+        int handler = init + code.Count * 2;
+        code.AddRange(new ushort[]
+        {
+            0x0A38, 0x000F, 0x2000,             // EORI.B #15,$2000.W
+            0x11F8, 0x2000, 0x8802,             // MOVE.B $2000.W,$8802.W
+            0x4E73                              // RTE
+        });
+        uint handlerAddress = 0x10000 + (uint)handler;   // where the file is loaded
+        code[1] = (ushort)(handlerAddress >> 16);
+        code[2] = (ushort)handlerAddress;
+        var b = new byte[init + code.Count * 2];
+        void Word(int at, int w) { b[at] = (byte)(w >> 8); b[at + 1] = (byte)w; }
+        Word(0, 0x6000); Word(2, init - 2);
+        Word(4, 0x4E75); Word(6, 0x4E71);
+        Word(8, 0x6000); Word(10, play - 10);
+        Encoding.ASCII.GetBytes("SNDHTITLTimer\0TC50\0\0HDNS").CopyTo(b, 12);
+        for (int i = 0; i < code.Count; i++) Word(init + i * 2, code[i]);
+        return b;
+    }
+
+    [Fact]
+    public void The_MFP_timer_interrupts_make_a_SID_voice()
+    {
+        var sndh = SndhFile.Read(TimerTune());
+        var sound = new float[44100];
+        new SndhSound(sndh, 44100, seconds: 2).Render(sound);
+        int crossings = 0;
+        for (int i = 4410; i < sound.Length; i++) if (sound[i - 1] < 0 && sound[i] >= 0) crossings++;
+        // 0.9 s of a 5036 Hz square wave
+        Assert.InRange(crossings, 4400, 4660);
+    }
 }
