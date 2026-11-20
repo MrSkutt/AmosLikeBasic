@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Builds the AMOS Like Basic IDE for download, for Mac and Windows.
+"""Builds the AMOS Like Basic IDE and AMOS Tracker for download, for Mac and Windows.
 
     python3 Tools/build_release.py 0.9.0
 
 Output in Export/Release/:
-    AmosLikeBasic-<version>-mac.zip   AMOS Like Basic.app and the manual
-    AmosLikeBasic-<version>-win.zip   a folder with AmosLikeBasic.exe and the manual
+    AmosLikeBasic-<version>-mac.zip   AMOS Like Basic.app, AMOS Tracker.app and the manual
+    AmosLikeBasic-<version>-win.zip   a folder with AmosLikeBasic.exe, AMOS Tracker/AmosTracker.exe and the manual
 
 .NET is included (self-contained), so nothing needs installing. The examples, images, sounds and
 fonts come with the app; on the first start the example projects, graphics and sounds are
@@ -26,14 +26,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from export_app import CSPROJ, EXE, PLATFORMS, ROOT, make_icns, zip_dir  # noqa: E402
 
 APP_NAME = "AMOS Like Basic"
+TRACKER_NAME = "AMOS Tracker"
+TRACKER_CSPROJ = os.path.join(ROOT, "AmosTracker", "AmosTracker.csproj")
+TRACKER_EXE = "AmosTracker"
 MANUAL = os.path.join(ROOT, "Documentation", "AMOS Like Basic - Manual.pdf")
 ICON_ICO = os.path.join(ROOT, "Assets", "AmosLikeBasic.ico")
 
 
-def publish(rid, out_dir, version):
-    print(f"== dotnet publish ({rid})")
+def publish(rid, out_dir, version, csproj=CSPROJ):
+    print(f"== dotnet publish {os.path.basename(csproj)} ({rid})")
     subprocess.run(
-        ["dotnet", "publish", CSPROJ, "-c", "Release", "-r", rid, "--self-contained", "true",
+        ["dotnet", "publish", csproj, "-c", "Release", "-r", rid, "--self-contained", "true",
          "-p:DebugType=None", "-p:DebugSymbols=false", f"-p:Version={version}", "-o", out_dir],
         check=True)
     # Debug files from NuGet packages (libSkiaSharp.pdb alone is 80 MB) and link files are not needed
@@ -44,8 +47,23 @@ def publish(rid, out_dir, version):
 
 def build_mac(version, out, work):
     stage = os.path.join(work, f"AmosLikeBasic-{version}-mac")
-    app = os.path.join(stage, f"{APP_NAME}.app")
-    publish(PLATFORMS["mac"], os.path.join(app, "Contents", "MacOS"), version)
+    mac_app(stage, version, work, CSPROJ, APP_NAME, EXE, "se.amoslikebasic.ide")
+    mac_app(stage, version, work, TRACKER_CSPROJ, TRACKER_NAME, TRACKER_EXE, "se.amoslikebasic.tracker")
+
+    shutil.copy2(MANUAL, stage)
+    zip_path = os.path.join(out, f"AmosLikeBasic-{version}-mac.zip")
+    if shutil.which("ditto"):
+        subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", stage, zip_path], check=True)
+    else:
+        zip_dir(stage, zip_path)
+    print(f"== Mac: {zip_path}")
+    return zip_path
+
+
+# A Mac app: the published program in Contents/MacOS, an icon, Info.plist, and an ad hoc signature
+def mac_app(stage, version, work, csproj, name, exe, identifier):
+    app = os.path.join(stage, f"{name}.app")
+    publish(PLATFORMS["mac"], os.path.join(app, "Contents", "MacOS"), version, csproj)
 
     icon_key = ""
     if shutil.which("sips") and shutil.which("iconutil") and os.path.exists(ICON_ICO):
@@ -59,13 +77,13 @@ def build_mac(version, out, work):
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>{APP_NAME}</string>
+    <string>{name}</string>
     <key>CFBundleDisplayName</key>
-    <string>{APP_NAME}</string>
+    <string>{name}</string>
     <key>CFBundleIdentifier</key>
-    <string>se.amoslikebasic.ide</string>
+    <string>{identifier}</string>
     <key>CFBundleExecutable</key>
-    <string>{EXE}</string>
+    <string>{exe}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleVersion</key>
@@ -81,7 +99,7 @@ def build_mac(version, out, work):
 """
     with open(os.path.join(app, "Contents", "Info.plist"), "w", encoding="utf-8") as f:
         f.write(plist)
-    os.chmod(os.path.join(app, "Contents", "MacOS", EXE), 0o755)
+    os.chmod(os.path.join(app, "Contents", "MacOS", exe), 0o755)
 
     if shutil.which("codesign"):
         # Apple Silicon only runs signed programs; an ad hoc signature is enough to start it
@@ -89,19 +107,11 @@ def build_mac(version, out, work):
     else:
         print("!! codesign is missing (build on a Mac), the app will not start on Apple Silicon")
 
-    shutil.copy2(MANUAL, stage)
-    zip_path = os.path.join(out, f"AmosLikeBasic-{version}-mac.zip")
-    if shutil.which("ditto"):
-        subprocess.run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", stage, zip_path], check=True)
-    else:
-        zip_dir(stage, zip_path)
-    print(f"== Mac: {zip_path}")
-    return zip_path
-
 
 def build_win(version, out, work):
     stage = os.path.join(work, f"AmosLikeBasic-{version}-win")
     publish(PLATFORMS["win"], stage, version)
+    publish(PLATFORMS["win"], os.path.join(stage, TRACKER_NAME), version, TRACKER_CSPROJ)
     shutil.copy2(MANUAL, stage)
     zip_path = os.path.join(out, f"AmosLikeBasic-{version}-win.zip")
     zip_dir(stage, zip_path)

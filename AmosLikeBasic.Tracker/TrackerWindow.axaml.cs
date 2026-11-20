@@ -1169,10 +1169,10 @@ public partial class TrackerWindow : Window
     private void YmBrowser_OnClick(object? sender, RoutedEventArgs e)
     {
         if (_ymBrowser != null) { _ymBrowser.Activate(); return; }
-        _ymBrowser = new YmBrowserWindow(async path =>
+        _ymBrowser = new YmBrowserWindow(async (path, tune) =>
         {
             if (!await ConfirmDiscardAsync()) return;
-            LoadFile(path);
+            LoadFile(path, tune);
         });
         _ymBrowser.Closed += (_, _) => _ymBrowser = null;
         _ymBrowser.Show(this);
@@ -1287,11 +1287,12 @@ public partial class TrackerWindow : Window
         if (path != null) LoadFile(path);
     }
 
-    public void LoadFile(string path)
+    // tune: which tune of an SNDH file (0: the one it starts with)
+    public void LoadFile(string path, int tune = 0)
     {
         if (Path.GetExtension(path).ToLowerInvariant() is ".mod" or ".xm" or ".ym" or ".sndh" || IsModFile(path))
         {
-            ImportMod(path);
+            ImportMod(path, tune);
             return;
         }
         try
@@ -1333,7 +1334,7 @@ public partial class TrackerWindow : Window
 
     // A MOD or XM file becomes a new, unsaved song; its samples are written as WAV files in
     // Sound/Samples/<module name>/, which the song refers to
-    private void ImportMod(string path)
+    private void ImportMod(string path, int tune = 0)
     {
         try
         {
@@ -1344,7 +1345,7 @@ public partial class TrackerWindow : Window
             if (inSong.StartsWith("..")) inSong = folder;   // the Sound folder is moved outside the working folder
             var bytes = File.ReadAllBytes(path);
             var result = XmImport.IsXm(bytes) ? XmImport.Import(bytes, name, folder, inSong)
-                : YmFile.IsChipMusic(bytes) ? YmImport.Import(YmFile.ReadChipMusic(bytes), name, true, folder, inSong)
+                : YmFile.IsChipMusic(bytes) ? YmImport.Import(YmFile.ReadChipMusic(bytes, tune), name, true, folder, inSong)
                 : ModImport.Import(bytes, name, folder, inSong);
             Stop();
             _song = result.Song;

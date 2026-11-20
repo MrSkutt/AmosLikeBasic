@@ -302,7 +302,7 @@ public class YmTests : IDisposable
             File.WriteAllText(Path.Combine(root, "Tao", "readme.txt"), "not a song");
 
             string? opened = null;
-            var w = new YmBrowserWindow(p => opened = p, root);
+            var w = new YmBrowserWindow((p, _) => opened = p, root);
             w.Show();
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             var lists = w.GetVisualDescendants().OfType<Avalonia.Controls.ListBox>().ToList();

@@ -17,7 +17,7 @@ namespace AmosLikeBasic;
 // tracker. A search finds songs by name or folder in all of them.
 public class YmBrowserWindow : Window
 {
-    private readonly Action<string> _open;
+    private readonly Action<string, int> _open;   // the file, and the tune of an SNDH file (0: its own first)
     private string _root;
     private List<string> _all = new();      // every YM and SNDH file under the folder
     private List<string> _files = new();    // the ones of the kinds shown
@@ -26,13 +26,16 @@ public class YmBrowserWindow : Window
     private readonly CheckBox _showYm, _showSndh;
     private readonly TextBlock _info, _where;
     private string? _chosen;
+    private readonly NumericUpDown _tune;
+    private readonly StackPanel _tuneRow;
+    private bool _choosing;
 
     private sealed record Item(string Text, string Path)
     {
         public override string ToString() => Text;
     }
 
-    public YmBrowserWindow(Action<string> open, string? folder = null)
+    public YmBrowserWindow(Action<string, int> open, string? folder = null)
     {
         _open = open;
         string trackerFolder = Path.Combine(Workspace.Sound, "Tracker");
@@ -69,6 +72,13 @@ public class YmBrowserWindow : Window
         _info = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0), MinHeight = 48 };
 
         var play = Button("▶ Play", "Play the song again from the start", () => Choose(play: true));
+        // An SNDH file can have several tunes: which one to hear and open
+        _tune = new NumericUpDown { Minimum = 1, Maximum = 1, Increment = 1, FormatString = "0", Width = 110, Margin = new Thickness(0, 0, 6, 6) };
+        _tune.ValueChanged += (_, _) => { if (!_choosing) Choose(play: true); };
+        _tuneRow = new StackPanel { Orientation = Orientation.Horizontal, IsVisible = false, Children =
+        {
+            new TextBlock { Text = "Tune", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 6) }, _tune
+        } };
         var stop = Button("■ Stop", null, () => ChiptuneSynth.PlayChipMusic(null));
         var openButton = Button("Open in tracker", "Read the song into the tracker (or double-click it)", OpenChosen);
         var folderButton = Button("Folder...", "Choose another folder of YM or SNDH files", ChooseFolder);
@@ -92,7 +102,7 @@ public class YmBrowserWindow : Window
         var buttons = new DockPanel { Margin = new Thickness(0, 8, 0, 0) };
         DockPanel.SetDock(close, Dock.Right);
         buttons.Children.Add(close);
-        buttons.Children.Add(new WrapPanel { Children = { play, stop, openButton } });
+        buttons.Children.Add(new WrapPanel { Children = { _tuneRow, play, stop, openButton } });
 
         var top = new StackPanel { Children = { Heading("ATARI CHIP MUSIC"), new TextBlock
         {
@@ -194,24 +204,31 @@ public class YmBrowserWindow : Window
     }
 
     // Shows what the song is, and plays it
+    private int Tune => (int)(_tune.Value ?? 1);
+
     private void Choose(bool play)
     {
         if (_songs.SelectedItem is not Item song) return;
+        bool newSong = _chosen != song.Path;
         _chosen = song.Path;
         try
         {
             var bytes = File.ReadAllBytes(song.Path);
-            var ym = YmFile.ReadChipMusic(bytes);
-            string kind = SndhFile.IsSndh(bytes) ? "SNDH" : $"YM{(ym.Version > 0 ? ym.Version : 3)}";
+            if (SndhFile.IsSndh(bytes))
+            {
+                ChooseSndh(SndhFile.Read(bytes), song.Path, newSong, play);
+                return;
+            }
+            _tuneRow.IsVisible = false;
+            var ym = YmFile.Read(bytes);
+            string kind = $"YM{(ym.Version > 0 ? ym.Version : 3)}";
             var length = TimeSpan.FromSeconds(ym.Seconds);
             string title = ym.Title.Length > 0 ? ym.Title : Path.GetFileNameWithoutExtension(song.Path);
             string by = ym.Author.Length > 0 ? " by " + ym.Author : "";
             string effects = ym.UsesSpecialEffects ? (ym.Drums.Count > 0 ? $", {ym.Drums.Count} digidrums" : ", special effects") : "";
             _info.Text = $"\"{title}\"{by}\n{(int)length.TotalMinutes}:{length.Seconds:00}, {ym.FrameRate} Hz, {kind}{effects}" +
                          (ym.Comment.Length > 0 ? "\n" + ym.Comment : "");
-            if (play) ChiptuneSynth.PlayChipMusic(SndhFile.IsSndh(bytes)
-                ? new SndhSound(SndhFile.Read(bytes), 44100) { Loop = true }
-                : new YmPlayer(ym, 44100) { Loop = true });
+            if (play) ChiptuneSynth.PlayChipMusic(new YmPlayer(ym, 44100) { Loop = true });
         }
         catch (Exception e) when (e is InvalidDataException or IOException or UnauthorizedAccessException)
         {
@@ -220,11 +237,29 @@ public class YmBrowserWindow : Window
         }
     }
 
+    // An SNDH file: what its header says, and its tune played live
+    private void ChooseSndh(SndhFile sndh, string path, bool newSong, bool play)
+    {
+        _choosing = true;
+        _tune.Maximum = sndh.Tunes;
+        if (newSong) _tune.Value = sndh.DefaultTune;
+        _tuneRow.IsVisible = sndh.Tunes > 1;
+        _choosing = false;
+        var length = TimeSpan.FromSeconds(SndhPlayer.LengthOf(sndh, Tune));
+        bool known = sndh.Seconds.Length >= Tune && sndh.Seconds[Tune - 1] > 0;
+        string title = sndh.Title.Length > 0 ? sndh.Title : Path.GetFileNameWithoutExtension(path);
+        string by = sndh.Composer.Length > 0 ? " by " + sndh.Composer : "";
+        string tunes = sndh.Tunes > 1 ? $", tune {Tune} of {sndh.Tunes}" : "";
+        _info.Text = $"\"{title}\"{by}{(sndh.Year.Length > 0 ? ", " + sndh.Year : "")}\n" +
+                     $"{(known ? $"{(int)length.TotalMinutes}:{length.Seconds:00}" : "length not given")}, {sndh.TimerHz} Hz, SNDH{tunes}";
+        if (play) ChiptuneSynth.PlayChipMusic(new SndhSound(sndh, 44100, Tune) { Loop = true });
+    }
+
     private void OpenChosen()
     {
         if (_chosen == null) return;
         ChiptuneSynth.PlayChipMusic(null);
-        _open(_chosen);
+        _open(_chosen, _tuneRow.IsVisible ? Tune : 0);
     }
 
     private async void ChooseFolder()

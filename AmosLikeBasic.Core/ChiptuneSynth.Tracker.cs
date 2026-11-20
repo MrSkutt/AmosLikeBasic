@@ -446,6 +446,8 @@ namespace AmosLikeBasic
         public static void ValidateInstrument(TrackerInstrument instrument, int number) =>
             CompileInstrument(instrument, number);
 
+        private const double MinAttack = 0.0015;
+
         private static TrackInstrument CompileInstrument(TrackerInstrument src, int number)
         {
             var steps = new List<TableStep>();
@@ -467,7 +469,8 @@ namespace AmosLikeBasic
                 PwmDepth = Math.Clamp(src.PwmDepth / 100.0, 0, 0.49),
                 PwmRate = Math.Max(0, src.PwmRate),
                 // With an envelope of points the voice's own one is only there to start and end without a click
-                Attack = points ? 0.001 : Math.Max(0, src.Attack) / 1000.0,
+                // At least 1.5 ms: a sound that starts at full volume at once (a sample not starting at 0) clicks
+                Attack = Math.Max(MinAttack, points ? 0 : src.Attack / 1000.0),
                 Decay = points ? 0 : Math.Max(0, src.Decay) / 1000.0,
                 Sustain = points ? 1 : Math.Clamp(src.Sustain / 100.0, 0, 1),
                 Release = points ? 0.005 : Math.Max(0, src.Release) / 1000.0,
@@ -499,8 +502,9 @@ namespace AmosLikeBasic
                 Sample = sample,
                 DefaultVolume = Math.Clamp(src.DefaultVolume, 0, 64),
                 SampleBaseFreq = 440.0 * Math.Pow(2, (Math.Clamp(src.SampleNote, 0, 127) - 69) / 12.0),
-                LoopStart = sample == null ? 0 : Math.Clamp(src.LoopStart, 0, sample.Data.Length - 1),
-                LoopEnd = sample == null || src.LoopEnd <= src.LoopStart ? 0 : Math.Min(src.LoopEnd, sample.Data.Length),
+                // A missing sample is empty: silent, and no loop to keep inside it
+                LoopStart = sample == null || sample.Data.Length == 0 ? 0 : Math.Clamp(src.LoopStart, 0, sample.Data.Length - 1),
+                LoopEnd = sample == null || sample.Data.Length == 0 || src.LoopEnd <= src.LoopStart ? 0 : Math.Min(src.LoopEnd, sample.Data.Length),
                 Table = steps.ToArray(),
                 TableLoop = src.TableLoop < steps.Count ? src.TableLoop : -1
             };

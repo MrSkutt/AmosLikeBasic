@@ -733,4 +733,13 @@ public class SynthTests : IDisposable
         Assert.False(S.IsTrackPlaying());
         Assert.True(Loudness(b, 0.01, 0.5) < 1e-4, "nothing sounds, not even the echo");
     }
+
+    [Fact]
+    public void AMissingSampleWithALoopIsSilentNotAnError()
+    {
+        // A song whose sample file has been taken away, with a loop set: it plays, silently
+        S.TrackPlay(SongWith("\"Wave\":\"Sample\",\"Sample\":\"Sound/Samples/no such file.wav\",\"LoopStart\":100,\"LoopEnd\":2000"), loop: false);
+        var b = Render(0.3);
+        Assert.True(b.All(x => x == 0), "silent");
+    }
 }

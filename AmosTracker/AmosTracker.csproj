@@ -23,6 +23,14 @@
         <ProjectReference Include="../AmosLikeBasic.Tracker/AmosLikeBasic.Tracker.csproj" />
     </ItemGroup>
 
+    <!-- The instrument library, the example songs and the samples they use, so that the tracker has
+         them when it is installed on its own (the user's own music folders under Sound/Tracker are not) -->
+    <ItemGroup>
+        <None Include="../Sound/Instruments/**/*" Link="Sound/Instruments/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="../Sound/Tracker/*.amostrk" Link="Sound/Tracker/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="../Sound/Samples/*.wav" Link="Sound/Samples/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
     <!-- The sound library (BASS) for each platform -->
     <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('win'))">
         <None Include="../libs/windows/bass*.dll" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
