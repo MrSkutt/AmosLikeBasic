@@ -24,7 +24,8 @@ public class InstrumentLibraryTests : IDisposable
         Directory.GetFiles(Repo.PathOf("Sound/Instruments"), "*.amosinst", SearchOption.AllDirectories)
             .Select(f => new object[] { Path.GetRelativePath(Repo.PathOf("Sound/Instruments"), f) });
 
-    // Peak and loudness (RMS) of a note held for 0.6 s and then let go, at C-4 (C-2 for basses)
+    // Peak and loudness of a note held for 0.6 s and then let go, at C-4 (C-2 for basses). The loudness
+    // is the RMS of its loudest 50 ms, so that a short sound (a hi-hat) counts as much as a long one.
     public static (double peak, double rms) Measure(TrackerInstrument inst, bool bass)
     {
         var song = new TrackerSong { Speed = 6, Tempo = 125 };
@@ -38,7 +39,10 @@ public class InstrumentLibraryTests : IDisposable
         S.Render(after);
         S.TrackPreviewStop();
         var all = held.Concat(after).ToArray();
-        return (all.Max(x => Math.Abs(x)), Math.Sqrt(held.Average(x => (double)x * x)));
+        const int window = S.SampleRate / 20;
+        double loudest = Enumerable.Range(0, held.Length / window)
+            .Max(w => Math.Sqrt(held.Skip(w * window).Take(window).Average(x => (double)x * x)));
+        return (all.Max(x => Math.Abs(x)), loudest);
     }
 
     [Theory]
