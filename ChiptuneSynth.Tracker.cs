@@ -341,6 +341,31 @@ namespace AmosLikeBasic
             ch.SongInstNumber = 0;
         }
 
+        // Silence at once: the song, the notes being tried, the sound effects, PLAY MUSIC, and every
+        // voice and its echo. For when something will not stop.
+        public static void Panic()
+        {
+            TrackStop();
+            StopMusic();
+            StopSfx(restore: false);
+            TrackPreviewStop();
+            _trackCommands.Enqueue(() =>
+            {
+                for (int c = 0; c < Voices; c++)
+                {
+                    var v = _voices[c];
+                    v.Stage = EnvStage.Idle;
+                    v.Drum = null;
+                    Volatile.Write(ref v.Seq, null);
+                    v.EchoMix = 0;
+                    Array.Clear(v.EchoBuffer);
+                    _trackChannels[c].Active = false;
+                }
+                foreach (var x in _sfx) x.Buffer = null;
+            });
+            EnsureStarted();
+        }
+
         public static void TrackStop()
         {
             if (Volatile.Read(ref _track) != null || Volatile.Read(ref _trackPending) != null)
@@ -1058,7 +1083,11 @@ namespace AmosLikeBasic
             if (ch.KeyOff)
             {
                 double tickSeconds = ch.Sfx ? 1 / SfxTickRate : 1 / (_trackTempo * 0.4);
-                if (inst.FadeOut > 0) ch.Fade = Math.Max(0, ch.Fade - tickSeconds / inst.FadeOut);
+                // Without a fade-out a sound that ends by itself (at 0, without a loop) goes on to its end;
+                // one that would go on for ever fades out quickly instead, so letting go always stops it
+                bool endsByItself = inst.EnvLoopEnd < 0 && levels[^1] <= 0;
+                double fade = inst.FadeOut > 0 ? inst.FadeOut : endsByItself ? 0 : 0.05;
+                if (fade > 0) ch.Fade = Math.Max(0, ch.Fade - tickSeconds / fade);
                 // Faded out, or at the end of an envelope that ends silent: the note is over
                 bool ended = ch.Fade <= 0 || (inst.EnvLoopEnd < 0 && ch.EnvTick > ticks[^1] && levels[^1] <= 0);
                 if (ended && v.Stage is EnvStage.Attack or EnvStage.Decay or EnvStage.Sustain) v.Stage = EnvStage.Release;

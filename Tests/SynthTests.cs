@@ -699,4 +699,38 @@ public class SynthTests : IDisposable
         Assert.InRange(Loudness(b, 0.29, 0.31) / held, 0.5, 0.85);   // 60 ms of 200 into the fade
         Assert.True(Loudness(b, 0.5, 0.65) < held * 0.01, "faded out after 200 ms");
     }
+
+    [Fact]
+    public void ANoteThatWouldNeverEndStopsWhenLetGo()
+    {
+        // No sustain point and no fade-out, and the envelope ends loud: === fades it out quickly
+        const string held = "\"Envelope\":[{\"Tick\":0,\"Level\":64},{\"Tick\":4,\"Level\":48}]";
+        S.TrackPlay(SongWith(held, "A-4 01 ...", "--- .. ...", "=== .. ...", "--- .. ...", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.7);
+        Assert.True(Loudness(b, 0.1, 0.23) > 0.05, "it sounds while held");
+        Assert.True(Loudness(b, 0.35, 0.6) < 1e-3, "and stops soon after ===");
+    }
+
+    [Fact]
+    public void ASoundThatEndsByItselfIsNotCutWhenLetGo()
+    {
+        // A drum that falls to 0 over 20 ticks: let go after 2, it still sounds to its end
+        const string drum = "\"Envelope\":[{\"Tick\":0,\"Level\":64},{\"Tick\":20,\"Level\":0}]";
+        S.TrackPlay(SongWith(drum, "A-4 01 ...", "=== .. ...", "--- .. ...", "--- .. ...", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.6);
+        Assert.True(Loudness(b, 0.25, 0.3) > 0.02, "it goes on after === (tick 12 – 15 of 20)");
+        Assert.True(Loudness(b, 0.45, 0.6) < 1e-3, "and ends at its last point");
+    }
+
+    [Fact]
+    public void PanicSilencesEverythingAtOnce()
+    {
+        // A note with a long echo, and a sound effect
+        S.TrackPlay(SongWith("\"EchoMix\":80,\"EchoTime\":300,\"EchoFeedback\":80"), loop: true);
+        Render(0.4);
+        S.Panic();
+        var b = Render(0.5);
+        Assert.False(S.IsTrackPlaying());
+        Assert.True(Loudness(b, 0.01, 0.5) < 1e-4, "nothing sounds, not even the echo");
+    }
 }

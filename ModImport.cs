@@ -12,7 +12,8 @@ namespace AmosLikeBasic;
 // ProTracker) is note 60 here, played at the sample's own rate of 8287 Hz.
 public static class ModImport
 {
-    public sealed record Result(TrackerSong Song, int Samples, List<string> Notes);
+    // Report: what was found, in a few lines for a window (null: nothing to show)
+    public sealed record Result(TrackerSong Song, int Samples, List<string> Notes, string? Report = null);
 
     private const double C2Rate = 8287.137;    // PAL: 7 093 789.2 / (2 × 428)
     private const int C2Period = 428;

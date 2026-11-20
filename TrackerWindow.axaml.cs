@@ -1057,6 +1057,14 @@ public partial class TrackerWindow : Window
     private void PlaySong_OnClick(object? sender, RoutedEventArgs e) => PlaySong();
     private void PlayPattern_OnClick(object? sender, RoutedEventArgs e) => PlayPattern(0);
     private void Stop_OnClick(object? sender, RoutedEventArgs e) { Stop(); KeepTypingFocus(); }
+
+    private void Panic_OnClick(object? sender, RoutedEventArgs e)
+    {
+        Stop();
+        TryEngine(ChiptuneSynth.Panic);
+        SetStatus("All sound stopped.");
+        KeepTypingFocus();
+    }
     private void EditToggle_OnClick(object? sender, RoutedEventArgs e) { SetEditMode(EditToggle.IsChecked == true); KeepTypingFocus(); }
 
     // ════════════════════════════════════════════════════════════════
@@ -1336,6 +1344,7 @@ public partial class TrackerWindow : Window
             string samples = result.Samples > 0 ? $", {result.Samples} samples (in Sound/Samples/{safe})" : "";
             SetStatus($"Read {Path.GetFileName(path)}: {result.Song.Patterns.Count} patterns{samples}. " +
                       string.Join(" ", result.Notes) + " Save it to keep it as a tracker song.");
+            if (result.Report != null) _ = ShowReportAsync("Read " + Path.GetFileName(path), result.Report);
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
         {
@@ -1449,6 +1458,29 @@ public partial class TrackerWindow : Window
             _forceClose = true;
             Close();
         }
+    }
+
+    // A window that tells what was found when a file was read
+    private async Task ShowReportAsync(string title, string text)
+    {
+        var ok = new Button { Content = "OK", Width = 80, Margin = new Thickness(5), HorizontalAlignment = HorizontalAlignment.Right };
+        var dialog = new Window
+        {
+            Title = title,
+            Width = 520,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        ok.Click += (_, _) => dialog.Close();
+        var lines = new StackPanel { Margin = new Thickness(14), Spacing = 2 };
+        foreach (var line in text.Split('\n'))
+            lines.Children.Add(new TextBlock { Text = line.Length == 0 ? " " : line, TextWrapping = TextWrapping.Wrap });
+        ((TextBlock)lines.Children[0]).FontWeight = FontWeight.Bold;
+        lines.Children.Add(ok);
+        dialog.Content = lines;
+        await dialog.ShowDialog(this);
+        KeepTypingFocus();
     }
 
     private async Task<bool> AskAsync(string title, string message, string yes, string no)

@@ -14,6 +14,7 @@
     <DockPanel>
         <!-- Verktygsrad -->
         <Border DockPanel.Dock="Top" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="0,0,0,2" Padding="6">
+            <StackPanel Spacing="6">
             <WrapPanel Orientation="Horizontal">
                 <Button Content="NEW" Classes="amos-button" Click="New_OnClick" Focusable="False" Margin="0,0,4,0"/>
                 <Button Content="LOAD" Classes="amos-button" Click="Load_OnClick" Focusable="False" Margin="0,0,4,0"/>
@@ -23,12 +24,17 @@
                         ToolTip.Tip="Save the song as a sound file (WAV), as you hear it: muted channels are left out"/>
                 <Button Content="PLAY SONG" Classes="amos-button" Click="PlaySong_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F5"/>
                 <Button Content="PLAY PATTERN" Classes="amos-button" Click="PlayPattern_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F6"/>
-                <Button Content="STOP" Classes="amos-button" Click="Stop_OnClick" Focusable="False" Margin="0,0,14,0" ToolTip.Tip="Esc"/>
+                <Button Content="STOP" Classes="amos-button" Click="Stop_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="Esc"/>
+                <Button Content="PANIC" Classes="amos-button" Click="Panic_OnClick" Focusable="False" Margin="0,0,14,0" Foreground="#FF5050"
+                        ToolTip.Tip="Silence everything at once: the song, notes that hang, sound effects and echoes"/>
                 <StackPanel Orientation="Horizontal">
                     <ToggleButton Name="EditToggle" Content="EDIT" Classes="amos-button" IsChecked="False" Focusable="False" Margin="0,0,4,0"
                                   Click="EditToggle_OnClick" ToolTip.Tip="Space"/>
                     <CheckBox Name="FollowCheck" Content="Follow" IsChecked="True" Focusable="False" Margin="4,0,14,0" Foreground="{DynamicResource AmosLabelFg}"/>
                 </StackPanel>
+            </WrapPanel>
+            <!-- The song's settings, always on a row of their own -->
+            <WrapPanel Orientation="Horizontal">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Title" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
                     <TextBox Name="TitleBox" Width="140" Margin="0,0,12,0"/>
@@ -55,6 +61,7 @@
                                    ToolTip.Tip="How many channels the song uses, 4 – 32. Sound effects (TRACK SFX) use channels 5 – 8 above the song's, or borrow channel 8."/>
                 </StackPanel>
             </WrapPanel>
+            </StackPanel>
         </Border>
 
         <!-- Statusrad -->

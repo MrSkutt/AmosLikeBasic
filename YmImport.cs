@@ -35,13 +35,57 @@ public static class YmImport
     {
         var notes = new List<string>();
         var sounds = Sounds(ym);
-        TrackerSong? song = analyse ? Analyse(ym, sounds, notes) : null;
+        var found = new Found();
+        TrackerSong? song = analyse ? Analyse(ym, sounds, notes, found) : null;
+        bool analysed = song != null;
         song ??= Dump(ym, sounds);
         song.Title = ym.Title.Length > 0 ? ym.Title : name;
         song.Tempo = Math.Clamp((int)Math.Round(125.0 * ym.FrameRate / 50), 32, 255);
         if (ym.FrameRate * 2.5 > 255) notes.Add($"The file plays {ym.FrameRate} frames a second, faster than the tracker's top tempo; it plays slower.");
         if (ym.UsesSpecialEffects) notes.Add("The file uses YM5/YM6 special effects (digidrums or SID voice); they were left out.");
-        return new ModImport.Result(song, 0, notes);
+        return new ModImport.Result(song, 0, notes, Report(ym, song, analysed, found, analyse));
+    }
+
+    // What the analysis found, for the report
+    private sealed class Found
+    {
+        public int Speed = 1;
+        public Dictionary<string, int> Kinds = new();
+        public int LoopOrder = -1;
+    }
+
+    private static string Report(YmFile ym, TrackerSong song, bool analysed, Found found, bool triedAnalysis)
+    {
+        var lines = new List<string>();
+        string by = ym.Author.Length > 0 ? " by " + ym.Author : "";
+        lines.Add($"\"{song.Title}\"{by}");
+        if (ym.Comment.Length > 0) lines.Add(ym.Comment);
+        var length = TimeSpan.FromSeconds(ym.Seconds);
+        lines.Add($"{(int)length.TotalMinutes}:{length.Seconds:00} long, {ym.Frames.Length} frames at {ym.FrameRate} Hz, " +
+                  $"{(ym.Clock == 2000000 ? "Atari ST" : ym.Clock is > 1700000 and < 1800000 ? "ZX Spectrum" : ym.Clock + " Hz")} clock.");
+        lines.Add("");
+        int rows = song.Order.Sum(o => song.Patterns[o].Rows);
+        if (analysed)
+        {
+            lines.Add($"Speed {found.Speed}: a row is {found.Speed} frame{(found.Speed == 1 ? "" : "s")}, {rows} rows in all" +
+                      (found.Speed == 1 ? " (no steady row length was found)." : "."));
+            string kinds = string.Join(", ", found.Kinds.OrderByDescending(k => k.Value).Select(k => $"{k.Value} {k.Key}"));
+            lines.Add($"{song.Instruments.Count} instruments, made from the notes: {kinds}.");
+            lines.Add($"{song.Patterns.Count} patterns, played {song.Order.Count} times in the order list" +
+                      (song.Patterns.Count < song.Order.Count ? " (the repeats are written once)." : "."));
+            if (found.LoopOrder > 0) lines.Add($"At the end it jumps back to place {found.LoopOrder} of the order list, where the music loops.");
+            lines.Add("");
+            lines.Add("Every note plays the chip's frames exactly, so the song sounds as the file does.");
+        }
+        else
+        {
+            lines.Add(triedAnalysis
+                ? "The notes differ too much to share instruments (it would need more than 255), so the song was read one row per frame (speed 1)."
+                : "Read one row per frame (speed 1).");
+            lines.Add($"{rows} rows in {song.Patterns.Count} patterns; the pitch is the nearest note and a fine slide, the volume is in the volume column.");
+        }
+        if (ym.UsesSpecialEffects) { lines.Add(""); lines.Add("The file uses YM5/YM6 special effects (digidrums or SID voice); they were left out."); }
+        return string.Join("\n", lines);
     }
 
     // ── Reading the frames ─────────────────────────────────────────────
@@ -217,11 +261,12 @@ public static class YmImport
         public int Instrument;
     }
 
-    private static TrackerSong? Analyse(YmFile ym, Sound[,] sounds, List<string> notes)
+    private static TrackerSong? Analyse(YmFile ym, Sound[,] sounds, List<string> notes, Found report)
     {
         int frames = sounds.GetLength(0);
         if (frames == 0) return null;
         var (speed, phase) = FindSpeed(sounds);
+        report.Speed = speed;
 
         // The frames a row starts at: one a row before the phase (at speed 1), then one every `speed`
         var rowOf = new int[frames];   // the row a frame belongs to; -1 when it is not the row's first
@@ -289,6 +334,7 @@ public static class YmImport
         song.Instruments.Clear();
         var kinds = new Dictionary<string, int>();
         foreach (var shape in shapes) song.Instruments.Add(MakeInstrument(shape, kinds));
+        report.Kinds = kinds;
 
         // The rows, then patterns that repeat written once
         var cells = new TrackerCell[rows, 4];
@@ -307,7 +353,7 @@ public static class YmImport
             while (f > 0 && rowOf[f] < 0) f--;
             loopRow = rowOf[f];
         }
-        BuildPatterns(song, cells, loopRow);
+        report.LoopOrder = BuildPatterns(song, cells, loopRow);
         notes.Add($"Speed {speed}, {song.Instruments.Count} instruments, {song.Patterns.Count} patterns in an order of {song.Order.Count}.");
         return song;
     }
@@ -454,7 +500,8 @@ public static class YmImport
 
     // Cuts the rows into patterns of the length that repeats best, and writes a repeat once. The loop
     // starts a pattern, and the last pattern is its own, as it jumps back.
-    private static void BuildPatterns(TrackerSong song, TrackerCell[,] cells, int loopRow)
+    // Returns the place in the order list the end jumps back to (0: the start)
+    private static int BuildPatterns(TrackerSong song, TrackerCell[,] cells, int loopRow)
     {
         int rows = cells.GetLength(0);
         string RowKey(int r) => string.Join("|", Enumerable.Range(0, 4).Select(c => cells[r, c].ToString()));
@@ -512,5 +559,6 @@ public static class YmImport
             var cell = end[end.Rows - 1, 3];
             end[end.Rows - 1, 3] = new TrackerCell(cell.Note, cell.Instrument, 'B', loopOrder, cell.Volume);
         }
+        return loopRow > 0 ? loopOrder : 0;
     }
 }

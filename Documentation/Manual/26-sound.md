@@ -352,7 +352,7 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **Instruments, volume and effects.** With the arrow keys the cursor goes to the instrument, volume and effect columns. There you type digits and letters directly: `0`–`9` and `A`–`F` for hex digits, and in the first column of the effect also `G`, `H` and `I`. `Delete` or `Backspace` clears whatever the cursor is on.
 
-**Playing.** `F5` plays the song from the place selected in the order list. `F6` plays the pattern over and over, `F7` plays the pattern from the cursor row and `Esc` stops. With **Follow** the pattern follows along while the song plays. When the song has more channels than fit in the window, the pattern shows as many as fit and follows the cursor sideways (`Tab`, the arrow keys, or Shift and the mouse wheel); an arrow in the heading shows that there are more. Click a channel's oscilloscope (or its heading) to mute the channel, and right-click to hear only that channel (solo); right-click it again and all are heard. A muted channel's oscilloscope says MUTE, and the one heard alone says SOLO.
+**Playing.** `F5` plays the song from the place selected in the order list. `F6` plays the pattern over and over, `F7` plays the pattern from the cursor row and `Esc` stops. **PANIC** silences everything at once (the song, notes that hang, sound effects and echoes). With **Follow** the pattern follows along while the song plays. When the song has more channels than fit in the window, the pattern shows as many as fit and follows the cursor sideways (`Tab`, the arrow keys, or Shift and the mouse wheel); an arrow in the heading shows that there are more. Click a channel's oscilloscope (or its heading) to mute the channel, and right-click to hear only that channel (solo); right-click it again and all are heard. A muted channel's oscilloscope says MUTE, and the one heard alone says SOLO.
 
 **Saving as a sound file.** **WAV** in the toolbar saves the song as a WAV file, to use the music in a video, send it to a friend or play it anywhere. It is made much faster than the song plays, and it is the song as you hear it: muted channels are left out, so you can also save the drums or the melody on their own.
 
@@ -500,7 +500,7 @@ In the file an LFO is written `"Lfo1": { "Target": "Cutoff", "Shape": "Triangle"
 | LOOP START, LOOP END | the envelope goes round between these points as long as the note sounds, for tremolo or a pulsing sound |
 | FADE OUT | after the note is let go, the sound fades out over this time; NONE lets the envelope end it |
 
-When the note is let go, the envelope goes on past the sustain point to its end. **ADSR** takes the points away again. In the file the points are written as `"Envelope": [{"Tick": 0, "Level": 64}, ...]` with `EnvelopeSustain`, `EnvelopeLoopStart`, `EnvelopeLoopEnd` (point numbers from 0, -1 for none) and `FadeOut` (ms).
+When the note is let go, the envelope goes on past the sustain point to its end. Without a fade-out, a sound that ends by itself (the last point at 0, no loop) plays to its end, and one that would go on for ever fades out quickly, so letting go of a key always stops it. **ADSR** takes the points away again. In the file the points are written as `"Envelope": [{"Tick": 0, "Level": 64}, ...]` with `EnvelopeSustain`, `EnvelopeLoopStart`, `EnvelopeLoopEnd` (point numbers from 0, -1 for none) and `FadeOut` (ms).
 
 ### The file
 
