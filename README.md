@@ -70,7 +70,7 @@ Put your own experiments in a `Sandbox/` folder in the project folder. It is ign
 
 ### Download
 
-Ready-to-run versions for macOS (Apple Silicon) and Windows (x64) are on the [Releases](https://github.com/MrSkutt/AmosLikeBasic/releases) page. Unzip and start; nothing else needs installing. The manual is in the zip file too.
+Ready-to-run versions for macOS (Apple Silicon) and Windows (x64) are on the [Releases](https://github.com/MrSkutt/AmosLikeBasic/releases) page. Unzip and start; nothing else needs installing. The manual is in the zip file too, and so is **AMOS Tracker**, the music tracker as an app of its own.
 
 - **Mac:** the app is not signed by Apple, so the first time you right-click it and choose **Open**.
 - **Windows:** if SmartScreen warns, click **More info** and **Run anyway**.
