@@ -1344,7 +1344,9 @@ public partial class TrackerWindow : Window
             string samples = result.Samples > 0 ? $", {result.Samples} samples (in Sound/Samples/{safe})" : "";
             SetStatus($"Read {Path.GetFileName(path)}: {result.Song.Patterns.Count} patterns{samples}. " +
                       string.Join(" ", result.Notes) + " Save it to keep it as a tracker song.");
-            if (result.Report != null) _ = ShowReportAsync("Read " + Path.GetFileName(path), result.Report);
+            if (result.Report != null)
+                _ = ShowReportAsync("Read " + Path.GetFileName(path), result.Report,
+                    result.Song.Instruments.Count > 1 ? ("Simplify instruments", Simplify) : null);
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
         {
@@ -1460,10 +1462,33 @@ public partial class TrackerWindow : Window
         }
     }
 
-    // A window that tells what was found when a file was read
-    private async Task ShowReportAsync(string title, string text)
+    // SIMPLIFY: fewer instruments, with their arpeggios and vibratos as effects
+    private void InstSimplify_OnClick(object? sender, RoutedEventArgs e) => Simplify();
+
+    private void Simplify()
     {
-        var ok = new Button { Content = "OK", Width = 80, Margin = new Thickness(5), HorizontalAlignment = HorizontalAlignment.Right };
+        PushUndo();
+        var r = InstrumentSimplifier.Simplify(_song);
+        if (r.After == r.Before)
+        {
+            _undo.RemoveAt(_undo.Count - 1);
+            SetStatus("Nothing to simplify: no instruments that are the same sound with an arpeggio or vibrato on top.");
+            KeepTypingFocus();
+            return;
+        }
+        Stop();
+        LoadSongIntoUi(keepPositions: true);
+        SongChanged();
+        string effects = r.Arpeggios + r.Vibratos > 0
+            ? $" {r.Arpeggios} arpeggios became 0xy and {r.Vibratos} vibratos 4xy in the patterns." : "";
+        SetStatus($"{r.Before} instruments became {r.After}.{effects} It sounds nearly as before; undo ({(OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl")}+Z) brings the old ones back.");
+        KeepTypingFocus();
+    }
+
+    // A window that tells what was found when a file was read, with a button for a next step
+    private async Task ShowReportAsync(string title, string text, (string label, Action action)? extra = null)
+    {
+        var ok = new Button { Content = "OK", Width = 80, Margin = new Thickness(5) };
         var dialog = new Window
         {
             Title = title,
@@ -1477,7 +1502,22 @@ public partial class TrackerWindow : Window
         foreach (var line in text.Split('\n'))
             lines.Children.Add(new TextBlock { Text = line.Length == 0 ? " " : line, TextWrapping = TextWrapping.Wrap });
         ((TextBlock)lines.Children[0]).FontWeight = FontWeight.Bold;
-        lines.Children.Add(ok);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
+        if (extra is { } x)
+        {
+            lines.Children.Add(new TextBlock
+            {
+                Text = "Simplify instruments makes fewer instruments: the arpeggios and vibratos become effects in the patterns, " +
+                       "and instruments that sound nearly the same become one. Easier to change, but it sounds nearly, not exactly, " +
+                       "as the file does. Undo brings it back; the SIMPLIFY button does it later too.",
+                TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0)
+            });
+            var more = new Button { Content = x.label, Margin = new Thickness(5) };
+            more.Click += (_, _) => { dialog.Close(); x.action(); };
+            buttons.Children.Add(more);
+        }
+        buttons.Children.Add(ok);
+        lines.Children.Add(buttons);
         dialog.Content = lines;
         await dialog.ShowDialog(this);
         KeepTypingFocus();

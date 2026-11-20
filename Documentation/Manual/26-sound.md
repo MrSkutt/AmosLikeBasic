@@ -449,6 +449,8 @@ That table is a kick drum: a short click of square wave and then a triangle wave
 
 **LIBRARY...** under the instrument list opens seventy ready-made instruments, sorted like on a synth: **Bass, Lead, Pad, Keys, Pluck, Brass & Strings, Chip, Drums, Percussion, Samples** and **FX**. Choose one and you hear it straight away (on the channel the cursor is in, in the octave chosen). **Add to song** makes it a new instrument in the song (double-clicking does the same), and **Replace current** puts it in place of the instrument chosen in the tracker, so the notes already written get the new sound. Then you can change it on the instrument page like any other.
 
+**SIMPLIFY**, next to it, makes fewer instruments out of many that are the same sound with something on top, as a song read from a YM file has: an arpeggio in an instrument's table becomes the effect `0xy` in the pattern, a vibrato `4xy`, and a note the table moves becomes the note itself. Instruments that are then nearly the same (the same wave and nearly the same volume envelope) become one. The song is easier to change, but sounds nearly, not exactly, as before; undo brings the old instruments back. Only instruments with a table and an envelope of points are touched.
+
 **Save current...** puts the tracker's current instrument in the library, in a category you choose or a new one you type. **Load file...** and **Save file...** read and write single instrument files (`.amosinst`) anywhere, for sharing a sound with a friend. The library is the folder `Sound/Instruments`, one folder per category, so you can also tidy it in Finder or Explorer.
 
 #### Sampled instruments
@@ -558,6 +560,8 @@ The program works out the song the way it was written:
 - **The patterns.** The rows are cut into patterns, and a pattern that repeats is written once and played again from the order list. The end jumps back to where the music loops.
 
 Since every note plays its frames exactly from its start, the song sounds as the file does whatever the analysis finds; the analysis only decides how readable it is. The chip's three channels become channels 1 – 3, and channel 4 and up are free for your own sounds.
+
+The window that shows what was found has a **Simplify instruments** button, which does what **SIMPLIFY** does (see the instruments above): fewer instruments, with the arpeggios and vibratos as effects, nearly but not exactly as the file sounds.
 
 When the notes differ too much to share instruments (a song would need more than 255), the file is read one row per frame instead: each frame gets the nearest note and a fine slide (`E1x`, `E2x`), the volume goes in the volume column, and five instruments (*YM tone*, *YM noise*, *YM tone + noise*, *YM buzzer saw*, *YM buzzer triangle*) follow what the chip's mixer lets through. The status line says which way the file was read.
 
