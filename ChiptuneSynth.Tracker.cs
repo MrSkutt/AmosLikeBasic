@@ -21,10 +21,10 @@ namespace AmosLikeBasic
         private readonly struct TableStep
         {
             public readonly WaveformType? Wave;
-            public readonly int Offset;          // semitones from the note
+            public readonly double Offset;       // semitones from the note (fractions for vibrato)
             public readonly double? PulseWidth;  // 0 – 1
 
-            public TableStep(WaveformType? wave, int offset, double? pulseWidth)
+            public TableStep(WaveformType? wave, double offset, double? pulseWidth)
             {
                 Wave = wave;
                 Offset = offset;
@@ -100,7 +100,8 @@ namespace AmosLikeBasic
             public int Vol = 64;           // 0 – 64 as in ProTracker
             public char Effect;
             public int Param;
-            public int TableIndex, TableOffset;
+            public int TableIndex;
+            public double TableOffset;
             public int DelayNote = TrackerCell.NoNote;
             // The volume envelope: where it is, whether the note has been let go, and the fade (1 – 0)
             public int EnvTick;
@@ -530,16 +531,16 @@ namespace AmosLikeBasic
                                    depth, Math.Max(0, delayMs) / 1000.0, retrigger);
         }
 
-        // "NOISE +24", "PULSE", "-12", "P30", "TRIANGLE 0 P50"
+        // "NOISE +24", "PULSE", "-12", "+0.25" (a quarter of a semitone), "P30", "TRIANGLE 0 P50"
         private static TableStep ParseTableStep(string text, int instrument)
         {
             WaveformType? wave = null;
-            int offset = 0;
+            double offset = 0;
             double? pulse = null;
             foreach (var word in text.Split(new[] { ' ', ',', '\t' }, StringSplitOptions.RemoveEmptyEntries))
             {
-                if (int.TryParse(word, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int n))
-                    offset = n;
+                if (double.TryParse(word, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out double n))
+                    offset = Math.Clamp(n, -96, 96);
                 else if ((word[0] == 'P' || word[0] == 'p') && word.Length > 1 &&
                          double.TryParse(word[1..], NumberStyles.Float, CultureInfo.InvariantCulture, out double pw))
                     pulse = Math.Clamp(pw / 100.0, 0.01, 0.99);

@@ -437,7 +437,7 @@ The effect is a letter or digit and two hex digits. Most only apply on their own
 
 An instrument has the same settings as the `PLAY` commands: `Wave`, `Volume`, `PulseWidth`, `PwmDepth`, `PwmRate`, `Attack`, `Decay`, `Sustain`, `Release`, `Filter`, `Cutoff`, `Resonance`, `FilterEnvDepth`, `FilterEnvAttack`, `FilterEnvDecay`, `Vibrato`, `VibratoRate`, `Ring` and `Sync`, and besides those a second oscillator and two LFOs (below). Those you leave out get default values.
 
-An instrument can also have a **table** that moves one step per tick from the moment the note starts. Each step can change the waveform, move the note a number of semitones and change the pulse width (`P30` is 30 %). That is how C64 musicians made drums and chords:
+An instrument can also have a **table** that moves one step per tick from the moment the note starts. Each step can change the waveform, move the note a number of semitones (fractions too: `+0.25` is a quarter of a semitone, for vibrato) and change the pulse width (`P30` is 30 %). That is how C64 musicians made drums and chords:
 
 ```text
 "Table": ["SQUARE +24", "TRIANGLE +12", "+6", "+2", "-2", "-5", "-8", "-10", "-12"]
@@ -549,13 +549,17 @@ S3M and IT files cannot be read into the tracker, but `MUSIC PLAY` plays them.
 
 ### Reading YM files
 
-YM files are music from the Atari ST's sound chip (the YM2149, the same as the Spectrum's AY): not notes, but the chip's registers written down 50 times a second while the music played. **LOAD** turns one into a song with one row per frame (speed 1), so it plays as the original and can be edited. Packed files (most YM files are packed with LHA) are unpacked by themselves; YM2 – YM6 are read.
+YM files are music from the Atari ST's sound chip (the YM2149, the same as the Spectrum's AY): not notes, but the chip's registers written down 50 times a second while the music played. **LOAD** turns one into a song that plays as the original and can be edited. Packed files (most YM files are packed with LHA) are unpacked by themselves; YM2 – YM6 are read.
 
-- The chip's three channels become channels 1 – 3; channel 4 and up are free for your own sounds.
-- Each frame gets the nearest note, and the rest of the pitch as a fine slide (`E1x`, `E2x`), so vibrato and slides follow.
-- The volume goes in the volume column.
-- Tone, noise or both (as the chip's mixer lets them through) pick the instrument: *YM tone*, *YM noise* or *YM tone + noise*. The "buzzer", the chip's envelope repeated fast, becomes *YM buzzer saw* or *YM buzzer triangle* at its pitch; a single envelope fade becomes the volume it gives in each frame.
-- A note is only written when it changes, so the pattern shows the melody, but every frame of a fast arpeggio is a row of its own.
+The program works out the song the way it was written:
+
+- **The rows.** It finds how many frames a row lasts (the speed) from where the notes start, so a song made at speed 6 gets speed 6 and a sixth of the rows.
+- **The instruments.** An ST music routine plays each note as an instrument that changes the pitch, the sound and the volume every frame: arpeggios, vibrato, drums that switch between noise and tone. Each note's frames become an instrument, the pitch and the sound in its **table** and the volume in its **envelope of points**, and notes that do the same share one. They are named by what they do: *Arp*, *Vibrato*, *Drum*, *Noise*, *Buzzer* (the chip's envelope repeated fast) or *Tone*.
+- **The patterns.** The rows are cut into patterns, and a pattern that repeats is written once and played again from the order list. The end jumps back to where the music loops.
+
+Since every note plays its frames exactly from its start, the song sounds as the file does whatever the analysis finds; the analysis only decides how readable it is. The chip's three channels become channels 1 – 3, and channel 4 and up are free for your own sounds.
+
+When the notes differ too much to share instruments (a song would need more than 255), the file is read one row per frame instead: each frame gets the nearest note and a fine slide (`E1x`, `E2x`), the volume goes in the volume column, and five instruments (*YM tone*, *YM noise*, *YM tone + noise*, *YM buzzer saw*, *YM buzzer triangle*) follow what the chip's mixer lets through. The status line says which way the file was read.
 
 The special effects of YM5 and YM6 files (digidrums, SID voice, sync buzzer) are left out, and the status line says so. SNDH files, which are Atari programs rather than registers, cannot be read.
 

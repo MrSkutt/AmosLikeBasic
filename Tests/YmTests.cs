@@ -103,7 +103,7 @@ public class YmTests : IDisposable
         for (int i = 0; i < 50; i++) frames.Add(Frame(noise: 8, mixer: 0x37, va: 15));
         for (int i = 0; i < 20; i++) frames.Add(Frame(va: 16, env: 18, shape: i == 0 ? 8 : 0xFF));
         var ym = new YmFile { Frames = frames.ToArray() };
-        var song = YmImport.Import(ym, "test").Song;
+        var song = YmImport.Import(ym, "test", analyse: false).Song;
 
         Assert.Equal((1, 125), (song.Speed, song.Tempo));                // one row per frame, 50 a second
         Assert.Equal(frames.Count, song.Patterns.Sum(p => p.Rows));
@@ -131,11 +131,63 @@ public class YmTests : IDisposable
     public void A_loop_in_the_middle_jumps_back_there()
     {
         var frames = Enumerable.Range(0, 300).Select(i => Frame(a: 284, mixer: 0x3E, va: 15)).ToArray();
-        var song = YmImport.Import(new YmFile { Frames = frames, LoopFrame = 100 }, "loop").Song;
+        var song = YmImport.Import(new YmFile { Frames = frames, LoopFrame = 100 }, "loop", analyse: false).Song;
         // The part before the loop is a pattern of its own, so the jump lands on the loop frame
         Assert.Equal(100, song.Patterns[0].Rows);
         var last = song.Patterns[^1];
         Assert.Equal(('B', 1), (last[last.Rows - 1, 3].Effect, last[last.Rows - 1, 3].Param));
+    }
+
+    // A tune as an ST music routine plays it: a note every 6 frames, each an arpeggio (0, 4, 7) that
+    // fades, with the melody going round eight times
+    private static YmFile Arpeggios()
+    {
+        int[] melody = { 284, 253, 225, 213, 284, 190, 213, 253, 284, 253, 225, 213, 190, 213, 253, 284 };
+        var frames = new List<byte[]>();
+        for (int round = 0; round < 8; round++)
+            foreach (int period in melody)
+                for (int f = 0; f < 6; f++)
+                {
+                    // An arpeggio up 4 and 7 semitones, and the volume one step down each frame
+                    double up = f % 3 == 1 ? 4 : f % 3 == 2 ? 7 : 0;
+                    int p = (int)Math.Round(period / Math.Pow(2, up / 12));
+                    frames.Add(Frame(a: p, b: period * 2, mixer: 0x3C, va: 15 - f, vb: 12));
+                }
+        return new YmFile { Frames = frames.ToArray() };
+    }
+
+    [Fact]
+    public void The_analysis_finds_the_rows_the_instruments_and_the_repeats()
+    {
+        var ym = Arpeggios();
+        var r = YmImport.Import(ym, "arp");
+        var song = r.Song;
+        Assert.Equal(6, song.Speed);                                    // a note every 6 frames
+        // One arpeggio instrument (whatever the note), one held note for the bass
+        Assert.Equal(2, song.Instruments.Count);
+        var arp = song.Instruments.Single(i => i.Name.StartsWith("Arp"));
+        Assert.Equal(new[] { "SQUARE", "SQUARE +4", "SQUARE +7" }, arp.Table.Take(3).Select(t => t.Split(' ', 2) is var w && w.Length > 1 ? w[0] + " " + double.Parse(w[1], System.Globalization.CultureInfo.InvariantCulture).ToString("+0;-0") : w[0]));
+        Assert.Equal(64, arp.Envelope[0].Level);
+        Assert.True(arp.Envelope[^1].Level < 64, "it fades");
+        // The melody: A-4 on the first row, and the second round is the same pattern again
+        Assert.Equal(69, song.Patterns[song.Order[0]][0, 0].Note);
+        Assert.Equal(128, song.Order.Sum(o => song.Patterns[o].Rows));
+        Assert.True(song.Patterns.Count < song.Order.Count, "the repeat is written once");
+
+        // It sounds as the frame-by-frame song does
+        float[] Play(TrackerSong t)
+        {
+            S.TrackPlay(t, loop: false);
+            var o = new float[SR * 2];
+            S.Render(o);
+            S.TrackStop();
+            S.Render(new float[2205]);
+            return o;
+        }
+        var analysed = Play(TrackerSong.FromJson(song.ToJson()));
+        var dump = Play(YmImport.Import(ym, "arp", analyse: false).Song);
+        Assert.InRange(Rms(analysed) / Rms(dump), 0.9, 1.1);
+        Assert.InRange(Frequency(analysed.AsSpan(0, SR).ToArray()) / Frequency(dump.AsSpan(0, SR).ToArray()), 0.97, 1.03);
     }
 
     // An LHA-packed YM file from the Atari: only on a computer that has it
