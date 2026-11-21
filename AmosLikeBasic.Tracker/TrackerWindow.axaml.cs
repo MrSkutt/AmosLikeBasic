@@ -450,6 +450,49 @@ public partial class TrackerWindow : Window
         var panRow = KnobRow(amp);
         AddKnob(panRow, "PAN", -100, 100, i => i.Pan, (i, v) => i.Pan = v, "pan", "+0;-0;0", bipolar: true, step: 1);
 
+        // The pan envelope: off, or points as the volume envelope (up is right, down is left)
+        AddSubHeading(amp, "PAN ENVELOPE");
+        AddChoice(amp, new[] { "Off", "Points" }, new[] { "OFF", "POINTS" },
+            i => i.PanEnvelope.Count >= 2 ? "Points" : "Off", SetPanEnvelopeMode, "pan envelope mode", refreshPage: true);
+        var panEditor = new PointEnvelopeEditor { Parts = EnvelopeParts.Pan };
+        panEditor.Edit = change =>
+        {
+            int before = CurrentInstrument?.PanEnvelope.Count ?? 0;
+            EditInstrument("pan envelope", change);
+            if ((CurrentInstrument?.PanEnvelope.Count ?? 0) != before) RefreshInstrumentPanel();
+        };
+        AddGraph(amp, panEditor);
+        var panKnobs = KnobRow(amp);
+        Knob? panSustainKnob = null, panLoopStartKnob = null, panLoopEndKnob = null;
+        _instrumentRefresh.Add(() =>
+        {
+            int last = Math.Max(0, (CurrentInstrument?.PanEnvelope.Count ?? 1) - 1);
+            foreach (var k in new[] { panSustainKnob, panLoopStartKnob, panLoopEndKnob })
+                if (k != null) k.Maximum = last;
+            panEditor.IsVisible = panKnobs.IsVisible = CurrentInstrument?.PanEnvelope.Count >= 2;
+        });
+        Knob PanLastKnob() => (Knob)((WrapPanel)panKnobs.Children[0]).Children[^1];
+        AddKnob(panKnobs, "SUSTAIN", -1, 24, i => i.PanEnvelopeSustain,
+            (i, v) => i.PanEnvelopeSustain = Math.Min((int)v, i.PanEnvelope.Count - 1), "pan env sustain", step: 1);
+        panSustainKnob = PanLastKnob();
+        panSustainKnob.ValueText = PointName;
+        AddKnob(panKnobs, "LOOP START", -1, 24, i => i.PanEnvelopeLoopStart, (i, v) =>
+        {
+            i.PanEnvelopeLoopStart = Math.Min((int)v, i.PanEnvelope.Count - 1);
+            if (i.PanEnvelopeLoopStart < 0) i.PanEnvelopeLoopEnd = -1;
+            else if (i.PanEnvelopeLoopEnd < i.PanEnvelopeLoopStart) i.PanEnvelopeLoopEnd = i.PanEnvelopeLoopStart;
+        }, "pan env loop start", step: 1);
+        panLoopStartKnob = PanLastKnob();
+        panLoopStartKnob.ValueText = PointName;
+        AddKnob(panKnobs, "LOOP END", -1, 24, i => i.PanEnvelopeLoopEnd, (i, v) =>
+        {
+            i.PanEnvelopeLoopEnd = Math.Min((int)v, i.PanEnvelope.Count - 1);
+            if (i.PanEnvelopeLoopEnd < 0) i.PanEnvelopeLoopStart = -1;
+            else if (i.PanEnvelopeLoopStart < 0 || i.PanEnvelopeLoopStart > i.PanEnvelopeLoopEnd) i.PanEnvelopeLoopStart = i.PanEnvelopeLoopEnd;
+        }, "pan env loop end", step: 1);
+        panLoopEndKnob = PanLastKnob();
+        panLoopEndKnob.ValueText = PointName;
+
         // ── EFFECTS ──
         var fx = Card(cards, "EFFECTS", 300);
         AddSubHeading(fx, "ECHO");
@@ -690,6 +733,22 @@ public partial class TrackerWindow : Window
         i.Envelope = new List<TrackerEnvelopePoint> { new(0, 0), new(a, 64), new(d, s), new(r, 0) };
         i.EnvelopeSustain = 2;
         i.EnvelopeLoopStart = i.EnvelopeLoopEnd = -1;
+    }
+
+    // A new pan envelope swings from the middle to the right, the left and back, over a second or so
+    private static void SetPanEnvelopeMode(TrackerInstrument i, string mode)
+    {
+        if (mode != "Points")
+        {
+            i.PanEnvelope.Clear();
+            i.PanEnvelopeSustain = i.PanEnvelopeLoopStart = i.PanEnvelopeLoopEnd = -1;
+            return;
+        }
+        if (i.PanEnvelope.Count >= 2) return;
+        i.PanEnvelope = new List<TrackerEnvelopePoint> { new(0, 32), new(12, 64), new(36, 0), new(48, 32) };
+        i.PanEnvelopeSustain = -1;
+        i.PanEnvelopeLoopStart = 0;
+        i.PanEnvelopeLoopEnd = 3;
     }
 
     // A card on the instrument page; returns the panel its rows go in

@@ -398,6 +398,9 @@ public sealed class PointEnvelopeEditor : InstrumentGraph
 {
     public const int MaxPoints = 25;
 
+    // The volume envelope, or the pan envelope
+    public EnvelopeParts Parts { get; init; } = EnvelopeParts.Volume;
+
     // Makes a change to the instrument through the tracker window (for undo and the sound)
     public Action<Action<TrackerInstrument>>? Edit { get; set; }
 
@@ -410,27 +413,36 @@ public sealed class PointEnvelopeEditor : InstrumentGraph
         ToolTip.SetTip(this, "Click to add a point, drag to move one, right-click to take one away. The ticks follow the song's speed.");
     }
 
-    private static int Span(TrackerInstrument inst) =>
-        Math.Max(32, (int)Math.Ceiling((inst.Envelope.Count > 0 ? inst.Envelope[^1].Tick : 0) * 1.15 + 4));
+    private List<TrackerEnvelopePoint> Pts(TrackerInstrument inst) => Parts.Points(inst);
+
+    private int Span(TrackerInstrument inst) =>
+        Math.Max(32, (int)Math.Ceiling((Pts(inst).Count > 0 ? Pts(inst)[^1].Tick : 0) * 1.15 + 4));
 
     private double X(TrackerInstrument inst, Rect a, double tick) => a.Left + tick / Span(inst) * a.Width;
     private static double Y(Rect a, double level) => a.Bottom - level / 64.0 * a.Height;
 
     protected override void Draw(DrawingContext ctx, TrackerInstrument inst, Rect a)
     {
-        var env = inst.Envelope;
+        var env = Pts(inst);
         var gridPen = new Pen(Grid, 1, new DashStyle(new double[] { 2, 3 }, 0));
         foreach (var level in new[] { 16, 32, 48 }) ctx.DrawLine(gridPen, new Point(a.Left, Y(a, level)), new Point(a.Right, Y(a, level)));
+        if (Parts.IsPan)
+        {
+            // Pan: the middle across, left below and right above it
+            ctx.DrawLine(new Pen(Faint, 1), new Point(a.Left, Y(a, 32)), new Point(a.Right, Y(a, 32)));
+            ctx.DrawText(Text("R", Faint, 10), new Point(a.Right - 8, a.Top));
+            ctx.DrawText(Text("L", Faint, 10), new Point(a.Right - 8, a.Bottom - 12));
+        }
         if (env.Count < 2) return;
 
-        if (inst.EnvelopeLoopStart >= 0 && inst.EnvelopeLoopEnd >= inst.EnvelopeLoopStart && inst.EnvelopeLoopEnd < env.Count)
+        if (Parts.LoopStart(inst) >= 0 && Parts.LoopEnd(inst) >= Parts.LoopStart(inst) && Parts.LoopEnd(inst) < env.Count)
         {
-            double x0 = X(inst, a, env[inst.EnvelopeLoopStart].Tick), x1 = X(inst, a, env[inst.EnvelopeLoopEnd].Tick);
+            double x0 = X(inst, a, env[Parts.LoopStart(inst)].Tick), x1 = X(inst, a, env[Parts.LoopEnd(inst)].Tick);
             ctx.FillRectangle(new SolidColorBrush(Color.FromArgb(40, 255, 220, 120)), new Rect(x0, a.Top, Math.Max(2, x1 - x0), a.Height));
         }
-        if (inst.EnvelopeSustain >= 0 && inst.EnvelopeSustain < env.Count)
+        if (Parts.Sustain(inst) >= 0 && Parts.Sustain(inst) < env.Count)
         {
-            double x = X(inst, a, env[inst.EnvelopeSustain].Tick);
+            double x = X(inst, a, env[Parts.Sustain(inst)].Tick);
             ctx.DrawLine(new Pen(Faint, 1, new DashStyle(new double[] { 3, 3 }, 0)), new Point(x, a.Top), new Point(x, a.Bottom));
             ctx.DrawText(Text("S", Faint, 10), new Point(x + 2, a.Top));
         }
@@ -440,9 +452,10 @@ public sealed class PointEnvelopeEditor : InstrumentGraph
         var fill = new StreamGeometry();
         using (var g = fill.Open())
         {
-            g.BeginFigure(new Point(pts[0].X, a.Bottom), true);
+            double baseY = Parts.IsPan ? Y(a, 32) : a.Bottom;
+            g.BeginFigure(new Point(pts[0].X, baseY), true);
             foreach (var p in pts) g.LineTo(p);
-            g.LineTo(new Point(pts[^1].X, a.Bottom));
+            g.LineTo(new Point(pts[^1].X, baseY));
             g.EndFigure(true);
         }
         ctx.DrawGeometry(new SolidColorBrush(Color.FromArgb(40, 255, 220, 0)), null, fill);
@@ -462,9 +475,9 @@ public sealed class PointEnvelopeEditor : InstrumentGraph
     private int HitPoint(TrackerInstrument inst, Point p)
     {
         var a = Area;
-        for (int k = 0; k < inst.Envelope.Count; k++)
+        for (int k = 0; k < Pts(inst).Count; k++)
         {
-            var e = inst.Envelope[k];
+            var e = Pts(inst)[k];
             if (Math.Abs(X(inst, a, e.Tick) - p.X) <= 6 && Math.Abs(Y(a, e.Level) - p.Y) <= 6) return k;
         }
         return -1;
@@ -474,26 +487,26 @@ public sealed class PointEnvelopeEditor : InstrumentGraph
     {
         base.OnPointerPressed(e);
         var inst = Instrument();
-        if (inst == null || Edit == null || inst.Envelope.Count < 2) return;
+        if (inst == null || Edit == null || Pts(inst).Count < 2) return;
         var p = e.GetPosition(this);
         int hit = HitPoint(inst, p);
         e.Handled = true;
 
         if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
         {
-            if (hit > 0 && inst.Envelope.Count > 2) Edit(i => RemovePoint(i, hit));
+            if (hit > 0 && Pts(inst).Count > 2) Edit(i => RemovePoint(Parts, i, hit));
             return;
         }
         if (hit < 0)
         {
-            if (inst.Envelope.Count >= MaxPoints) return;
+            if (Pts(inst).Count >= MaxPoints) return;
             var a = Area;
             int tick = (int)Math.Round(Math.Clamp((p.X - a.Left) / a.Width, 0, 1) * Span(inst));
             int level = (int)Math.Round(Math.Clamp((a.Bottom - p.Y) / a.Height, 0, 1) * 64);
-            int at = inst.Envelope.FindIndex(q => q.Tick >= tick);
-            if (at == 0 || (at > 0 && inst.Envelope[at].Tick == tick)) return;   // tick taken
-            if (at < 0) at = inst.Envelope.Count;
-            Edit(i => InsertPoint(i, at, new TrackerEnvelopePoint(tick, level)));
+            int at = Pts(inst).FindIndex(q => q.Tick >= tick);
+            if (at == 0 || (at > 0 && Pts(inst)[at].Tick == tick)) return;   // tick taken
+            if (at < 0) at = Pts(inst).Count;
+            Edit(i => InsertPoint(Parts, i, at, new TrackerEnvelopePoint(tick, level)));
             hit = at;
         }
         _drag = hit;
@@ -505,17 +518,19 @@ public sealed class PointEnvelopeEditor : InstrumentGraph
     {
         base.OnPointerMoved(e);
         var inst = Instrument();
-        if (_drag < 0 || inst == null || Edit == null || _drag >= inst.Envelope.Count) return;
+        if (_drag < 0 || inst == null || Edit == null || _drag >= Pts(inst).Count) return;
         var a = Area;
         var p = e.GetPosition(this);
         int k = _drag;
         // Between its neighbours; the first point stays at tick 0. Dragging past the right edge makes room.
-        int lo = k == 0 ? 0 : inst.Envelope[k - 1].Tick + 1;
-        int hi = k == 0 ? 0 : k < inst.Envelope.Count - 1 ? inst.Envelope[k + 1].Tick - 1 : 9999;
+        var env = Pts(inst);
+        int lo = k == 0 ? 0 : env[k - 1].Tick + 1;
+        int hi = k == 0 ? 0 : k < env.Count - 1 ? env[k + 1].Tick - 1 : 9999;
         int tick = Math.Clamp((int)Math.Round((p.X - a.Left) / a.Width * Span(inst)), lo, hi);
         int level = (int)Math.Round(Math.Clamp((a.Bottom - p.Y) / a.Height, 0, 1) * 64);
-        if (tick == inst.Envelope[k].Tick && level == inst.Envelope[k].Level) return;
-        Edit(i => { i.Envelope[k].Tick = tick; i.Envelope[k].Level = level; });
+        if (tick == env[k].Tick && level == env[k].Level) return;
+        var parts = Parts;
+        Edit(i => { parts.Points(i)[k].Tick = tick; parts.Points(i)[k].Level = level; });
     }
 
     protected override void OnPointerReleased(Avalonia.Input.PointerReleasedEventArgs e)
@@ -527,22 +542,53 @@ public sealed class PointEnvelopeEditor : InstrumentGraph
     }
 
     // The sustain and loop points follow the points they are on
-    public static void InsertPoint(TrackerInstrument i, int at, TrackerEnvelopePoint point)
+    public static void InsertPoint(EnvelopeParts e, TrackerInstrument i, int at, TrackerEnvelopePoint point)
     {
-        i.Envelope.Insert(at, point);
+        e.Points(i).Insert(at, point);
         int Moved(int index) => index >= at ? index + 1 : index;
-        if (i.EnvelopeSustain >= 0) i.EnvelopeSustain = Moved(i.EnvelopeSustain);
-        if (i.EnvelopeLoopStart >= 0) i.EnvelopeLoopStart = Moved(i.EnvelopeLoopStart);
-        if (i.EnvelopeLoopEnd >= 0) i.EnvelopeLoopEnd = Moved(i.EnvelopeLoopEnd);
+        if (e.Sustain(i) >= 0) e.SetSustain(i, Moved(e.Sustain(i)));
+        if (e.LoopStart(i) >= 0) e.SetLoopStart(i, Moved(e.LoopStart(i)));
+        if (e.LoopEnd(i) >= 0) e.SetLoopEnd(i, Moved(e.LoopEnd(i)));
     }
 
-    public static void RemovePoint(TrackerInstrument i, int at)
+    public static void RemovePoint(EnvelopeParts e, TrackerInstrument i, int at)
     {
-        i.Envelope.RemoveAt(at);
-        int Moved(int index) => index == at ? Math.Min(index, i.Envelope.Count - 1) : index > at ? index - 1 : index;
-        if (i.EnvelopeSustain >= 0) i.EnvelopeSustain = Moved(i.EnvelopeSustain);
-        if (i.EnvelopeLoopStart >= 0) i.EnvelopeLoopStart = Moved(i.EnvelopeLoopStart);
-        if (i.EnvelopeLoopEnd >= 0) i.EnvelopeLoopEnd = Moved(i.EnvelopeLoopEnd);
-        if (i.EnvelopeLoopStart > i.EnvelopeLoopEnd) i.EnvelopeLoopStart = i.EnvelopeLoopEnd;
+        var points = e.Points(i);
+        points.RemoveAt(at);
+        int Moved(int index) => index == at ? Math.Min(index, points.Count - 1) : index > at ? index - 1 : index;
+        if (e.Sustain(i) >= 0) e.SetSustain(i, Moved(e.Sustain(i)));
+        if (e.LoopStart(i) >= 0) e.SetLoopStart(i, Moved(e.LoopStart(i)));
+        if (e.LoopEnd(i) >= 0) e.SetLoopEnd(i, Moved(e.LoopEnd(i)));
+        if (e.LoopStart(i) > e.LoopEnd(i)) e.SetLoopStart(i, e.LoopEnd(i));
     }
+}
+
+// An instrument's volume or pan envelope: its points, sustain point and loop, for the editor and its knobs
+public sealed class EnvelopeParts
+{
+    public required Func<TrackerInstrument, List<TrackerEnvelopePoint>> Points { get; init; }
+    public required Func<TrackerInstrument, int> Sustain { get; init; }
+    public required Action<TrackerInstrument, int> SetSustain { get; init; }
+    public required Func<TrackerInstrument, int> LoopStart { get; init; }
+    public required Action<TrackerInstrument, int> SetLoopStart { get; init; }
+    public required Func<TrackerInstrument, int> LoopEnd { get; init; }
+    public required Action<TrackerInstrument, int> SetLoopEnd { get; init; }
+    public bool IsPan { get; init; }
+
+    public static readonly EnvelopeParts Volume = new()
+    {
+        Points = i => i.Envelope,
+        Sustain = i => i.EnvelopeSustain, SetSustain = (i, v) => i.EnvelopeSustain = v,
+        LoopStart = i => i.EnvelopeLoopStart, SetLoopStart = (i, v) => i.EnvelopeLoopStart = v,
+        LoopEnd = i => i.EnvelopeLoopEnd, SetLoopEnd = (i, v) => i.EnvelopeLoopEnd = v
+    };
+
+    public static readonly EnvelopeParts Pan = new()
+    {
+        Points = i => i.PanEnvelope,
+        Sustain = i => i.PanEnvelopeSustain, SetSustain = (i, v) => i.PanEnvelopeSustain = v,
+        LoopStart = i => i.PanEnvelopeLoopStart, SetLoopStart = (i, v) => i.PanEnvelopeLoopStart = v,
+        LoopEnd = i => i.PanEnvelopeLoopEnd, SetLoopEnd = (i, v) => i.PanEnvelopeLoopEnd = v,
+        IsPan = true
+    };
 }

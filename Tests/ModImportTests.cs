@@ -198,8 +198,10 @@ public class ModImportTests : IDisposable
         for (int k = 0; k < 96; k++) Bytes(k < 48 ? 0 : 1);           // keymap
         int[] env = { 0, 64, 10, 32, 20, 0 };
         for (int k = 0; k < 24; k++) U16(k < env.Length ? env[k] : 0);   // volume envelope
-        b.AddRange(new byte[48]);                                        // panning envelope
-        Bytes(3, 0, 1, 0, 0, 0, 0, 0, 1 | 2, 0, 0, 0, 0, 0); U16(0x400);
+        int[] pan = { 0, 32, 8, 64, 16, 0 };
+        for (int k = 0; k < 24; k++) U16(k < pan.Length ? pan[k] : 0);   // panning envelope
+        // 3 + 3 points, volume sustain at 1, pan looping 0 – 2; an auto-vibrato: sine, sweep 2, depth 32, rate 64
+        Bytes(3, 3, 1, 0, 0, 0, 0, 2, 1 | 2, 1 | 4, 0, 2, 32, 64); U16(0x400);
         while (b.Count < start + 263) Bytes(0);
 
         // "low": 8-bit, 16 frames, a forward loop; "high": 16-bit, 16 frames, ping-pong 4 – 12, an octave up
@@ -222,7 +224,7 @@ public class ModImportTests : IDisposable
             c[2, 0] = (97, 0, 0, 0, 0);          // key off
             c[0, 1] = (49, 1, 0x18, 0, 0x37);    // C-4 (the high sample), volume 8 and an arpeggio
             c[1, 1] = (0, 0, 0x65, 0, 0);        // volume slide down 5 (in the effect column)
-            c[3, 1] = (0, 0, 0, 0x10, 0x20);     // Gxx (global volume) is not in the tracker
+            c[3, 1] = (0, 0, 0, 0x10, 0x20);     // Gxx: global volume
         });
 
         var r = XmImport.Import(xm, "tiny", _temp, _temp);
@@ -235,6 +237,10 @@ public class ModImportTests : IDisposable
         // The envelope as it is; the fadeout of 0x400 takes 32 ticks of 20 ms
         Assert.Equal(new[] { (0, 64), (10, 32), (20, 0) }, low.Envelope.Select(p => (p.Tick, p.Level)));
         Assert.Equal((1, -1, -1, 640.0), (low.EnvelopeSustain, low.EnvelopeLoopStart, low.EnvelopeLoopEnd, low.FadeOut));
+        // The pan envelope as it is, and the auto-vibrato as LFO 2 on the pitch: a quarter of a round a tick at 50 ticks a second
+        Assert.Equal(new[] { (0, 32), (8, 64), (16, 0) }, low.PanEnvelope.Select(q => (q.Tick, q.Level)));
+        Assert.Equal((-1, 0, 2), (low.PanEnvelopeSustain, low.PanEnvelopeLoopStart, low.PanEnvelopeLoopEnd));
+        Assert.Equal(("Pitch", "Sine", 50.0, 12.5, 40.0), (low.Lfo2.Target, low.Lfo2.Shape, low.Lfo2.Depth, low.Lfo2.Rate, low.Lfo2.Delay));
 
         var high = song.Instruments[1];
         Assert.Equal(48, high.SampleNote);                        // relative note +12
@@ -250,6 +256,6 @@ public class ModImportTests : IDisposable
         Assert.Equal(TrackerCell.NoteOff, p[2, 0].Note);
         Assert.Equal("C-4 02 08 037", p[0, 1].ToString());
         Assert.Equal("--- .. .. A05", p[1, 1].ToString());
-        Assert.Contains(r.Notes, n => n.Contains("Gxx"));
+        Assert.Equal(('V', 0x20), (p[3, 1].Effect, p[3, 1].Param));   // Gxx (global volume) is the tracker's Vxx
     }
 }

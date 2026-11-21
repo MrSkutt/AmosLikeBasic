@@ -188,4 +188,85 @@ public class SndhTests
         Assert.InRange(sids.Average(e => e.Frequency), 9800, 10300);
         Assert.Empty(ym.Drums);
     }
+
+    // ── The rest of the machine that players use ──
+
+    [Fact]
+    public void A_byte_on_an_odd_address_reaches_the_YM_but_a_word_only_its_upper_byte()
+    {
+        var st = new AtariSt();
+        st.Write8(0xFF8801, 8);        // the 68000 puts a byte on both halves of the bus
+        st.Write8(0xFF8803, 12);
+        Assert.Equal(12, st.Ym[8]);
+        st.Write16(0xFF8800, 0x0900);  // register 9 (the 00 below it is not seen)
+        st.Write16(0xFF8802, 0x0700);
+        Assert.Equal(7, st.Ym[9]);
+        Assert.Equal(0x02, st.Read8(0xFFFC04));   // the MIDI ACIA: ready to send
+    }
+
+    [Fact]
+    public void STe_DMA_sound_plays_a_frame_from_memory_round_and_round_or_once()
+    {
+        var st = new AtariSt();
+        for (int i = 0; i < 100; i++) st.Ram[0x20000 + i] = 0x40;   // a frame of 100 samples at half level
+        void Set(uint a, int v) => st.Write8(0xFF8900 | a, (byte)v);
+        Set(0x03, 0x02); Set(0x05, 0x00); Set(0x07, 0x00);            // start $020000
+        Set(0x0F, 0x02); Set(0x11, 0x00); Set(0x13, 0x64);            // end $020064
+        Set(0x21, 0x81);                                               // mono, 12517 Hz
+        // Timer A counts the ends of frames (event mode), and interrupts at the first
+        st.Mfp.Write(15, 1); st.Mfp.Write(12, 8); st.Mfp.Write(3, 0x20); st.Mfp.Write(9, 0x20);
+
+        Set(0x01, 3);                                                  // play, round and round
+        double frame = 100 / 12517.0 * SndhMachine.CpuClock;
+        st.Dma.Run(frame * 0.5);
+        Assert.Equal(0.5, st.Dma.Sample(), 3);
+        Assert.Null(st.Mfp.Acknowledge());
+        st.Dma.Run(frame);
+        Assert.Equal(0.5, st.Dma.Sample(), 3);                         // the second time round
+        Assert.Equal(0x40 + 13, st.Mfp.Acknowledge());                 // timer A's interrupt
+
+        Set(0x01, 1);                                                  // once: it stops at the end
+        st.Dma.Run(frame * 1.1);
+        Assert.Equal(0, st.Dma.Sample());
+        Assert.Equal(0, st.Read8(0xFF8901) & 1);
+    }
+
+    [Fact]
+    public void The_Microwire_shifts_for_16_microseconds_and_sets_the_volume()
+    {
+        var st = new AtariSt();
+        st.Ram[0x20000] = 0x40;
+        st.Write8(0xFF8903, 0x02); st.Write8(0xFF890F, 0x02); st.Write8(0xFF8913, 0x02);
+        st.Write8(0xFF8921, 0x80);
+        st.Write8(0xFF8901, 1);
+        // Master volume 20 of 40: -40 dB. The command is 10 (the LMC1992), 011 (master), then the value
+        st.Write16(0xFF8924, 0x07FF);
+        st.Write16(0xFF8922, 2 << 9 | 3 << 6 | 20);
+        Assert.NotEqual(0x07FF, st.Read16(0xFF8924));                  // turning round while it sends
+        st.Dma.Run(16 * SndhMachine.CpuClock / 1_000_000 + 8);
+        Assert.Equal(0x07FF, st.Read16(0xFF8924));                     // and back
+        Assert.Equal(0.5 * 0.01, st.Dma.Sample(), 4);
+    }
+
+    [Fact]
+    public void Dosound_plays_its_list_of_writes_fifty_times_a_second()
+    {
+        // init: Dosound(list); play does nothing. The list: tone A at 284, mixer, full volume, wait 5, volume 0, end
+        var code = new List<ushort>();
+        int init = 0x40, list = 0x80;
+        code.AddRange(new ushort[] { 0x2F3C, 0x0001, (ushort)list, 0x3F3C, 32, 0x4E4E, 0x5C8F, 0x4E75 });   // MOVE.L #list,-(SP); MOVE.W #32,-(SP); TRAP #14; ADDQ.L #6,SP; RTS
+        int play = init + code.Count * 2;
+        code.Add(0x4E75);
+        var b = new byte[0xA0];
+        void Word(int at, int w) { b[at] = (byte)(w >> 8); b[at + 1] = (byte)w; }
+        Word(0, 0x6000); Word(2, init - 2);
+        Word(4, 0x4E75); Word(6, 0x4E71);
+        Word(8, 0x6000); Word(10, play - 10);
+        Encoding.ASCII.GetBytes("SNDHTITLDo\0\0TC50\0\0HDNS").CopyTo(b, 12);
+        for (int i = 0; i < code.Count; i++) Word(init + i * 2, code[i]);
+        new byte[] { 0x00, 0x1C, 0x01, 0x01, 0x07, 0x3E, 0x08, 0x0F, 0xFF, 0x05, 0x08, 0x00, 0xFF, 0x00 }.CopyTo(b, list);
+        var ym = SndhPlayer.Record(SndhFile.Read(b), seconds: 1);
+        Assert.Equal((0x1C, 0x3E, 15), (ym.Frames[2][0], ym.Frames[2][7], ym.Frames[2][8]));
+        Assert.Equal(0, ym.Frames[12][8]);
+    }
 }

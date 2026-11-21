@@ -206,6 +206,14 @@ namespace AmosLikeBasic
         public int EnvelopeLoopEnd { get; set; } = -1;
         public double FadeOut { get; set; }
 
+        // A pan envelope drawn with points, as FastTracker 2 has: levels 0 (left) – 32 (the middle) – 64 (right),
+        // with a sustain point and a loop as the volume envelope. It moves the sound as far as there is room
+        // to that side of the instrument's (or 8xx's) pan.
+        public List<TrackerEnvelopePoint> PanEnvelope { get; set; } = new();
+        public int PanEnvelopeSustain { get; set; } = -1;
+        public int PanEnvelopeLoopStart { get; set; } = -1;
+        public int PanEnvelopeLoopEnd { get; set; } = -1;
+
         // Echo: the sound comes back after a while, a little quieter each time. Mix 0 is off.
         public double EchoTime { get; set; } = 300;        // ms, at most 2000
         public int EchoSyncRows { get; set; }              // > 0: the time is this many rows of the song

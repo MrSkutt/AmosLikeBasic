@@ -67,6 +67,7 @@ public static class InstrumentLibrary
                    ?? throw new InvalidDataException($"{Path.GetFileName(file)} is not an instrument");
         inst.Table ??= new();
         inst.Envelope ??= new();
+        inst.PanEnvelope ??= new();
         inst.Lfo1 ??= new();
         inst.Lfo2 ??= new();
         if (string.IsNullOrWhiteSpace(inst.Name)) inst.Name = Path.GetFileNameWithoutExtension(file);

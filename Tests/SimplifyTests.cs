@@ -49,4 +49,21 @@ public class SimplifyTests
         Assert.Equal(before, r.After);
         Assert.Equal(json, song.ToJson());
     }
+
+    [Fact]
+    public void Tick_arpeggios_of_two_and_four_notes_become_J()
+    {
+        var song = new TrackerSong { Speed = 6 };
+        song.Instruments.Clear();
+        song.Instruments.Add(Tabled("Octave", "SQUARE", "SQUARE +12"));                              // two notes taking turns
+        song.Instruments.Add(Tabled("Chord", "SQUARE", "SQUARE +4", "SQUARE +7", "SQUARE +12"));      // four, the octave last
+        var p = song.Patterns[0];
+        p[0, 0] = TrackerCell.Parse("C-4 01 ...");
+        p[2, 0] = TrackerCell.Parse("C-4 02 ...");
+
+        var r = InstrumentSimplifier.Simplify(song);
+        Assert.Equal((2, 1, 2), (r.Before, r.After, r.Arpeggios));
+        Assert.Equal("C-4 01 .. JC0", p[0, 0].ToString());
+        Assert.Equal("C-4 01 .. J47", p[2, 0].ToString());
+    }
 }

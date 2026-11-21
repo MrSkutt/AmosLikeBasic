@@ -742,4 +742,120 @@ public class SynthTests : IDisposable
         var b = Render(0.3);
         Assert.True(b.All(x => x == 0), "silent");
     }
+
+    // ── Effects from FastTracker 2 ──
+
+    [Fact]
+    public void GlobalVolumeAndItsSlide()
+    {
+        S.TrackPlay(SongWith("", "A-4 01 ...", "--- .. ..."), loop: false);
+        double full = Loudness(Render(0.2), 0.03, 0.1);
+        S.TrackPlay(SongWith("", "A-4 01 V20", "--- .. ..."), loop: false);
+        Assert.InRange(Loudness(Render(0.2), 0.03, 0.1) / full, 0.45, 0.55);   // V20: half
+        // W0F: down 15 a tick from 64, five ticks a row: by the second row about 0
+        S.TrackPlay(SongWith("", "A-4 01 W0F", "--- .. W0F", "--- .. ..."), loop: false);
+        var b = Render(0.4);
+        Assert.True(Loudness(b, 0.27, 0.34) < full * 0.1, "slid down to silence");
+    }
+
+    [Fact]
+    public void PanSlidesToTheSide()
+    {
+        S.TrackPlay(SongWith("", "A-4 01 PF0", "--- .. PF0", "--- .. PF0", "--- .. ..."), loop: false);
+        var b = RenderStereo(0.5);
+        var (left, right) = Sides(b, 0.38, 0.45);
+        Assert.True(right > left * 3, $"right {right:0.000}, left {left:0.000}");
+    }
+
+    [Fact]
+    public void TremorSwitchesTheNoteOnAndOff()
+    {
+        // T11: on for 2 ticks, off for 2 (a tick is 20 ms)
+        S.TrackPlay(SongWith("", "A-4 01 T11", "--- .. T11", "--- .. T11", "--- .. ..."), loop: false);
+        var b = Render(0.4);
+        // The volume is smoothed over about 10 ms (no clicks), so an off tick is quiet rather than silent
+        var ticks = Enumerable.Range(2, 14).Select(t => Loudness(b, t * 0.02 + 0.008, t * 0.02 + 0.018)).ToList();
+        int quiet = ticks.Count(l => l < ticks.Max() * 0.4);
+        Assert.InRange(quiet, 5, 9);   // about half of 14
+    }
+
+    [Fact]
+    public void KeyOffOnATickLetsGo()
+    {
+        // K03: let go on tick 3 (60 ms); the release is 30 ms
+        S.TrackPlay(SongWith("\"Release\":30", "A-4 01 K03", "--- .. ...", "--- .. ..."), loop: false);
+        var b = Render(0.3);
+        Assert.True(Loudness(b, 0.02, 0.05) > 0.05, "it sounds before");
+        Assert.True(Loudness(b, 0.15, 0.25) < 0.01, "and is let go");
+    }
+
+    [Fact]
+    public void RetriggerWithAVolumeChange()
+    {
+        // R73: struck again every 3 ticks, halving the volume each time
+        S.TrackPlay(SongWith("", "A-4 01 R73", "--- .. R73", "--- .. ..."), loop: false);
+        var b = Render(0.3);
+        // Halved on tick 3 of each row: a quarter by the third row
+        double first = Loudness(b, 0.005, 0.05), later = Loudness(b, 0.25, 0.29);
+        Assert.True(later < first * 0.4, $"first {first:0.000}, later {later:0.000}");
+    }
+
+    [Fact]
+    public void FinetuneAndASquareVibrato()
+    {
+        // E54: four eighths (half a semitone) up for the note on the row
+        S.TrackPlay(SongWith("", "A-4 01 E54", "--- .. ..."), loop: false);
+        Assert.InRange(Semitones(Pitch(Render(0.2), 0.03, 0.1), 440), 0.4, 0.6);
+        // A square vibrato (E42) of depth 8 (one semitone each way): the pitch is only up or down, never in between
+        S.TrackPlay(SongWith("", "A-4 01 E42", "--- .. 418", "--- .. 418", "--- .. 418"), loop: false);
+        var b = Render(0.5);
+        for (double t = 0.15; t < 0.45; t += 0.02)
+        {
+            double s = Math.Abs(Semitones(Pitch(b, t, t + 0.015), 440));
+            Assert.True(s > 0.7 || s < 0.05, $"at {t:0.00} s: {s:0.00} semitones");
+        }
+    }
+
+    [Fact]
+    public void EnvelopePositionJumps()
+    {
+        // L10: the envelope (falling from 64 to 0 over 20 ticks) starts at tick 16, so the note starts quiet
+        const string fall = "\"Envelope\":[{\"Tick\":0,\"Level\":64},{\"Tick\":20,\"Level\":0}]";
+        S.TrackPlay(SongWith(fall, "A-4 01 ..."), loop: false);
+        double fromStart = Loudness(Render(0.1), 0.03, 0.06);
+        S.TrackPlay(SongWith(fall, "A-4 01 L10"), loop: false);
+        double fromLater = Loudness(Render(0.1), 0.03, 0.06);
+        Assert.True(fromLater < fromStart * 0.35, $"{fromLater:0.000} against {fromStart:0.000}");
+    }
+
+    [Fact]
+    public void APanEnvelopeMovesTheSound()
+    {
+        // From the middle to the right in 10 ticks, and held there
+        const string toRight = "\"PanEnvelope\":[{\"Tick\":0,\"Level\":32},{\"Tick\":10,\"Level\":64}]";
+        S.TrackPlay(SongWith(toRight, "A-4 01 ...", "--- .. ...", "--- .. ..."), loop: false);
+        var b = RenderStereo(0.4);
+        var (l0, r0) = Sides(b, 0.005, 0.02);
+        var (l1, r1) = Sides(b, 0.3, 0.38);
+        Assert.InRange(r0 / l0, 0.7, 1.4);                                  // in the middle at first
+        Assert.True(r1 > l1 * 5, $"right {r1:0.000}, left {l1:0.000}");    // then on the right
+    }
+
+    [Fact]
+    public void JGoesRoundTheNotesOneATickFromTheNoteStart()
+    {
+        // J47: A-4, C#5, E-5, A-5, a tick (20 ms) each; at speed 3 the round of four goes on across the rows
+        var song = SongWith("", "A-4 01 J47", "--- .. J47", "--- .. J47");
+        song.Speed = 3;
+        S.TrackPlay(song, loop: false);
+        var b = Render(0.2);
+        int[] expected = { 0, 4, 7, 12, 0, 4, 7, 12 };
+        for (int t = 1; t < 8; t++)
+            Assert.InRange(Semitones(Pitch(b, t * 0.02 + 0.004, t * 0.02 + 0.018), 440), expected[t] - 0.3, expected[t] + 0.3);
+        // JC0: the note and its octave taking turns
+        S.TrackPlay(SongWith("", "A-4 01 JC0", "--- .. ..."), loop: false);
+        b = Render(0.1);
+        Assert.InRange(Semitones(Pitch(b, 0.024, 0.038), 440), 11.7, 12.3);
+        Assert.InRange(Semitones(Pitch(b, 0.044, 0.058), 440), -0.3, 0.3);
+    }
 }

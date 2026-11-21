@@ -54,10 +54,23 @@ public class TrackerViewTests : IDisposable
         // Tempo 125: a tick is 20 ms
         Assert.Equal(new[] { (0, 0), (2, 64), (7, 32), (17, 0) }, inst.Envelope.Select(p => (p.Tick, p.Level)));
         Assert.Equal(2, inst.EnvelopeSustain);
-        Assert.True(w.GetVisualDescendants().OfType<PointEnvelopeEditor>().Single().IsVisible);
+        PointEnvelopeEditor Editor(bool pan) => w.GetVisualDescendants().OfType<PointEnvelopeEditor>().Single(e => e.Parts.IsPan == pan);
+        Assert.True(Editor(false).IsVisible);
         Choice("ADSR").RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
         Assert.Empty(inst.Envelope);
-        Assert.False(w.GetVisualDescendants().OfType<PointEnvelopeEditor>().Single().IsVisible);
+        Assert.False(Editor(false).IsVisible);
+
+        // The pan envelope's POINTS (the second) makes a swing from the middle, round in a loop; OFF takes it away
+        Assert.False(Editor(true).IsVisible);
+        var panPoints = w.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().Where(b => b.Content as string == "POINTS").ElementAt(1);
+        panPoints.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Assert.Equal(new[] { (0, 32), (12, 64), (36, 0), (48, 32) }, inst.PanEnvelope.Select(p => (p.Tick, p.Level)));
+        Assert.Equal((0, 3), (inst.PanEnvelopeLoopStart, inst.PanEnvelopeLoopEnd));
+        Assert.True(Editor(true).IsVisible);
+        ((Panel)panPoints.Parent!).Children.OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => b.Content as string == "OFF")
+            .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Assert.Empty(inst.PanEnvelope);
+        Assert.False(Editor(true).IsVisible);
         Close(w);
     }
 

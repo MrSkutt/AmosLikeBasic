@@ -146,6 +146,18 @@ public sealed class Mfp
         return null;
     }
 
+    // The STe's DMA sound at the end of a frame: timer A counts it in event mode (8), and GPIP 7 raises
+    // its interrupt (channel 15), both as players use them to hear when a frame has played
+    public void DmaFrameEnded()
+    {
+        if ((_r[Tacr] & 15) == 8 && --_count[0] <= 0)
+        {
+            _count[0] = _reload[0];
+            Request(Channel[0]);
+        }
+        Request(15);
+    }
+
     private bool InService(int channel)
     {
         int bit = channel & 7, service = channel >= 8 ? Isra : Isrb;
@@ -153,13 +165,141 @@ public sealed class Mfp
     }
 }
 
-// Enough of an Atari ST for its music routines: 4 MB of memory, the YM2149 at $FF8800 (an even address
-// picks a register, $FF8802 writes it) and the MFP at $FFFA01.
+// The STe's DMA sound: 8-bit samples played straight from memory, between a start and an end address,
+// once or round and round, at 6, 12, 25 or 50 kHz, in mono or stereo; and the volume chip (LMC1992),
+// set through the Microwire interface, which also says whether the YM is heard alongside
+public sealed class SteSound
+{
+    private static readonly double[] Rates = { 6258, 12517, 25033, 50066 };
+    private readonly byte[] _ram;
+    private readonly Mfp _mfp;
+    private byte _control, _mode;
+    private uint _start, _end;              // the registers: the next frame
+    private uint _frameEnd, _address;       // the frame playing
+    private double _position;               // frames played since the last whole one, 0 – 1
+    private ushort _wireData, _wireMask = 0x07FF;
+    private double _wireCycles;             // 68000 cycles left of the 16 µs the Microwire shifts for
+    private double _master = 1, _left = 1, _right = 1;
+    public double YmLevel { get; private set; } = 1;
+
+    public SteSound(byte[] ram, Mfp mfp) { _ram = ram; _mfp = mfp; }
+
+    private bool Playing => (_control & 1) != 0;
+    private bool Mono => (_mode & 0x80) != 0;
+
+    public byte Read(uint a) => (a & 0x3F) switch
+    {
+        0x01 => _control,
+        0x03 => (byte)(_start >> 16), 0x05 => (byte)(_start >> 8), 0x07 => (byte)_start,
+        0x09 => (byte)(_address >> 16), 0x0B => (byte)(_address >> 8), 0x0D => (byte)_address,
+        0x0F => (byte)(_end >> 16), 0x11 => (byte)(_end >> 8), 0x13 => (byte)_end,
+        0x21 => _mode,
+        0x22 => (byte)(Shifting(_wireData) >> 8), 0x23 => (byte)Shifting(_wireData),
+        0x24 => (byte)(Shifting(_wireMask) >> 8), 0x25 => (byte)Shifting(_wireMask),
+        _ => 0
+    };
+
+    // While the Microwire sends, its data and mask turn round a bit each µs, and are back after 16:
+    // players wait for the mask to change and then to come back
+    private const double WireCycles = 16 * SndhMachine.CpuClock / 1_000_000;
+    private ushort Shifting(ushort v)
+    {
+        if (_wireCycles <= 0) return v;
+        int bits = Math.Clamp(16 - (int)(_wireCycles / (WireCycles / 16)), 1, 15);
+        return (ushort)(v << bits | v >> (16 - bits));
+    }
+
+    public void Write(uint a, byte v)
+    {
+        switch (a & 0x3F)
+        {
+            case 0x01:
+                bool was = Playing;
+                _control = (byte)(v & 3);
+                if (!was && Playing) StartFrame();
+                break;
+            case 0x03: _start = (_start & 0x00FFFF) | (uint)(v & 0x3F) << 16; break;
+            case 0x05: _start = (_start & 0xFF00FF) | (uint)v << 8; break;
+            case 0x07: _start = (_start & 0xFFFF00) | (uint)(v & 0xFE); break;
+            case 0x0F: _end = (_end & 0x00FFFF) | (uint)(v & 0x3F) << 16; break;
+            case 0x11: _end = (_end & 0xFF00FF) | (uint)v << 8; break;
+            case 0x13: _end = (_end & 0xFFFF00) | (uint)(v & 0xFE); break;
+            case 0x21: _mode = (byte)(v & 0x83); break;
+            case 0x22: _wireData = (ushort)(_wireData & 0x00FF | v << 8); break;
+            case 0x23: _wireData = (ushort)(_wireData & 0xFF00 | v); Microwire(); _wireCycles = WireCycles; break;
+            case 0x24: _wireMask = (ushort)(_wireMask & 0x00FF | v << 8); break;
+            case 0x25: _wireMask = (ushort)(_wireMask & 0xFF00 | v); break;
+        }
+    }
+
+    private void StartFrame()
+    {
+        _address = _start;
+        _frameEnd = _end;
+        _position = 0;
+    }
+
+    // The bits of the data where the mask has ones, first to last, are the command: 10 (the LMC1992),
+    // what to set, and its value; volumes in steps of 2 dB
+    private void Microwire()
+    {
+        int command = 0, bits = 0;
+        for (int b = 15; b >= 0; b--)
+            if ((_wireMask >> b & 1) != 0) { command = command << 1 | (_wireData >> b & 1); bits++; }
+        if (bits < 11) return;
+        command &= 0x7FF;
+        if (command >> 9 != 2) return;
+        int value = command & 63;
+        double Db(int steps) => Math.Pow(10, -2.0 * steps / 20);
+        switch ((command >> 6) & 7)
+        {
+            case 0: YmLevel = (value & 3) switch { 0 => Db(6), 1 => 1, _ => 0 }; break;   // mixing: the YM at -12 dB, as it is, or not at all
+            case 3: _master = Db(40 - Math.Min(value, 40)); break;         // master volume 0 – 40
+            case 4: _right = Db(20 - Math.Min(value, 20)); break;          // right 0 – 20
+            case 5: _left = Db(20 - Math.Min(value, 20)); break;           // left 0 – 20
+        }
+    }
+
+    // Plays for some 68000 cycles: the frame moves on, ends, and starts again or stops
+    public void Run(double cycles)
+    {
+        _wireCycles -= cycles;
+        if (!Playing) return;
+        _position += cycles * Rates[_mode & 3] / SndhMachine.CpuClock;
+        int frameBytes = Mono ? 1 : 2;
+        while (_position >= 1 && Playing)
+        {
+            _position -= 1;
+            _address += (uint)frameBytes;
+            if (_address < _frameEnd) continue;
+            _mfp.DmaFrameEnded();
+            if ((_control & 2) != 0) StartFrame();
+            else _control &= 0xFE;
+        }
+    }
+
+    // The sample heard now (both sides together), -1 – 1
+    public double Sample()
+    {
+        if (!Playing || _address >= _frameEnd) return 0;
+        uint a = _address & 0x3FFFFF;
+        double left = (sbyte)_ram[a] / 128.0;
+        if (Mono) return left * _master * (_left + _right) / 2;
+        double right = (sbyte)_ram[(a + 1) & 0x3FFFFF] / 128.0;
+        return (left * _left + right * _right) / 2 * _master;
+    }
+}
+
+// Enough of an Atari STe for its music routines: 4 MB of memory, the YM2149 at $FF8800 (an even address
+// picks a register, $FF8802 writes it), the DMA sound at $FF8900 and the MFP at $FFFA01.
 public sealed class AtariSt : IM68000Bus
 {
+    public AtariSt() => Dma = new SteSound(Ram, Mfp);
+
     public readonly byte[] Ram = new byte[4 << 20];
     public readonly byte[] Ym = new byte[16];
     public readonly Mfp Mfp = new();
+    public readonly SteSound Dma;
     public bool EnvelopeWritten;            // register 13 was written (which starts the envelope again)
     public Action<int, byte>? YmWritten;     // each write to the sound chip, as it happens
     private int _select;
@@ -169,6 +309,9 @@ public sealed class AtariSt : IM68000Bus
         if (a < Ram.Length) return Ram[a];
         if (a is >= 0xFF8800 and < 0xFF8900) return (a & 2) == 0 ? Ym[_select] : (byte)0xFF;
         if (a is >= 0xFFFA00 and < 0xFFFA40) return (a & 1) != 0 ? Mfp.Read((int)(a - 0xFFFA01) / 2) : (byte)0xFF;
+        if (a is >= 0xFF8900 and < 0xFF8940) return Dma.Read(a);
+        // The keyboard's and MIDI's ACIAs: always ready to send, nothing received (players wait on it)
+        if (a is 0xFFFC00 or 0xFFFC04) return 0x02;
         return 0;
     }
 
@@ -179,15 +322,23 @@ public sealed class AtariSt : IM68000Bus
         if (a < Ram.Length) { Ram[a] = v; return; }
         if (a is >= 0xFF8800 and < 0xFF8900)
         {
-            if ((a & 1) != 0) return;   // the YM sits on the upper half of the data bus
+            // The YM sits on the upper half of the data bus, but the 68000 puts a byte it writes on both
+            // halves: a byte to $FF8801 or $FF8803 reaches it as well
             if ((a & 2) == 0) _select = v & 15;
             else WriteYm(_select, v);
             return;
         }
         if (a is >= 0xFFFA00 and < 0xFFFA40 && (a & 1) != 0) Mfp.Write((int)(a - 0xFFFA01) / 2, v);
+        if (a is >= 0xFF8900 and < 0xFF8940) Dma.Write(a, v);
     }
 
-    public void Write16(uint a, ushort v) { Write8(a, (byte)(v >> 8)); Write8(a + 1, (byte)v); }
+    // A word reaches the YM as its upper byte only, in one write
+    public void Write16(uint a, ushort v)
+    {
+        if (a is >= 0xFF8800 and < 0xFF8900) { Write8(a, (byte)(v >> 8)); return; }
+        Write8(a, (byte)(v >> 8));
+        Write8(a + 1, (byte)v);
+    }
 
     public void WriteYm(int register, byte value)
     {
@@ -214,6 +365,8 @@ public sealed class SndhMachine
     private const uint Trampoline = 0x520;    // saves the registers, calls play, and returns from the "interrupt"
     private const uint AfterPlay = 0x52A;
     private const uint InitReturn = 0x540;
+    private const uint CookieJar = 0x560;
+    private const double VblHz = 50;
 
     public readonly AtariSt St = new();
     public readonly M68000 Cpu;
@@ -224,6 +377,11 @@ public sealed class SndhMachine
     private bool _inPlay;
     private uint _heap = 0x200000;
     private long _mfpCycles;                  // the 68000 cycle the MFP's timers have run to
+    private double _nextVbl;
+    // Dosound (XBIOS 32): the operating system plays a list of register writes, 50 times a second
+    private uint _sound;
+    private int _soundDelay;
+    private byte _soundTemp;
 
     public SndhMachine(SndhFile sndh, int tune = 0)
     {
@@ -234,6 +392,19 @@ public sealed class SndhMachine
         Cpu = new M68000(St);
         Cpu.Trap = SystemCall;
         St.Load(LoadAddress, sndh.Data);
+
+        // The cookie jar at $5A0: an STe (_MCH 1.0) with the YM and 8-bit DMA sound (_SND bits 0 and 1),
+        // which players for the STe look for before they use its sound
+        St.Write32(0x5A0, CookieJar);
+        uint jar = CookieJar;
+        foreach (var (name, value) in new[] { ("_MCH", 0x00010000u), ("_SND", 3u), ("_CPU", 0u) })
+        {
+            St.Write32(jar, (uint)(name[0] << 24 | name[1] << 16 | name[2] << 8 | name[3]));
+            St.Write32(jar + 4, value);
+            jar += 8;
+        }
+        St.Write32(jar, 0);
+        St.Write32(jar + 4, 8);   // room for 8
 
         // Every vector points at an RTE, so that a stray exception or interrupt returns
         St.Write16(0x408, 0x4E73);
@@ -259,6 +430,7 @@ public sealed class SndhMachine
         Cpu.SR = 0x2300;
         _nextCall = Cpu.Cycles;
         _mfpCycles = Cpu.Cycles;
+        _nextVbl = Cpu.Cycles + CpuClock / VblHz;
     }
 
     private void Code(uint address, params ushort[] words)
@@ -278,6 +450,7 @@ public sealed class SndhMachine
         }
         else Cpu.Step();
         St.Mfp.Run((Cpu.Cycles - _mfpCycles) * Mfp.Clock / CpuClock);
+        St.Dma.Run(Cpu.Cycles - _mfpCycles);
         _mfpCycles = Cpu.Cycles;
         if (Cpu.InterruptMask < 6 && St.Mfp.Acknowledge() is { } vector) Cpu.Interrupt(6, vector);
         if (_inPlay && Cpu.PC == AfterPlay) _inPlay = false;
@@ -294,8 +467,51 @@ public sealed class SndhMachine
                 _nextCall += _cyclesPerCall;
                 if (!_inPlay) CallPlay();
             }
+            // What the operating system does every VBL that players count on: the frame counters go up, and
+            // a Dosound list plays on (no player in the SNDH archive hooks the VBL itself, and an interrupt
+            // there only moves the timing of the others)
+            if (Cpu.Cycles >= _nextVbl)
+            {
+                _nextVbl += CpuClock / VblHz;
+                St.Write32(0x466, St.Read32(0x466) + 1);
+                St.Write32(0x462, St.Read32(0x462) + 1);
+                DosoundTick();
+            }
             Step();
         }
+    }
+
+    // One step of the Dosound list: registers set, a sweep of one register a step at a time (81), or a
+    // wait (82 and above; 0 ends it), as the operating system does it
+    private void DosoundTick()
+    {
+        if (_sound == 0) return;
+        if (_soundDelay > 0) { _soundDelay--; return; }
+        uint p = _sound;
+        for (int guard = 0; guard < 256; guard++)
+        {
+            byte command = St.Read8(p++);
+            if (command < 0x80) St.WriteYm(command & 15, St.Read8(p++));
+            else if (command == 0x80) _soundTemp = St.Read8(p++);
+            else if (command == 0x81)
+            {
+                int register = St.Read8(p) & 15;
+                sbyte step = (sbyte)St.Read8(p + 1);
+                byte last = St.Read8(p + 2);
+                St.WriteYm(register, _soundTemp);
+                _soundTemp = (byte)(_soundTemp + step);
+                if (_soundTemp == last) p += 3;
+                else p--;                                    // the same sweep again next time
+                break;
+            }
+            else
+            {
+                _soundDelay = St.Read8(p++);
+                if (_soundDelay == 0) p = 0;
+                break;
+            }
+        }
+        _sound = p;
     }
 
     // As an interrupt: the current place and status pushed, then the trampoline with interrupts allowed
@@ -376,6 +592,13 @@ public sealed class SndhMachine
                         St.Mfp.Write(mask, (byte)(St.Mfp.Read(mask) | bit));
                         break;
                     }
+                    case 32:                                                           // Dosound: a list of writes to play
+                    {
+                        uint list = St.Read32(sp + 2);
+                        Cpu.D[0] = _sound;
+                        if ((int)list >= 0) { _sound = list & 0xFFFFFF; _soundDelay = 0; }
+                        break;
+                    }
                     case 38:                                                           // Supexec: call a routine
                     {
                         uint routine = St.Read32(sp + 2);
@@ -427,7 +650,9 @@ public sealed class SndhSound : IChipMusic
             }
             _cycle += _cyclesPerSample;
             _machine.RunUntil(_cycle);
-            dest[i] = (float)_chip.Next();
+            double ym = _chip.Next();
+            var dma = _machine.St.Dma;
+            dest[i] = (float)(ym * dma.YmLevel + dma.Sample() * 0.7);
         }
     }
 }

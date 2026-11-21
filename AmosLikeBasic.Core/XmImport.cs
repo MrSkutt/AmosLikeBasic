@@ -43,6 +43,10 @@ public static class XmImport
         public int Sustain = -1, LoopStart = -1, LoopEnd = -1;
         public bool EnvelopeOn;
         public int Fadeout;
+        public (int x, int y)[] PanEnvelope = Array.Empty<(int, int)>();
+        public int PanSustain = -1, PanLoopStart = -1, PanLoopEnd = -1;
+        public bool PanOn;
+        public int VibratoType, VibratoSweep, VibratoDepth, VibratoRate;   // the auto-vibrato
     }
 
     public static bool IsXm(byte[] head) =>
@@ -118,6 +122,13 @@ public static class XmImport
                 if ((type & 2) != 0) inst.Sustain = Math.Min((int)xm[pos + 227], points - 1);
                 if ((type & 4) != 0) { inst.LoopStart = Math.Min((int)xm[pos + 228], points - 1); inst.LoopEnd = Math.Min((int)xm[pos + 229], points - 1); }
                 inst.Fadeout = U16(xm, pos + 239);
+                int panPoints = Math.Min((int)xm[pos + 226], 12);
+                inst.PanEnvelope = Enumerable.Range(0, panPoints).Select(k => (U16(xm, pos + 177 + k * 4), Math.Min(U16(xm, pos + 179 + k * 4), 64))).ToArray();
+                int panType = xm[pos + 234];
+                inst.PanOn = (panType & 1) != 0 && panPoints > 1;
+                if ((panType & 2) != 0) inst.PanSustain = Math.Min((int)xm[pos + 230], panPoints - 1);
+                if ((panType & 4) != 0) { inst.PanLoopStart = Math.Min((int)xm[pos + 231], panPoints - 1); inst.PanLoopEnd = Math.Min((int)xm[pos + 232], panPoints - 1); }
+                (inst.VibratoType, inst.VibratoSweep, inst.VibratoDepth, inst.VibratoRate) = (xm[pos + 235], xm[pos + 236], xm[pos + 237], xm[pos + 238]);
             }
             pos += size;
 
@@ -206,6 +217,7 @@ public static class XmImport
                     Pan = Math.Round((s.Panning - 128) / 128.0 * 100)
                 };
                 Envelope(inst, t, tickMs);
+                PanAndVibrato(inst, t, tickMs);
                 song.Instruments.Add(t);
                 s.Tracker = song.Instruments.Count;
             }
@@ -263,6 +275,31 @@ public static class XmImport
         t.EnvelopeLoopEnd = inst.LoopEnd;
         // FT2 takes the fadeout from 32768 each tick
         t.FadeOut = inst.Fadeout > 0 ? Math.Round(32768.0 / inst.Fadeout * tickMs) : 0;
+    }
+
+    // The pan envelope as it is, and the auto-vibrato as an LFO on the pitch (LFO 2): its wave, depth
+    // (up to about a quarter of a semitone), rate (rate / 256 of a round each tick) and the sweep as a delay
+    private static void PanAndVibrato(Instrument inst, TrackerInstrument t, double tickMs)
+    {
+        if (inst.PanOn)
+        {
+            t.PanEnvelope = inst.PanEnvelope.Select(p => new TrackerEnvelopePoint(p.x, p.y)).ToList();
+            t.PanEnvelopeSustain = inst.PanSustain;
+            t.PanEnvelopeLoopStart = inst.PanLoopStart;
+            t.PanEnvelopeLoopEnd = inst.PanLoopEnd;
+        }
+        if (inst.VibratoDepth > 0 && inst.VibratoRate > 0)
+        {
+            t.Lfo2 = new TrackerLfo
+            {
+                Target = "Pitch",
+                Shape = inst.VibratoType switch { 1 => "Square", 2 => "Saw down", 3 => "Saw up", _ => "Sine" },
+                Depth = Math.Round(inst.VibratoDepth * 100 / 64.0, 1),
+                Rate = Math.Round(inst.VibratoRate / 256.0 * (1000 / tickMs), 2),
+                Delay = Math.Round(inst.VibratoSweep * tickMs),
+                Retrigger = true
+            };
+        }
     }
 
     private sealed class Shared
@@ -329,7 +366,7 @@ public static class XmImport
                 else if (veff == 'A' && x.Param == 0 && eff is '3' or '4') eff = eff == '3' ? '5' : '6';
                 else volumeLost++;
             }
-            else skipped.Add("volume column " + ((x.Volume >> 4) == 0xD ? "pan slide left" : "pan slide right"));
+            else skipped.Add($"volume column {x.Volume:X2}");
         }
         return new TrackerCell(note, inst, eff, prm, volume);
     }
@@ -346,6 +383,8 @@ public static class XmImport
             case 0xA: return ('4', (y << 4) | Remember(ch, "4y", 0));
             case 0xB: return ('4', (Remember(ch, "4x", 0) << 4) | y);
             case 0xC: return ('8', y * 17);
+            case 0xD: return ('P', y);          // pan slide left
+            case 0xE: return ('P', y << 4);     // pan slide right
             case 0xF: return ('3', y == 0 ? 0 : Math.Min(255, Slide(y * 16, linear, ch.Period)));
         }
         return ('\0', 0);
@@ -414,16 +453,29 @@ public static class XmImport
                     case 0x2: return ('E', 0x20 | Math.Min(15, SlideDown(ch, Remember(ch, "E2", y), linear, 1)));
                     case 0xA: return ('E', 0xA0 | Remember(ch, "EA", y));
                     case 0xB: return ('E', 0xB0 | Remember(ch, "EB", y));
-                    case 0x6: case 0x9: case 0xC: case 0xD: case 0xE: return ('E', param);
+                    case 0x3: case 0x4: case 0x6: case 0x7: case 0x9: case 0xC: case 0xD: case 0xE: return ('E', param);
+                    case 0x5:
+                    {
+                        // XM's finetune is x - 8 eighths of a semitone; the tracker's E5x as ProTracker's (-8 – 7)
+                        int eighths = y - 8;
+                        return ('E', 0x50 | (eighths < 0 ? eighths + 16 : eighths));
+                    }
+                    case 0x0: case 0xF: return ('\0', 0);   // they do nothing in FastTracker 2 either
                     default:
                         skipped.Add($"E{x:X}x");
                         return ('\0', 0);
                 }
-            case 0x14:   // Kxx: let go of the note on tick xx
-                return param == 0 ? ('\0', 0) : ('E', 0xC0 | Math.Min(param, 15));
-            case 0x1B:   // Rxy: retrigger (the volume change is left out)
-                int r = Remember(ch, "R", y);
-                return r == 0 ? ('\0', 0) : ('E', 0x90 | r);
+            case 0x10: return ('V', Math.Min(param, 64));                                // Gxx: global volume
+            case 0x11: return ('W', Remember(ch, "H", param));                           // Hxy: global volume slide
+            case 0x14: return param == 0 ? ('\0', 0) : ('K', param);                    // Kxx: let go on tick xx
+            case 0x15: return ('L', param);                                               // Lxx: envelope position
+            case 0x19: return ('P', Remember(ch, "P", param));                           // Pxy: pan slide
+            case 0x1B:                                                                    // Rxy: retrigger with a volume change
+            {
+                int rx = Remember(ch, "Rx", x), ry = Remember(ch, "R", y);
+                return ry == 0 ? ('\0', 0) : ('R', rx << 4 | ry);
+            }
+            case 0x1D: return ('T', Remember(ch, "T", param));                           // Txy: tremor
             case 0x21:   // X1x / X2x: extra fine slides, a quarter of E1x / E2x
                 if (x is 1 or 2)
                 {

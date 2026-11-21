@@ -59,6 +59,10 @@ namespace AmosLikeBasic
             public double[] EnvLevels = Array.Empty<double>();
             public int EnvSustain = -1, EnvLoopStart = -1, EnvLoopEnd = -1;
             public double FadeOut;   // seconds, 0 = none
+            // The pan envelope (null: none); levels -1 (left) – 1 (right)
+            public int[]? PanTicks;
+            public double[] PanLevels = Array.Empty<double>();
+            public int PanSustain = -1, PanLoopStart = -1, PanLoopEnd = -1;
         }
 
         private sealed class TrackData
@@ -96,6 +100,10 @@ namespace AmosLikeBasic
             public int PortaSpeed;
             public int VibSpeed, VibDepth, VibPhase;
             public int TremSpeed, TremDepth, TremPhase;   // effect 7
+            public int VibWave, TremWave;                  // E4x / E7x: 0 sine, 1 ramp down, 2 square (+4: not from the start at a new note)
+            public bool Glissando;                         // E3x: glides in whole semitones
+            public int TremorPos;                          // Txy: where in its on-and-off it is
+            public int NoteTicks;                          // ticks since the note started (Jxy goes round from there)
             public int LoopRow, LoopCount;                // effect E6: the row a pattern loop goes back to
             public int Vol = 64;           // 0 – 64 as in ProTracker
             public char Effect;
@@ -104,7 +112,7 @@ namespace AmosLikeBasic
             public double TableOffset;
             public int DelayNote = TrackerCell.NoNote;
             // The volume envelope: where it is, whether the note has been let go, and the fade (1 – 0)
-            public int EnvTick;
+            public int EnvTick, PanEnvTick;
             public bool KeyOff;
             public double Fade = 1;
             // Set with G, H and I. Apply until the channel changes instrument.
@@ -145,6 +153,7 @@ namespace AmosLikeBasic
         private static int _trackJumpOrder, _trackBreakRow;
         private static int _trackPosOrder, _trackPosRow;
         private static double _trackVolume = 1.0;
+        private static int _trackGlobal = 64;   // Vxx / Wxy: the song's own volume, 0 – 64
         private static bool _trackPreview;   // the editor previews notes without a song playing
 
         // Changes from the editor that the audio thread makes at the next sample
@@ -458,6 +467,7 @@ namespace AmosLikeBasic
             // Points in tick order; the first is at tick 0
             var env = (src.Envelope ?? new()).Where(p => p != null).OrderBy(p => p.Tick).ToList();
             bool points = env.Count >= 2;
+            var pan = (src.PanEnvelope ?? new()).Where(p => p != null).OrderBy(p => p.Tick).ToList();
             // A sampled instrument plays its file instead of oscillator 1 (a missing file is silent)
             var sample = (src.Wave ?? "").Equals("Sample", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(src.Sample)
                 ? SampleBank.Get(src.Sample) ?? new SampleData(Array.Empty<float>(), 44100) : null;
@@ -480,6 +490,11 @@ namespace AmosLikeBasic
                 EnvLoopStart = points && src.EnvelopeLoopStart >= 0 && src.EnvelopeLoopStart <= src.EnvelopeLoopEnd && src.EnvelopeLoopEnd < env.Count ? src.EnvelopeLoopStart : -1,
                 EnvLoopEnd = points && src.EnvelopeLoopStart >= 0 && src.EnvelopeLoopStart <= src.EnvelopeLoopEnd && src.EnvelopeLoopEnd < env.Count ? src.EnvelopeLoopEnd : -1,
                 FadeOut = Math.Clamp(src.FadeOut, 0, 60000) / 1000.0,
+                PanTicks = pan.Count >= 2 ? pan.Select((p, k) => k == 0 ? 0 : Math.Clamp(p.Tick, 0, 65535)).ToArray() : null,
+                PanLevels = pan.Count >= 2 ? pan.Select(p => (Math.Clamp(p.Level, 0, 64) - 32) / 32.0).ToArray() : Array.Empty<double>(),
+                PanSustain = pan.Count >= 2 && src.PanEnvelopeSustain < pan.Count ? src.PanEnvelopeSustain : -1,
+                PanLoopStart = pan.Count >= 2 && src.PanEnvelopeLoopStart >= 0 && src.PanEnvelopeLoopStart <= src.PanEnvelopeLoopEnd && src.PanEnvelopeLoopEnd < pan.Count ? src.PanEnvelopeLoopStart : -1,
+                PanLoopEnd = pan.Count >= 2 && src.PanEnvelopeLoopStart >= 0 && src.PanEnvelopeLoopStart <= src.PanEnvelopeLoopEnd && src.PanEnvelopeLoopEnd < pan.Count ? src.PanEnvelopeLoopEnd : -1,
                 Filter = ParseFilterMode(src.Filter ?? "Off"),
                 Cutoff = Math.Clamp(src.Cutoff, 20, 18000),
                 Resonance = Math.Clamp(src.Resonance / 100.0, 0, 0.98),
@@ -633,11 +648,14 @@ namespace AmosLikeBasic
                 ch.Effect = '\0';
                 ch.VibSpeed = ch.VibDepth = ch.VibPhase = ch.PortaSpeed = 0;
                 ch.TremSpeed = ch.TremDepth = ch.TremPhase = ch.LoopRow = ch.LoopCount = 0;
+                ch.VibWave = ch.TremWave = ch.TremorPos = 0;
+                ch.Glissando = false;
                 ch.DelayNote = TrackerCell.NoNote;
                 ch.Cutoff = ch.Resonance = ch.PulseWidth = ch.Pan = null;
             }
 
             _trackPreview = false;
+            _trackGlobal = 64;
             _trackLoop = req.Loop;
             _trackSpeed = req.Data.Speed;
             _trackTempo = req.Data.Tempo;
@@ -806,6 +824,12 @@ namespace AmosLikeBasic
                             case 0xA: ch.Vol = Math.Min(64, ch.Vol + y); break;               // fine volume up
                             case 0xB: ch.Vol = Math.Max(0, ch.Vol - y); break;                // fine volume down
                             case 0xC: if (y == 0) ch.Vol = 0; break;
+                            case 0x3: ch.Glissando = y != 0; break;                            // glissando on/off
+                            case 0x4: ch.VibWave = y; break;                                   // vibrato wave
+                            case 0x7: ch.TremWave = y; break;                                  // tremolo wave
+                            case 0x5:                                                          // finetune: eighths of a semitone, -8 – 7
+                                if (cell.Note >= 0) ch.PortaTarget = ch.Note += (y < 8 ? y : y - 16) / 8.0;
+                                break;
                             case 0x6:
                                 // Pattern loop: E60 marks the start, E6x plays from there x times more
                                 if (y == 0) ch.LoopRow = _trackRow;
@@ -823,6 +847,15 @@ namespace AmosLikeBasic
                     case 'F':
                         if (p > 0 && p < 0x20) _trackSpeed = p;
                         else if (p >= 0x20) _trackTempo = p;
+                        break;
+                    case 'V':
+                        _trackGlobal = Math.Min(p, 64);                     // the song's volume, 00 – 40
+                        break;
+                    case 'K':
+                        if (p == 0) ReleaseTrackVoice(c);                   // let go now, or on tick xx
+                        break;
+                    case 'L':
+                        ch.EnvTick = p;                                     // the envelope of points from tick xx
                         break;
                     case 'G':
                     {
@@ -891,6 +924,34 @@ namespace AmosLikeBasic
                 case '7':
                     ch.TremPhase += ch.TremSpeed;
                     break;
+                case 'W':
+                    _trackGlobal = Math.Clamp(x > 0 ? _trackGlobal + x : _trackGlobal - y, 0, 64);
+                    break;
+                case 'P':
+                {
+                    // Pan slide: x towards the right, y towards the left, in 1/128 of the way each tick
+                    var v = _voices[c];
+                    v.Pan = (ch.Pan = Math.Clamp((ch.Pan ?? v.Pan) + (x - y) / 127.5, -1, 1)).Value;
+                    break;
+                }
+                case 'K':
+                    if (_trackTick == p) ReleaseTrackVoice(c);
+                    break;
+                case 'R':
+                    // Retrigger every y ticks, and the volume changed by x each time
+                    if (y > 0 && _trackTick % y == 0 && ch.Active)
+                    {
+                        ch.Vol = Math.Clamp(x switch
+                        {
+                            1 => ch.Vol - 1, 2 => ch.Vol - 2, 3 => ch.Vol - 4, 4 => ch.Vol - 8, 5 => ch.Vol - 16,
+                            6 => ch.Vol * 2 / 3, 7 => ch.Vol / 2,
+                            9 => ch.Vol + 1, 10 => ch.Vol + 2, 11 => ch.Vol + 4, 12 => ch.Vol + 8, 13 => ch.Vol + 16,
+                            14 => ch.Vol * 3 / 2, 15 => ch.Vol * 2,
+                            _ => ch.Vol
+                        }, 0, 64);
+                        TriggerTrackNote(c, (int)Math.Round(ch.Note));
+                    }
+                    break;
                 case 'E':
                     if (x == 0xC && _trackTick == y) ch.Vol = 0;
                     // Retrigger: the note is struck again every y ticks (drum rolls)
@@ -924,8 +985,10 @@ namespace AmosLikeBasic
             ch.Note = ch.PortaTarget = note;
             ch.TableIndex = 0;
             ch.TableOffset = 0;
-            ch.VibPhase = 0;
-            ch.EnvTick = 0;
+            ch.NoteTicks = 0;
+            if ((ch.VibWave & 4) == 0) ch.VibPhase = 0;
+            if ((ch.TremWave & 4) == 0) ch.TremPhase = 0;
+            ch.EnvTick = ch.PanEnvTick = 0;
             ch.KeyOff = false;
             ch.Fade = 1;
 
@@ -1045,22 +1108,76 @@ namespace AmosLikeBasic
                     ch.TableIndex = inst.TableLoop >= 0 ? inst.TableLoop : table.Length - 1;
             }
 
-            double semis = ch.Note + ch.TableOffset;
+            double note = ch.Note;
+            // Glissando: a glide heard in whole semitones
+            if (ch.Glissando && ch.Effect is '3' or '5') note = Math.Round(note);
+            double semis = note + ch.TableOffset;
             int p = ch.Param;
             if (ch.Effect == '0' && p != 0)
                 semis += (_trackTick % 3) switch { 1 => p >> 4, 2 => p & 15, _ => 0 };
+            // Jx0: two notes, a tick each; Jxy: four, the last an octave up; counted from the note's start
+            if (ch.Effect == 'J' && p != 0)
+                semis += (p & 15) == 0 ? ch.NoteTicks % 2 * (p >> 4)
+                    : (ch.NoteTicks % 4) switch { 1 => p >> 4, 2 => p & 15, 3 => 12, _ => 0 };
+            ch.NoteTicks++;
             if (ch.Effect is '4' or '6')
-                semis += Math.Sin(ch.VibPhase * 2 * Math.PI / 64) * ch.VibDepth / 8.0;
+                semis += Wave(ch.VibWave, ch.VibPhase) * ch.VibDepth / 8.0;
 
             double freq = 440.0 * Math.Pow(2, (semis - 69) / 12.0);
             v.Freq = v.TargetFreq = Math.Clamp(freq, 1, SampleRate * 0.45);
             double vol = ch.Vol;
             if (ch.Effect == '7')   // tremolo: the volume swings by up to depth × 4 of 64
-                vol = Math.Clamp(vol + Math.Sin(ch.TremPhase * 2 * Math.PI / 64) * ch.TremDepth * 4, 0, 64);
+                vol = Math.Clamp(vol + Wave(ch.TremWave, ch.TremPhase) * ch.TremDepth * 4, 0, 64);
+            if (ch.Effect == 'T')
+            {
+                // Tremor: on for x + 1 ticks, off for y + 1
+                int on = (p >> 4) + 1, off = (p & 15) + 1;
+                if (ch.TremorPos++ % (on + off) >= on) vol = 0;
+            }
+            else ch.TremorPos = 0;
+            vol *= _trackGlobal / 64.0;
             if (inst.EnvTicks != null) vol *= NextEnvelope(ch, v, inst);
+            if (inst.PanTicks != null)
+            {
+                // As far towards the side as there is room from where the pan is
+                double basePan = ch.Pan ?? inst.Pan;
+                double e = NextPanEnvelope(ch, inst);
+                v.Pan = Math.Clamp(basePan + e * (1 - Math.Abs(basePan)), -1, 1);
+            }
             v.Volume = ch.Sfx ? inst.Volume * _sfxVolume
                 : _trackMute[c] ? 0 : inst.Volume * vol / 64.0 * _trackVolume;
         }
+
+        // The pan envelope's level at the channel's tick (-1 – 1), and one tick on, as the volume envelope goes
+        private static double NextPanEnvelope(TrackChannel ch, TrackInstrument inst)
+        {
+            var ticks = inst.PanTicks!;
+            var levels = inst.PanLevels;
+            int t = ch.PanEnvTick;
+            double level = levels[^1];
+            for (int k = 0; k < ticks.Length - 1; k++)
+                if (t < ticks[k + 1])
+                {
+                    int span = Math.Max(1, ticks[k + 1] - ticks[k]);
+                    level = levels[k] + (levels[k + 1] - levels[k]) * Math.Clamp((t - ticks[k]) / (double)span, 0, 1);
+                    break;
+                }
+            if (!(inst.PanSustain >= 0 && !ch.KeyOff && t == ticks[inst.PanSustain]))
+            {
+                t++;
+                if (inst.PanLoopEnd >= 0 && t > ticks[inst.PanLoopEnd]) t = ticks[inst.PanLoopStart];
+                ch.PanEnvTick = Math.Min(t, ticks[^1] + 1);
+            }
+            return level;
+        }
+
+        // The vibrato's and tremolo's wave at a phase (64 a round), -1 – 1: sine, ramp down or square
+        private static double Wave(int kind, int phase) => (kind & 3) switch
+        {
+            1 => 1 - (phase & 63) / 32.0,
+            2 => (phase & 63) < 32 ? 1 : -1,
+            _ => Math.Sin(phase * 2 * Math.PI / 64)
+        };
 
         // The envelope's level at the channel's tick (0 – 1, with the fade), and one tick on
         private static double NextEnvelope(TrackChannel ch, Voice v, TrackInstrument inst)

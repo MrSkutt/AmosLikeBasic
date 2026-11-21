@@ -95,7 +95,7 @@ public static class InstrumentSimplifier
         }
         song.Instruments.Clear();
         song.Instruments.AddRange(instruments);
-        return new Result(before, instruments.Count, parts.Values.Count(p => p.Effect?.effect == '0'), parts.Values.Count(p => p.Effect?.effect == '4'));
+        return new Result(before, instruments.Count, parts.Values.Count(p => p.Effect?.effect is '0' or 'J'), parts.Values.Count(p => p.Effect?.effect == '4'));
     }
 
     private static Dictionary<int, int> CountUses(TrackerSong song)
@@ -132,7 +132,10 @@ public static class InstrumentSimplifier
         }
 
         var env = inst.Envelope.OrderBy(p => p.Tick).ToList();
-        int length = Math.Max(Math.Max(steps.Count, env[^1].Tick + 1), 2);
+        int natural = Math.Max(Math.Max(steps.Count, env[^1].Tick + 1), 2), length = natural;
+        // An envelope that ends above 0 holds its last level for as long as the note is held: its volume
+        // is compared with others' for a while longer, as the held sound it is
+        if (env[^1].Level > 0 || inst.EnvelopeLoopEnd >= 0) length = Math.Max(length, HeldTicks);
         var part = new Part { Number = number, Waves = new string[length], Levels = new int[length], Offsets = new double[length] };
         string baseWave = (inst.Wave ?? "Square").ToUpperInvariant();
         string wave = baseWave;
@@ -155,7 +158,7 @@ public static class InstrumentSimplifier
         }
 
         // Only a tone (no noise) is taken apart: a drum's pitches are its sound
-        var sounding = Enumerable.Range(0, length).Where(t => part.Levels[t] > 0).ToList();
+        var sounding = Enumerable.Range(0, natural).Where(t => part.Levels[t] > 0).ToList();
         if (sounding.Count == 0 || sounding.Any(t => part.Waves[t] == "NOISE")) return part;
         var o = sounding.Select(t => part.Offsets[t]).ToArray();
         var whole = o.Select(v => Math.Round(v)).ToArray();
@@ -165,10 +168,14 @@ public static class InstrumentSimplifier
             TakeOut(part, (int)whole[0], null);
         else if (steady && Arpeggio(whole) is var (low, x, y))
             TakeOut(part, low, ('0', x << 4 | y));
+        else if (steady && TickArpeggio(whole) is var (tlow, tp))
+            TakeOut(part, tlow, ('J', tp));
         else if (!steady && Vibrato(o) is var (centre, speed, depth))
             TakeOut(part, centre, ('4', speed << 4 | depth));
         return part;
     }
+
+    private const int HeldTicks = 32;
 
     private static void TakeOut(Part part, int shift, (char, int)? effect)
     {
@@ -181,7 +188,7 @@ public static class InstrumentSimplifier
     // Three pitches going round, one each tick: the lowest becomes the note, the others x and y above it
     private static (int low, int x, int y)? Arpeggio(double[] whole)
     {
-        if (whole.Length < 3) return null;
+        if (whole.Length < 6) return null;   // at least twice round
         int n = Math.Min(whole.Length, 24);
         int fits = Enumerable.Range(0, n).Count(i => whole[i] == whole[i % 3]);
         if (fits < n * 0.8) return null;
@@ -189,6 +196,25 @@ public static class InstrumentSimplifier
         int start = Array.IndexOf(three, three.Min());
         int low = three[start], x = three[(start + 1) % 3] - low, y = three[(start + 2) % 3] - low;
         return x is >= 0 and <= 15 && y is >= 0 and <= 15 ? (low, x, y) : null;
+    }
+
+    // Two pitches taking turns each tick (Jx0), or four going up with the octave last (Jxy). They go round
+    // from the note's start, so only a round that starts on its lowest pitch is the same (short notes
+    // would start on the wrong pitch otherwise)
+    private static (int low, int param)? TickArpeggio(double[] whole)
+    {
+        if (whole.Length < 4) return null;
+        int n = Math.Min(whole.Length, 24);
+        foreach (int period in new[] { 2, 4 })
+        {
+            if (Enumerable.Range(0, n).Any(i => whole[i] != whole[i % period])) continue;
+            var round = whole.Take(period).Select(v => (int)v).ToArray();
+            int low = round[0];
+            var above = round.Select(v => v - low).ToArray();
+            if (period == 2 && above[1] is > 0 and <= 15) return (low, above[1] << 4);
+            if (period == 4 && above[1] > 0 && above[2] > above[1] && above[2] < 12 && above[3] == 12) return (low, above[1] << 4 | above[2]);
+        }
+        return null;
     }
 
     // A pitch that swings around a centre, at most 1.5 semitones each way: speed and depth as in 4xy
@@ -227,7 +253,8 @@ public static class InstrumentSimplifier
 
     // The same waves, nearly the same volume (on average within 6 of 64, nowhere more than 20), and the
     // same pitches where they were not taken apart; over the ticks both have, since a shorter one is a
-    // note the next note cut off, and that cut stays where it is
+    // note the next note cut off, and that cut stays where it is (a held one is looked at for HeldTicks,
+    // so that a sound that goes on is not taken for one that dies away)
     private static bool Alike(Part a, Part b)
     {
         int n = Math.Min(a.Levels.Length, b.Levels.Length);

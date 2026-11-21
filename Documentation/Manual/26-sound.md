@@ -406,6 +406,7 @@ The effect is a letter or digit and two hex digits. Most only apply on their own
 | Effect | Does |
 |---|---|
 | `0xy` | arpeggio: the note switches between the note, x semitones up and y semitones up, one step per tick |
+| `Jxy` | an arpeggio counted from the note's start, one step per tick: `Jx0` switches between the note and x semitones up; `Jxy` goes round four, the note, x up, y up and the octave (`J47` is a major chord, `J37` minor) |
 | `1xx` | slides up, xx sixteenths of a semitone per tick (`110` is one semitone per tick) |
 | `2xx` | slides down |
 | `3xx` | glides to the note on the row instead of playing it; `300` carries on at the same speed |
@@ -418,6 +419,9 @@ The effect is a letter or digit and two hex digits. Most only apply on their own
 | `Cxx` | volume 00 – 40 (hex, 40 is full volume) |
 | `Dxy` | goes on to row xy (decimal) in the next pattern |
 | `E1x`, `E2x` | slides up or down x sixteenths of a semitone once, on the row |
+| `E3x` | glissando: `E31` makes `3xx` glide in whole semitones, `E30` smoothly again |
+| `E4x`, `E7x` | the wave of the vibrato (`4xy`) or tremolo (`7xy`): 0 sine, 1 ramp, 2 square; add 4 to go on from where it was at a new note |
+| `E5x` | finetune for the note on the row, in eighths of a semitone: 1 – 7 up, 8 – F down (F is one eighth down) |
 | `E6x` | pattern loop: `E60` marks a row, `E6x` goes back to it x times |
 | `E9x` | strikes the note again every x ticks (drum rolls) |
 | `EAx`, `EBx` | the volume up or down by x once, on the row |
@@ -430,6 +434,13 @@ The effect is a letter or digit and two hex digits. Most only apply on their own
 | `Ixx` | pulse width, 80 is 50 % |
 | `8xx` | pan: 00 left, 80 the middle, FF right |
 | `9xx` | a sampled instrument starts xx × 256 frames into its sample |
+| `Kxx` | lets go of the note on tick xx (as `===`, but later in the row) |
+| `Lxx` | an envelope of points goes on from tick xx |
+| `Pxy` | pan slide: x to the right or y to the left each tick |
+| `Rxy` | strikes the note again every y ticks and changes the volume each time by x: 1 – 5 down 1, 2, 4, 8, 16; 6 to ⅔, 7 to ½; 9 – D up 1, 2, 4, 8, 16; E × 1½, F × 2 |
+| `Txy` | tremor: the note is heard for x + 1 ticks and silent for y + 1 |
+| `Vxx` | the whole song's volume, 00 – 40 |
+| `Wxy` | the whole song's volume up by x or down by y each tick |
 
 `G`, `H`, `I` and `8` stay on the channel until it changes instrument, so a filter can open slowly over many notes.
 
@@ -449,7 +460,7 @@ That table is a kick drum: a short click of square wave and then a triangle wave
 
 **LIBRARY...** under the instrument list opens seventy ready-made instruments, sorted like on a synth: **Bass, Lead, Pad, Keys, Pluck, Brass & Strings, Chip, Drums, Percussion, Samples** and **FX**. Choose one and you hear it straight away (on the channel the cursor is in, in the octave chosen). **Add to song** makes it a new instrument in the song (double-clicking does the same), and **Replace current** puts it in place of the instrument chosen in the tracker, so the notes already written get the new sound. Then you can change it on the instrument page like any other.
 
-**SIMPLIFY**, next to it, makes fewer instruments out of many that are the same sound with something on top, as a song read from a YM file has: an arpeggio in an instrument's table becomes the effect `0xy` in the pattern, a vibrato `4xy`, and a note the table moves becomes the note itself. Instruments that are then nearly the same (the same wave and nearly the same volume envelope) become one. The song is easier to change, but sounds nearly, not exactly, as before; undo brings the old instruments back. Only instruments with a table and an envelope of points are touched.
+**SIMPLIFY**, next to it, makes fewer instruments out of many that are the same sound with something on top, as a song read from a YM file has: an arpeggio in an instrument's table becomes the effect `0xy` in the pattern (or `Jxy`, when it goes round two or four notes, one a tick), a vibrato `4xy`, and a note the table moves becomes the note itself. Instruments that are then nearly the same (the same wave and nearly the same volume envelope) become one. The song is easier to change, but sounds nearly, not exactly, as before; undo brings the old instruments back. Only instruments with a table and an envelope of points are touched.
 
 **Save current...** puts the tracker's current instrument in the library, in a category you choose or a new one you type. **Load file...** and **Save file...** read and write single instrument files (`.amosinst`) anywhere, for sharing a sound with a friend. The library is the folder `Sound/Instruments`, one folder per category, so you can also tidy it in Finder or Explorer.
 
@@ -504,6 +515,8 @@ In the file an LFO is written `"Lfo1": { "Target": "Cutoff", "Shape": "Triangle"
 
 When the note is let go, the envelope goes on past the sustain point to its end. Without a fade-out, a sound that ends by itself (the last point at 0, no loop) plays to its end, and one that would go on for ever fades out quickly, so letting go of a key always stops it. **ADSR** takes the points away again. In the file the points are written as `"Envelope": [{"Tick": 0, "Level": 64}, ...]` with `EnvelopeSustain`, `EnvelopeLoopStart`, `EnvelopeLoopEnd` (point numbers from 0, -1 for none) and `FadeOut` (ms).
 
+**PAN ENVELOPE** below it moves the sound between left and right while the note sounds. **POINTS** draws one in the same way: the line across the middle is the centre, up is right and down is left. It starts as a swing from the middle to the right, the left and back, round in a loop. It moves the sound as far as there is room from the instrument's pan (or `8xx`) towards the side. Its SUSTAIN and LOOP knobs work as the volume envelope's, and **OFF** takes it away. In the file it is `PanEnvelope`, with `PanEnvelopeSustain`, `PanEnvelopeLoopStart` and `PanEnvelopeLoopEnd`; its levels are 0 (left) – 32 (the middle) – 64 (right).
+
 ### The file
 
 The file is JSON, so it can be opened in an ordinary text editor. Each row of a pattern is a line of text, with the channels separated by `|`:
@@ -540,10 +553,10 @@ The module becomes a new song that is not saved yet. **SAVE** keeps it as a trac
 
 A few things differ from the originals, and the status line says what a module used that was left out:
 
-- `E0x` (the Amiga's filter), `E3x`, `E4x`, `E5x`, `E7x`, `E8x` and `EFx` are left out, and in XM files also global volume (`Gxx`, `Hxy`), envelope position (`Lxx`), pan slides (`Pxy`) and tremor (`Txy`).
+- `E0x` (the Amiga's filter) and `EFx` are left out. XM's own effects become the tracker's: global volume `Gxx` and `Hxy` become `Vxx` and `Wxy` (G and H are the filter here), and `Kxx`, `Lxx`, `Pxy`, `Rxy` and `Txy` keep their letters.
 - A slide is turned into sixteenths of a semitone where it starts, so in Amiga-style songs a very long slide can end slightly off.
 - An XM instrument with several samples over the keys becomes one instrument per sample, and a note gets the one its key plays.
-- XM's volume envelope is kept as an envelope of points, with its sustain point, loop and fadeout. The panning envelope and the auto-vibrato are left out.
+- XM's volume and panning envelopes are kept as envelopes of points, with their sustain points and loops, and the fadeout. An instrument's auto-vibrato becomes LFO 2 on the pitch, with its wave, depth, speed and sweep (as the LFO's delay).
 - A volume in XM's volume column goes in the tracker's volume column. Its other commands (volume slides, vibrato, pan and glide) go in the effect column when that is free, and are left out when it is not.
 - The tracker plays at most 32 channels, as FastTracker 2 does.
 
@@ -573,7 +586,7 @@ YM5 and YM6 files can have the Atari's special effects, made with a timer:
 
 The buzzer itself (the envelope repeated fast) is played with a sample of the chip's own envelope, 32 steps of its volume, so it has the edge a smooth wave lacks.
 
-**SNDH files** (`.sndh`, `.snd`) are Atari ST music as its original player: 68000 code with the notes, often packed with Pack-Ice. The program unpacks them and runs the player on an emulated 68000 and Atari ST, with the MFP's timers and their interrupts. `MUSIC PLAY` and the browser play it live: every write to the sound chip is heard the moment the player makes it, so SID voices and digidrums, made with the timers thousands of times a second, sound as on the Atari. In the tracker, an SNDH file is read as the chip's registers at every call of the player, and from there it is a YM file. What the timers do between the calls is recognised: a volume switched on and off fast becomes a SID voice, volumes written as a sample become a *Digidrum* (a digitised tune that plays all the time becomes one long sample), and the envelope started again fast becomes a sync buzzer. Songs played more than 100 times a second (often 200) are read with frames taken together, as the tracker's tempo goes up to about 100 rows a second.
+**SNDH files** (`.sndh`, `.snd`) are Atari ST music as its original player: 68000 code with the notes, often packed with Pack-Ice. The program unpacks them and runs the player on an emulated 68000 and Atari STe, with the MFP's timers and their interrupts, the STe's DMA sound (8-bit samples played straight from memory, with the volume set through the Microwire), and the operating system's Dosound, which some game music uses. `MUSIC PLAY` and the browser play it live: every write to the sound chip is heard the moment the player makes it, so SID voices and digidrums, made with the timers thousands of times a second, sound as on the Atari. In the tracker, an SNDH file is read as the chip's registers at every call of the player, and from there it is a YM file. What the timers do between the calls is recognised: a volume switched on and off fast becomes a SID voice, volumes written as a sample become a *Digidrum* (a digitised tune that plays all the time becomes one long sample), and the envelope started again fast becomes a sync buzzer. Songs played more than 100 times a second (often 200) are read with frames taken together, as the tracker's tempo goes up to about 100 rows a second. The STe's DMA sound is heard when an SNDH file plays, but it is not brought into the tracker: there only what the YM chip plays is read.
 
 **CHIP...** next to LOAD opens the Atari music, YM and SNDH files, in `Sound/Tracker` (or another folder, with **Folder...**), by the folders in it. Choose a song and it plays at once, as the chip played it; a search finds songs by name or folder, and **YM** and **SNDH** choose which kinds are listed. An SNDH file with several tunes shows **Tune**, to hear another and open that one. **Open in tracker** (or a double-click) reads it into the tracker.
 

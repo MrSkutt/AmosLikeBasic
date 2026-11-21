@@ -51,7 +51,7 @@
     <!-- Resources -->
     <ItemGroup>
         <!-- Not the user's own music collections or the samples written when a module is read (all gitignored) -->
-        <None Include="Sound/**/*" Exclude="Sound/Tracker/YM/**;Sound/Tracker/SNDH/**;Sound/AtariYM/**;Sound/Samples/*/**" CopyToOutputDirectory="PreserveNewest" />
+        <None Include="Sound/**/*" Exclude="Sound/Tracker/YM/**;Sound/Tracker/SNDH/**;Sound/SID/**;Sound/AtariYM/**;Sound/Samples/*/**" CopyToOutputDirectory="PreserveNewest" />
         <None Include="Graphics/**/*" CopyToOutputDirectory="PreserveNewest" />
         <None Include="Projects/**/*" CopyToOutputDirectory="PreserveNewest" />
         <!-- Retro fonts for FONT SET (C64 Pro Mono, Topaz ...), so the text looks the same on every computer -->
