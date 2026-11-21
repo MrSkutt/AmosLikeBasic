@@ -1231,7 +1231,7 @@ public partial class TrackerWindow : Window
         _ymBrowser = new YmBrowserWindow(async (path, tune) =>
         {
             if (!await ConfirmDiscardAsync()) return;
-            LoadFile(path, tune);
+            await LoadFile(path, tune);
         });
         _ymBrowser.Closed += (_, _) => _ymBrowser = null;
         _ymBrowser.Show(this);
@@ -1334,26 +1334,25 @@ public partial class TrackerWindow : Window
             Title = "Load song",
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("Songs and modules") { Patterns = new[] { "*.amostrk", "*.mod", "*.xm", "*.ym", "*.sndh", "*.snd" } },
+                new FilePickerFileType("Songs and modules") { Patterns = new[] { "*.amostrk", "*.mod", "*.xm", "*.ym", "*.sndh", "*.snd", "*.sid" } },
                 SongFileType,
                 new FilePickerFileType("Modules (MOD, XM)") { Patterns = new[] { "*.mod", "*.xm" } },
-                new FilePickerFileType("Atari ST chip music (YM, SNDH)") { Patterns = new[] { "*.ym", "*.sndh", "*.snd" } }
+                new FilePickerFileType("Atari ST chip music (YM, SNDH)") { Patterns = new[] { "*.ym", "*.sndh", "*.snd" } },
+                new FilePickerFileType("Commodore 64 music (SID)") { Patterns = new[] { "*.sid" } }
             },
             SuggestedStartLocation = await StartFolderAsync()
         });
         if (files.Count == 0) return;
         string? path = files[0].TryGetLocalPath();
-        if (path != null) LoadFile(path);
+        if (path != null) await LoadFile(path);
     }
 
-    // tune: which tune of an SNDH file (0: the one it starts with)
-    public void LoadFile(string path, int tune = 0)
+    // tune: which tune of an SNDH or SID file (0: the one it starts with). Done when the song is in the
+    // tracker (a module or chip music is read in the background)
+    public Task LoadFile(string path, int tune = 0)
     {
-        if (Path.GetExtension(path).ToLowerInvariant() is ".mod" or ".xm" or ".ym" or ".sndh" || IsModFile(path))
-        {
-            ImportMod(path, tune);
-            return;
-        }
+        if (Path.GetExtension(path).ToLowerInvariant() is ".mod" or ".xm" or ".ym" or ".sndh" or ".snd" or ".sid" || IsModFile(path))
+            return ImportModAsync(path, tune);
         try
         {
             var song = TrackerSong.Load(path);
@@ -1372,6 +1371,7 @@ public partial class TrackerWindow : Window
         {
             SetStatus("Could not load: " + ex.Message);
         }
+        return Task.CompletedTask;
     }
 
     // A ProTracker module ("M.K." at byte 1080) or an XM file, whatever its file name
@@ -1392,9 +1392,15 @@ public partial class TrackerWindow : Window
     }
 
     // A MOD or XM file becomes a new, unsaved song; its samples are written as WAV files in
-    // Sound/Samples/<module name>/, which the song refers to
-    private void ImportMod(string path, int tune = 0)
+    // Sound/Samples/<module name>/, which the song refers to. It is read in the background: chip music
+    // is run through its player first, which can take some seconds, shown in a window with how far it is
+    private bool _importing;
+
+    private async Task ImportModAsync(string path, int tune = 0)
     {
+        if (_importing) return;
+        _importing = true;
+        Window? waiting = null;
         try
         {
             string name = Path.GetFileNameWithoutExtension(path);
@@ -1402,10 +1408,43 @@ public partial class TrackerWindow : Window
             string folder = Path.Combine(Workspace.Sound, "Samples", safe);
             string inSong = Path.GetRelativePath(Workspace.Root, folder).Replace('\\', '/');
             if (inSong.StartsWith("..")) inSong = folder;   // the Sound folder is moved outside the working folder
-            var bytes = File.ReadAllBytes(path);
-            var result = XmImport.IsXm(bytes) ? XmImport.Import(bytes, name, folder, inSong)
-                : YmFile.IsChipMusic(bytes) ? YmImport.Import(YmFile.ReadChipMusic(bytes, tune), name, true, folder, inSong)
-                : ModImport.Import(bytes, name, folder, inSong);
+
+            var bar = new ProgressBar { Minimum = 0, Maximum = 100, Height = 14, Margin = new Thickness(0, 8, 0, 0) };
+            var percent = new TextBlock { Text = "0 %", HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 4, 0, 0) };
+            void Progress(double done) => Dispatcher.UIThread.Post(() =>
+            {
+                bar.Value = done * 100;
+                percent.Text = $"{(int)(done * 100)} %";
+            });
+            var work = Task.Run(() =>
+            {
+                var bytes = File.ReadAllBytes(path);
+                return XmImport.IsXm(bytes) ? XmImport.Import(bytes, name, folder, inSong)
+                    : SidFile.IsSid(bytes) ? YmImport.ImportSid(SidFile.Load(path), name, tune, progress: Progress)
+                    : YmFile.IsChipMusic(bytes) ? YmImport.Import(YmFile.ReadChipMusic(bytes, tune, Progress), name, true, folder, inSong)
+                    : ModImport.Import(bytes, name, folder, inSong);
+            });
+            // Only a read that takes a while shows the window
+            if (await Task.WhenAny(work, Task.Delay(300)) != work)
+            {
+                waiting = new Window
+                {
+                    Title = "Reading",
+                    Width = 360,
+                    SizeToContent = SizeToContent.Height,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    CanResize = false,
+                    Content = new StackPanel
+                    {
+                        Margin = new Thickness(14),
+                        Children = { new TextBlock { Text = $"Reading {Path.GetFileName(path)}...", TextTrimming = TextTrimming.CharacterEllipsis }, bar, percent }
+                    }
+                };
+                _ = waiting.ShowDialog(this);
+            }
+            var result = await work;
+            waiting?.Close();
+            waiting = null;
             Stop();
             _song = result.Song;
             _path = null;   // saved as a tracker song the first time SAVE is pressed
@@ -1426,6 +1465,11 @@ public partial class TrackerWindow : Window
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
         {
             SetStatus("Could not read the module: " + ex.Message);
+        }
+        finally
+        {
+            waiting?.Close();
+            _importing = false;
         }
     }
 

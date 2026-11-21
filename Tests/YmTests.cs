@@ -147,7 +147,7 @@ public class YmTests : IDisposable
     {
         int[] melody = { 284, 253, 225, 213, 284, 190, 213, 253, 284, 253, 225, 213, 190, 213, 253, 284 };
         var frames = new List<byte[]>();
-        for (int round = 0; round < 8; round++)
+        for (int round = 0; round < 16; round++)
             foreach (int period in melody)
                 for (int f = 0; f < 6; f++)
                 {
@@ -172,9 +172,10 @@ public class YmTests : IDisposable
         Assert.Equal(new[] { "SQUARE", "SQUARE +4", "SQUARE +7" }, arp.Table.Take(3).Select(t => t.Split(' ', 2) is var w && w.Length > 1 ? w[0] + " " + double.Parse(w[1], System.Globalization.CultureInfo.InvariantCulture).ToString("+0;-0") : w[0]));
         Assert.Equal(64, arp.Envelope[0].Level);
         Assert.True(arp.Envelope[^1].Level < 64, "it fades");
-        // The melody: A-4 on the first row, and the second round is the same pattern again
+        // The melody: A-4 on the first row, in patterns of 64 rows, the repeats written once
         Assert.Equal(69, song.Patterns[song.Order[0]][0, 0].Note);
-        Assert.Equal(128, song.Order.Sum(o => song.Patterns[o].Rows));
+        Assert.Equal(256, song.Order.Sum(o => song.Patterns[o].Rows));
+        Assert.True(song.Order.Count(o => song.Patterns[o].Rows == 64) >= 3, "patterns of 64 rows");
         Assert.True(song.Patterns.Count < song.Order.Count, "the repeat is written once");
 
         // It sounds as the frame-by-frame song does

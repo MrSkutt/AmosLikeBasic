@@ -74,6 +74,25 @@ public class TrackerViewTests : IDisposable
         Close(w);
     }
 
+    [AvaloniaFact]
+    public void LOAD_reads_a_SID_file_into_the_tracker()
+    {
+        string file = Path.Combine(Path.GetTempPath(), $"amos-tiny-{Guid.NewGuid():N}.sid");
+        File.WriteAllBytes(file, SidTests.TinyTune());
+        try
+        {
+            var w = Open();
+            var loading = w.LoadFile(file);
+            for (int i = 0; i < 500 && !loading.IsCompleted; i++) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
+            Assert.True(loading.IsCompleted);
+            var song = (TrackerSong)typeof(TrackerWindow).GetField("_song", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(w)!;
+            Assert.Equal("Tiny", song.Title);
+            Assert.Equal(69, song.Patterns[song.Order[0]][0, 0].Note);
+            Close(w);
+        }
+        finally { File.Delete(file); }
+    }
+
     private static TrackerWindow Open()
     {
         var w = new TrackerWindow { Width = 1280, Height = 820 };

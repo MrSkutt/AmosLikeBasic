@@ -670,7 +670,8 @@ public static class SndhPlayer
     // Writes to one register in a frame, more than a player makes in one call: done by a timer interrupt
     private const int TimerWrites = 6;
 
-    public static YmFile Record(SndhFile sndh, int tune = 0, int seconds = 0)
+    // progress: how far it has come, 0 – 1, now and then
+    public static YmFile Record(SndhFile sndh, int tune = 0, int seconds = 0, Action<double>? progress = null)
     {
         if (seconds <= 0) seconds = LengthOf(sndh, tune);
         var machine = new SndhMachine(sndh, tune);
@@ -684,6 +685,7 @@ public static class SndhPlayer
         double cycle = machine.Cpu.Cycles, perFrame = SndhMachine.CpuClock / machine.Rate;
         for (int f = 0; f < frames; f++)
         {
+            if (progress != null && f % Math.Max(1, frames / 100) == 0) progress((double)f / frames);
             current = new List<(int, byte)>();
             writes[f] = current;
             st.EnvelopeWritten = false;

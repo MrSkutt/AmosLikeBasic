@@ -191,7 +191,13 @@ public sealed class AudioEngine : IDisposable
     private void PlayYm(byte[] data, string fullPath)
     {
         AmosLikeBasic.IChipMusic player;
-        try { player = AmosLikeBasic.YmFile.PlayChipMusic(data, 44100, loop: false); }
+        // A SID file in the High Voltage SID Collection is played for its length from Songlengths.md5
+        try
+        {
+            player = AmosLikeBasic.SidFile.IsSid(data)
+                ? new AmosLikeBasic.SidSound(AmosLikeBasic.SidFile.Load(fullPath), 44100)
+                : AmosLikeBasic.YmFile.PlayChipMusic(data, 44100, loop: false);
+        }
         catch (InvalidDataException ex)
         {
             Console.WriteLine($"Could not read the chip music: {ex.Message}");

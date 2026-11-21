@@ -20,12 +20,15 @@ namespace AmosLikeBasic;
 // The YM5/YM6 special effects: a digidrum becomes a sampled instrument (its sample written as a
 // WAV file), a note started where the drum is hit; a SID voice a square wave at the SID's pitch; and
 // a sync buzzer the buzzer at the timer's pitch. MUSIC PLAY plays them exactly.
-public static class YmImport
+public static partial class YmImport
 {
-    private enum Mode { Silent, Tone, Noise, ToneNoise, BuzzSaw, BuzzTriangle }
+    // The YM's kinds of sound, then the SID's waves (the YM's tone is a square, a pulse of 50 %)
+    private enum Mode { Silent, Tone, Noise, ToneNoise, BuzzSaw, BuzzTriangle, Triangle, Saw, Pulse }
 
-    // What a channel does in a frame: Step is the chip's volume step 0 – 31
-    private readonly record struct Sound(Mode Mode, double Semis, int Step, bool Retrigger)
+    // What a channel does in a frame: Step is the YM's volume step 0 – 31 (a SID's envelope is read as
+    // the nearest), Width a pulse's width in per cent, Filter the SID filter it goes through (0 none,
+    // 1 low, 2 band, 3 high pass, plus 4 × the tracker's resonance in per cent)
+    private readonly record struct Sound(Mode Mode, double Semis, int Step, bool Retrigger, int Width = 50, int Filter = 0)
     {
         public bool Sounds => Mode != Mode.Silent && Step > 0;
     }
@@ -353,13 +356,21 @@ public static class YmImport
         song.Instruments.Add(Instrument("YM buzzer triangle", "Triangle"));
         UseBuzzerSample(song.Instruments[3], Mode.BuzzSaw, buzzers);
         UseBuzzerSample(song.Instruments[4], Mode.BuzzTriangle, buzzers);
+        // A SID's waves, numbered as their modes (6 – 8)
+        bool sid = sounds.Cast<Sound>().Any(s => s.Mode is Mode.Triangle or Mode.Saw or Mode.Pulse);
+        if (sid)
+        {
+            song.Instruments.Add(Instrument("SID triangle", "Triangle"));
+            song.Instruments.Add(Instrument("SID saw", "Sawtooth"));
+            song.Instruments.Add(Instrument("SID pulse", "Square"));
+        }
         int firstDrum = song.Instruments.Count + 1;
         song.Instruments.AddRange(drums.Instruments);
         var hits = new Dictionary<(int, int), DrumHit>();
         foreach (var h in ReadHits(ym, drums)) hits[(h.Frame, h.Channel)] = h;
 
         // Patterns of up to 256 rows; a loop back to the middle of the song starts a pattern of its own
-        int frames = ym.Frames.Length;
+        int frames = sounds.GetLength(0);
         int loop = Math.Clamp(ym.LoopFrame, 0, Math.Max(0, frames - 1));
         var starts = new List<int>();
         for (int f = 0; f < loop; f += TrackerSong.MaxRows) starts.Add(f);
@@ -451,9 +462,12 @@ public static class YmImport
     // One frame of a note: the sound, the pitch from the note, and the volume below the note's loudest.
     // Pitches within 15 cents count as the same: the chip's periods are whole numbers, so the same
     // arpeggio comes out a little differently on each note.
-    private readonly record struct Step(Mode Mode, double Offset, int Down)
+    // Two frames of notes are the same when they sound alike: pulse widths a few per cent apart count as
+    // one (a pulse swept on across a whole song would make every note an instrument of its own)
+    private readonly record struct Step(Mode Mode, double Offset, int Down, int Width = 50, int Filter = 0)
     {
-        public bool Same(Step o) => Mode == o.Mode && (Mode == Mode.Silent || (Down == o.Down && Math.Abs(Offset - o.Offset) < 0.15));
+        public bool Same(Step o) => Mode == o.Mode && (Mode == Mode.Silent ||
+            (Down == o.Down && Math.Abs(Offset - o.Offset) < 0.15 && Filter == o.Filter && (Mode != Mode.Pulse || Math.Abs(Width - o.Width) <= 6)));
     }
 
     private sealed class Note
@@ -466,12 +480,15 @@ public static class YmImport
     private static IEnumerable<DrumHit> ReadHits(YmFile ym, Drums drums) =>
         ReadEffects(ym).Hits.Where(h => drums.Of.ContainsKey(h.Drum));
 
+    // gated: a SID's notes start where a gate goes on (its envelope then rises over some frames, which
+    // is not a new note); a YM's where the sound gets louder
+    // decorate: adds to the rows before they become patterns (given the frame each row starts at)
     private static TrackerSong? Analyse(YmFile ym, Sound[,] sounds, List<string> notes, Found report, Drums drums,
-        (string, string)? buzzers)
+        (string, string)? buzzers, bool gated = false, Action<TrackerCell[,], int[]>? decorate = null)
     {
         int frames = sounds.GetLength(0);
         if (frames == 0) return null;
-        var (speed, phase) = FindSpeed(sounds);
+        var (speed, phase) = FindSpeed(sounds, gated);
         report.Speed = speed;
 
         // The frames a row starts at: one a row before the phase (at speed 1), then one every `speed`
@@ -502,6 +519,11 @@ public static class YmImport
                 if (firstSound >= 0)
                 {
                     if (silenced || firstSound > rs) begins = true;
+                    else if (gated)
+                    {
+                        for (int f = rs; f < re && !begins; f++) begins = sounds[f, c].Retrigger;
+                        begins |= Math.Abs(sounds[rs, c].Semis - pitch) > 0.5 && !sounds[rs - 1, c].Retrigger;
+                    }
                     else
                     {
                         var now = sounds[rs, c];
@@ -566,6 +588,7 @@ public static class YmImport
             cells[rowOf[start], hit.Channel] = drums.Cell(hit, firstDrum, hit.Frame - start);
         }
         if (phase > 0) cells[phase, 3] = new TrackerCell(TrackerCell.NoNote, 0, 'F', speed);
+        decorate?.Invoke(cells, rowStarts);
         int loopRow = 0;
         if (ym.LoopFrame > 0 && ym.LoopFrame < frames)
         {
@@ -573,7 +596,7 @@ public static class YmImport
             while (f > 0 && rowOf[f] < 0) f--;
             loopRow = rowOf[f];
         }
-        report.LoopOrder = BuildPatterns(song, cells, loopRow);
+        report.LoopOrder = BuildPatterns(song, cells, loopRow, speed == 1);
         notes.Add($"Speed {speed}, {song.Instruments.Count} instruments, {song.Patterns.Count} patterns in an order of {song.Order.Count}.");
         return song;
     }
@@ -593,7 +616,7 @@ public static class YmImport
         for (int f = from; f < end; f++)
         {
             var s = sounds[f, n.Channel];
-            n.Steps[f - from] = s.Sounds ? new Step(s.Mode, s.Semis - n.Pitch, n.Loudest - s.Step) : new Step(Mode.Silent, 0, 0);
+            n.Steps[f - from] = s.Sounds ? new Step(s.Mode, s.Semis - n.Pitch, n.Loudest - s.Step, s.Width, s.Filter) : new Step(Mode.Silent, 0, 0);
         }
         return n;
     }
@@ -610,7 +633,7 @@ public static class YmImport
     // channel starts sounding, gets clearly louder (by 3 of the chip's 16 volume steps, so that an
     // instrument's own small swells do not count) or has its envelope restarted at the start of a
     // row; and where in it the rows start
-    private static (int speed, int phase) FindSpeed(Sound[,] sounds)
+    private static (int speed, int phase) FindSpeed(Sound[,] sounds, bool gated = false)
     {
         int frames = sounds.GetLength(0);
         var starts = new List<int>();
@@ -619,7 +642,7 @@ public static class YmImport
             {
                 var s = sounds[f, c];
                 var before = f > 0 ? sounds[f - 1, c] : default;
-                if (s.Sounds && (!before.Sounds || s.Step >= before.Step + 6 || s.Retrigger)) { starts.Add(f); break; }
+                if (gated ? s.Retrigger : s.Sounds && (!before.Sounds || s.Step >= before.Step + 6 || s.Retrigger)) { starts.Add(f); break; }
             }
         if (starts.Count < 8) return (1, 0);
         for (int speed = 16; speed >= 2; speed--)
@@ -651,8 +674,9 @@ public static class YmImport
             string wave = s.Mode switch
             {
                 Mode.Noise or Mode.ToneNoise => "NOISE",
-                Mode.BuzzSaw => "SAWTOOTH",
-                Mode.BuzzTriangle => "TRIANGLE",
+                Mode.BuzzSaw or Mode.Saw => "SAWTOOTH",
+                Mode.BuzzTriangle or Mode.Triangle => "TRIANGLE",
+                Mode.Pulse => "PULSE P" + s.Width,
                 _ => "SQUARE"
             };
             // Whole semitones as such; the rest (vibrato, detune) to a hundredth
@@ -677,6 +701,12 @@ public static class YmImport
         if (modes.Count == 1 && modes[0] is Mode.BuzzSaw or Mode.BuzzTriangle) UseBuzzerSample(inst, modes[0], buzzers);
         inst.Table = table;
         inst.TableLoop = loopLength > 0 ? loopStart : -1;
+        int filter = steps.FirstOrDefault(s => s.Mode != Mode.Silent).Filter;
+        if (filter > 0)
+        {
+            inst.Filter = (filter & 3) switch { 1 => "Low", 2 => "Band", _ => "High" };
+            inst.Resonance = filter >> 2;
+        }
         inst.Envelope = points;
         if (loopLength > 0)
         {
@@ -709,50 +739,104 @@ public static class YmImport
     {
         var sounding = steps.Where(s => s.Mode != Mode.Silent).ToList();
         bool noise = sounding.Any(s => s.Mode is Mode.Noise or Mode.ToneNoise);
-        bool tone = sounding.Any(s => s.Mode == Mode.Tone);
+        bool tone = sounding.Any(s => s.Mode is Mode.Tone or Mode.Triangle or Mode.Saw or Mode.Pulse);
         string kind = sounding.Any(s => s.Mode is Mode.BuzzSaw or Mode.BuzzTriangle) ? "Buzzer"
             : noise && tone ? "Drum"
             : noise ? "Noise"
             : sounding.Select(s => Math.Round(s.Offset)).Distinct().Count() > 1 ? "Arp"
             : sounding.Any(s => Math.Abs(s.Offset - sounding[0].Offset) > 0.05) ? "Vibrato"
+            : sounding.Any(s => s.Mode == Mode.Pulse && s.Width != sounding[0].Width) ? "Pulse sweep"
+            : sounding.All(s => s.Mode == Mode.Triangle) ? "Triangle"
+            : sounding.All(s => s.Mode == Mode.Saw) ? "Saw"
             : "Tone";
         kinds[kind] = kinds.GetValueOrDefault(kind) + 1;
         return $"{kind} {kinds[kind]}";
     }
 
-    // Cuts the rows into patterns of the length that repeats best, and writes a repeat once. The loop
-    // starts a pattern, and the last pattern is its own, as it jumps back.
+    // Cuts the rows into patterns that follow the music: whole bars of about 64 rows, starting where its
+    // bars do, and writes a repeat once. Rows before the first bar
+    // are a pattern of their own, the loop starts a pattern, and the last pattern is its own, as it jumps back.
     // Returns the place in the order list the end jumps back to (0: the start)
-    private static int BuildPatterns(TrackerSong song, TrackerCell[,] cells, int loopRow)
+    private static int BuildPatterns(TrackerSong song, TrackerCell[,] cells, int loopRow, bool rowsAreFrames)
     {
         int rows = cells.GetLength(0);
         string RowKey(int r) => string.Join("|", Enumerable.Range(0, 4).Select(c => cells[r, c].ToString()));
         var keys = Enumerable.Range(0, rows).Select(RowKey).ToArray();
 
-        List<(int from, int to)> Blocks(int length)
+        // Blocks of `length` rows on a grid starting at `offset` (the rows before it a pickup of their
+        // own), started again where the loop begins
+        List<(int from, int to)> Blocks(int length, int offset)
         {
+            var starts = new SortedSet<int> { 0, rows };
+            if (loopRow > 0 && loopRow < rows) starts.Add(loopRow);
+            for (int r = offset; r < rows; r += length) starts.Add(r);
+            for (int r = loopRow + ((offset - loopRow) % length + length) % length; r < rows; r += length) starts.Add(r);
+            var edges = starts.ToList();
             var list = new List<(int, int)>();
-            for (int r = 0; r < loopRow; r += length) list.Add((r, Math.Min(loopRow, r + length)));
-            for (int r = loopRow; r < rows; r += length) list.Add((r, Math.Min(rows, r + length)));
+            for (int i = 0; i + 1 < edges.Count; i++) list.Add((edges[i], edges[i + 1]));
             return list;
         }
         string BlockKey((int from, int to) b) => string.Join("\n", keys[b.from..b.to]);
+        long Cost(List<(int from, int to)> blocks) =>
+            blocks.Take(blocks.Count - 1).Select(BlockKey).Distinct().Sum(k => k.Count(ch => ch == '\n') + 1)
+            + (blocks[^1].to - blocks[^1].from) + 8L * blocks.Count;
 
-        // The length that leaves the fewest rows to write, with a long order list counting against it
-        int bestLength = 64;
-        long bestCost = long.MaxValue;
-        foreach (int length in new[] { 16, 32, 48, 64, 96, 128, 192, 256 })
+        // The length: whole bars, about 64 rows. The music's period is the shortest distance (8 – 128
+        // rows) at which a channel's notes come again nearly as often as at the best one (the
+        // instruments, volumes and effects not counted, as a recorded song's seldom match exactly); a
+        // pattern is as many periods as fit in 64 rows, or a longer period halved
+        double Repeats(int distance)
         {
-            var blocks = Blocks(length);
-            // The jump back to the loop (Bxx) reaches places 0 – 255 of the order list
-            if (blocks.Count > 256 && length < 256) continue;
-            long unique = blocks.Take(blocks.Count - 1).Select(BlockKey).Distinct().Sum(k => k.Count(ch => ch == '\n') + 1)
-                          + (blocks[^1].to - blocks[^1].from);
-            long cost = unique + 8L * blocks.Count;
-            if (cost < bestCost) { bestCost = cost; bestLength = length; }
+            int same = 0, n = 0;
+            for (int r = 0; r + distance < rows; r++)
+                for (int c = 0; c < 3; c++)
+                {
+                    int a = cells[r, c].Note, b = cells[r + distance, c].Note;
+                    if (a < 0 && b < 0) continue;
+                    n++;
+                    if (a == b) same++;
+                }
+            return n < 16 ? 0 : same / (double)n;
+        }
+        // (with a steady speed, bars of 4 or 3 beats: 16 – 128 rows; read a frame a row, any length)
+        var distances = rowsAreFrames ? Enumerable.Range(8, 121) : new[] { 16, 24, 32, 48, 64, 96, 128 };
+        var repeats = distances.Where(d => rows >= 2 * d).ToDictionary(d => d, Repeats);
+        double best = repeats.Count > 0 ? repeats.Values.Max() : 0;
+        int length = 64;
+        if (best >= 0.15)
+        {
+            int period = repeats.Where(kv => kv.Value >= best * 0.9).Min(kv => kv.Key);
+            length = period <= 64 ? period * (64 / period) : period;
+            while (length > 64 && length % 2 == 0) length /= 2;
         }
 
-        var chosen = Blocks(bestLength);
+        // Where the bars start: the place in a quarter of the pattern where the most notes are struck
+        int beat = length % 4 == 0 ? length / 4 : length;
+        var strength = new int[beat];
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < 3; c++)
+                if (cells[r, c].Note >= 0) strength[r % beat]++;
+        int phase = Array.IndexOf(strength, strength.Max());
+
+        // Which beat starts a pattern, from there or from the song's start: the one that repeats best
+        int bestLength = length, bestOffset = phase;
+        long bestCost = long.MaxValue;
+        foreach (int offset in Enumerable.Range(0, 4).SelectMany(k => new[] { (phase + k * beat) % length, k * beat % length }).Distinct())
+        {
+            var blocks = Blocks(length, offset);
+            if (blocks.Count > 256) continue;     // the jump back to the loop (Bxx) reaches places 0 – 255
+            long cost = Cost(blocks);
+            if (cost < bestCost) { bestCost = cost; bestOffset = offset; }
+        }
+        // A very long song: longer patterns, so that the order list stays within 256 places
+        while (bestCost == long.MaxValue && bestLength < 256)
+        {
+            bestLength *= 2;
+            bestOffset %= bestLength;
+            if (Blocks(bestLength, bestOffset).Count <= 256) bestCost = 0;
+        }
+
+        var chosen = Blocks(bestLength, bestOffset);
         var patternOf = new Dictionary<string, int>();
         song.Patterns.Clear();
         song.Order.Clear();

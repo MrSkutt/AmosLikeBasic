@@ -11,19 +11,20 @@ using Avalonia.Styling;
 
 namespace AmosLikeBasic;
 
-// The tracker's chip music: a folder of Atari ST music, YM and SNDH files (Sound/Tracker unless another
-// is chosen), by the folders in it (often one a composer). Choosing a song plays it through the YM2149
-// at once (an SNDH file's player is run on an emulated 68000 first); it can then be opened in the
-// tracker. A search finds songs by name or folder in all of them.
+// The tracker's chip music: a folder of Atari ST music (YM and SNDH files) and Commodore 64 music (SID
+// files), Sound unless another is chosen, by the folders in it (often one a composer). Choosing a song
+// plays it at once: a YM file through the YM2149, an SNDH file's player on an emulated 68000 and a SID
+// file's on an emulated C64. It can then be opened in the tracker. A search finds songs by name or
+// folder in all of them.
 public class YmBrowserWindow : Window
 {
-    private readonly Action<string, int> _open;   // the file, and the tune of an SNDH file (0: its own first)
+    private readonly Action<string, int> _open;   // the file, and the tune of an SNDH or SID file (0: its own first)
     private string _root;
-    private List<string> _all = new();      // every YM and SNDH file under the folder
+    private List<string> _all = new();      // every YM, SNDH and SID file under the folder
     private List<string> _files = new();    // the ones of the kinds shown
     private readonly ListBox _folders, _songs;
     private readonly TextBox _search;
-    private readonly CheckBox _showYm, _showSndh;
+    private readonly CheckBox _showYm, _showSndh, _showSid;
     private readonly TextBlock _info, _where;
     private string? _chosen;
     private readonly NumericUpDown _tune;
@@ -38,8 +39,7 @@ public class YmBrowserWindow : Window
     public YmBrowserWindow(Action<string, int> open, string? folder = null)
     {
         _open = open;
-        string trackerFolder = Path.Combine(Workspace.Sound, "Tracker");
-        _root = folder ?? (Directory.Exists(trackerFolder) ? trackerFolder : Workspace.Sound);
+        _root = folder ?? Workspace.Sound;
         Title = "Chip Music";
         Width = 820;
         Height = 560;
@@ -61,18 +61,21 @@ public class YmBrowserWindow : Window
         _songs.DoubleTapped += (_, _) => OpenChosen();
         _search = new TextBox { PlaceholderText = "Search songs and folders", Margin = new Thickness(0, 0, 8, 0) };
         _search.TextChanged += (_, _) => ShowFolder();
-        // Which kinds to list: YM files (recorded registers) and SNDH files (the Atari's own players)
+        // Which kinds to list: YM files (recorded registers), SNDH files (the Atari's own players) and SID files
         _showYm = new CheckBox { Content = "YM", IsChecked = true, Margin = new Thickness(0, 0, 8, 0), Focusable = false };
         _showSndh = new CheckBox { Content = "SNDH", IsChecked = true, Margin = new Thickness(0, 0, 8, 0), Focusable = false };
         ToolTip.SetTip(_showYm, "Show YM files: the sound chip's registers, recorded");
+        _showSid = new CheckBox { Content = "SID", IsChecked = true, Margin = new Thickness(0, 0, 8, 0), Focusable = false };
         ToolTip.SetTip(_showSndh, "Show SNDH files: the Atari's own music players, run here (they play exactly; in the tracker some sound simpler)");
+        ToolTip.SetTip(_showSid, "Show SID files: Commodore 64 music, its players run on an emulated C64");
         _showYm.IsCheckedChanged += (_, _) => Filter();
         _showSndh.IsCheckedChanged += (_, _) => Filter();
+        _showSid.IsCheckedChanged += (_, _) => Filter();
         _where = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
         _info = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 6, 0, 0), MinHeight = 48 };
 
         var play = Button("▶ Play", "Play the song again from the start", () => Choose(play: true));
-        // An SNDH file can have several tunes: which one to hear and open
+        // An SNDH or SID file can have several tunes: which one to hear and open
         _tune = new NumericUpDown { Minimum = 1, Maximum = 1, Increment = 1, FormatString = "0", Width = 110, Margin = new Thickness(0, 0, 6, 6) };
         _tune.ValueChanged += (_, _) => { if (!_choosing) Choose(play: true); };
         _tuneRow = new StackPanel { Orientation = Orientation.Horizontal, IsVisible = false, Children =
@@ -81,13 +84,13 @@ public class YmBrowserWindow : Window
         } };
         var stop = Button("■ Stop", null, () => ChiptuneSynth.PlayChipMusic(null));
         var openButton = Button("Open in tracker", "Read the song into the tracker (or double-click it)", OpenChosen);
-        var folderButton = Button("Folder...", "Choose another folder of YM or SNDH files", ChooseFolder);
+        var folderButton = Button("Folder...", "Choose another folder of YM, SNDH or SID files", ChooseFolder);
         var close = Button("Close", null, Close);
 
         var searchRow = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
         DockPanel.SetDock(folderButton, Dock.Right);
         searchRow.Children.Add(folderButton);
-        var kinds = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { _showYm, _showSndh } };
+        var kinds = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Children = { _showYm, _showSndh, _showSid } };
         DockPanel.SetDock(kinds, Dock.Right);
         searchRow.Children.Add(kinds);
         searchRow.Children.Add(_search);
@@ -104,9 +107,9 @@ public class YmBrowserWindow : Window
         buttons.Children.Add(close);
         buttons.Children.Add(new WrapPanel { Children = { _tuneRow, play, stop, openButton } });
 
-        var top = new StackPanel { Children = { Heading("ATARI CHIP MUSIC"), new TextBlock
+        var top = new StackPanel { Children = { Heading("CHIP MUSIC"), new TextBlock
         {
-            Text = "Choose a song (YM or SNDH) to hear it, as the Atari ST's sound chip played it. Open it in the tracker to change it.",
+            Text = "Choose a song to hear it as the sound chip played it: YM and SNDH from the Atari ST, SID from the Commodore 64. Open it in the tracker to change it.",
             TextWrapping = TextWrapping.Wrap, FontSize = 12
         }, _where, searchRow } };
         var foot = new StackPanel { Children = { _info, buttons } };
@@ -147,24 +150,25 @@ public class YmBrowserWindow : Window
         return b;
     }
 
-    // All the YM and SNDH files under the folder
+    // All the YM, SNDH and SID files under the folder
     private void Scan()
     {
         _all = Directory.Exists(_root)
             ? Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories)
-                .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".ym" or ".sndh" or ".snd")
+                .Where(f => Path.GetExtension(f).ToLowerInvariant() is ".ym" or ".sndh" or ".snd" or ".sid")
                 .OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList()
             : new List<string>();
         Filter();
     }
 
     private static bool IsSndhFile(string f) => Path.GetExtension(f).ToLowerInvariant() is ".sndh" or ".snd";
+    private static bool IsSidFile(string f) => Path.GetExtension(f).Equals(".sid", StringComparison.OrdinalIgnoreCase);
 
     // The files of the kinds ticked, and the folders that have them (the chosen folder kept if it still has some)
     private void Filter()
     {
-        bool ym = _showYm.IsChecked == true, sndh = _showSndh.IsChecked == true;
-        _files = _all.Where(f => IsSndhFile(f) ? sndh : ym).ToList();
+        bool ym = _showYm.IsChecked == true, sndh = _showSndh.IsChecked == true, sid = _showSid.IsChecked == true;
+        _files = _all.Where(f => IsSndhFile(f) ? sndh : IsSidFile(f) ? sid : ym).ToList();
         _where.Text = $"{_files.Count} songs in {_root}";
         string? chosen = (_folders.SelectedItem as Item)?.Path;
         var folders = _files.GroupBy(f => Path.GetDirectoryName(f)!)
@@ -176,7 +180,7 @@ public class YmBrowserWindow : Window
         else
         {
             _songs.ItemsSource = null;
-            _info.Text = !ym && !sndh ? "Tick YM or SNDH to see songs."
+            _info.Text = !ym && !sndh && !sid ? "Tick YM, SNDH or SID to see songs."
                 : "There are no such files here. Choose a folder that has some with Folder...";
         }
         ShowFolder();
@@ -219,6 +223,11 @@ public class YmBrowserWindow : Window
                 ChooseSndh(SndhFile.Read(bytes), song.Path, newSong, play);
                 return;
             }
+            if (SidFile.IsSid(bytes))
+            {
+                ChooseSid(SidFile.Load(song.Path), song.Path, newSong, play);
+                return;
+            }
             _tuneRow.IsVisible = false;
             var ym = YmFile.Read(bytes);
             string kind = $"YM{(ym.Version > 0 ? ym.Version : 3)}";
@@ -255,16 +264,41 @@ public class YmBrowserWindow : Window
         if (play) ChiptuneSynth.PlayChipMusic(new SndhSound(sndh, 44100, Tune) { Loop = true });
     }
 
+    // A SID file: what its header says, and its tune played live on the C64
+    private void ChooseSid(SidFile sid, string path, bool newSong, bool play)
+    {
+        _choosing = true;
+        _tune.Maximum = sid.Tunes;
+        if (newSong) _tune.Value = sid.StartTune;
+        _tuneRow.IsVisible = sid.Tunes > 1;
+        _choosing = false;
+        bool known = sid.Seconds.Length >= Tune && sid.Seconds[Tune - 1] > 0;
+        var length = TimeSpan.FromSeconds(known ? sid.Seconds[Tune - 1] : 0);
+        string title = sid.Title.Length > 0 ? sid.Title : Path.GetFileNameWithoutExtension(path);
+        string by = sid.Author.Length > 0 ? " by " + sid.Author : "";
+        string tunes = sid.Tunes > 1 ? $", tune {Tune} of {sid.Tunes}" : "";
+        string chips = sid.ExtraSids.Length > 0 ? $"{sid.ExtraSids.Length + 1} × " : "";
+        _info.Text = $"\"{title}\"{by}{(sid.Released.Length > 0 ? ", " + sid.Released : "")}\n" +
+                     $"{(known ? $"{(int)length.TotalMinutes}:{length.Seconds:00}" : "length not given")}, {chips}{(sid.Mos8580 ? "8580" : "6581")}, " +
+                     $"{(sid.Rsid ? "RSID" : "PSID")}{tunes}" +
+                     (sid.BasicTune ? "\nThis tune is partly a BASIC program, which needs the C64's own ROMs: it cannot be played here." : "");
+        if (play) ChiptuneSynth.PlayChipMusic(new SidSound(sid, 44100, Tune) { Loop = true });
+    }
+
     private void OpenChosen()
     {
         if (_chosen == null) return;
         ChiptuneSynth.PlayChipMusic(null);
-        _open(_chosen, _tuneRow.IsVisible ? Tune : 0);
+        // Back to the tracker, which reads it and says what it found
+        string chosen = _chosen;
+        int tune = _tuneRow.IsVisible ? Tune : 0;
+        Close();
+        _open(chosen, tune);
     }
 
     private async void ChooseFolder()
     {
-        var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "A folder of YM files" });
+        var picked = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions { Title = "A folder of chip music" });
         string? path = picked.Count > 0 ? picked[0].TryGetLocalPath() : null;
         if (path == null) return;
         _root = path;

@@ -27,17 +27,17 @@ public sealed class YmFile
 
     public double Seconds => Frames.Length / (double)Math.Max(1, FrameRate);
 
-    // A YM file or an SNDH file (whose player is run to record it as YM frames)
-    public static bool IsChipMusic(byte[] b) => SndhFile.IsSndh(b) || IsYm(b);
+    // A YM file, an SNDH file (whose player is run to record it as YM frames) or a C64 SID file
+    public static bool IsChipMusic(byte[] b) => SndhFile.IsSndh(b) || IsYm(b) || SidFile.IsSid(b);
 
-    public static YmFile ReadChipMusic(byte[] bytes, int tune = 0) =>
-        SndhFile.IsSndh(bytes) ? SndhPlayer.Record(SndhFile.Read(bytes), tune) : Read(bytes);
+    public static YmFile ReadChipMusic(byte[] bytes, int tune = 0, Action<double>? progress = null) =>
+        SndhFile.IsSndh(bytes) ? SndhPlayer.Record(SndhFile.Read(bytes), tune, progress: progress) : Read(bytes);
 
     // To listen to: an SNDH file is run live (its timer effects heard as they happen), a YM file played frame by frame
     public static IChipMusic PlayChipMusic(byte[] bytes, int sampleRate, bool loop, int tune = 0) =>
-        SndhFile.IsSndh(bytes)
-            ? new SndhSound(SndhFile.Read(bytes), sampleRate, tune) { Loop = loop }
-            : new YmPlayer(Read(bytes), sampleRate) { Loop = loop };
+        SndhFile.IsSndh(bytes) ? new SndhSound(SndhFile.Read(bytes), sampleRate, tune) { Loop = loop }
+        : SidFile.IsSid(bytes) ? new SidSound(SidFile.Read(bytes), sampleRate, tune) { Loop = loop }
+        : new YmPlayer(Read(bytes), sampleRate) { Loop = loop };
 
     public static bool IsYm(byte[] b) =>
         (b.Length >= 4 && b[0] == 'Y' && b[1] == 'M' && b[3] == '!') || IsLha(b);
