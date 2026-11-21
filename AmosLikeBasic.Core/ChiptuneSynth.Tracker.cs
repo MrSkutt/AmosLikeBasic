@@ -104,6 +104,9 @@ namespace AmosLikeBasic
             public int VibSpeed, VibDepth, VibPhase;
             public int TremSpeed, TremDepth, TremPhase;   // effect 7
             public int VibWave, TremWave;                  // E4x / E7x: 0 sine, 1 ramp down, 2 square (+4: not from the start at a new note)
+            // EFx: the channel's own copies of the samples it turns over, how fast, and where it is in the loop
+            public Dictionary<SampleData, SampleData>? Funked;
+            public int FunkSpeed, FunkCounter, FunkPos;
             public bool Glissando;                         // E3x: glides in whole semitones
             public int TremorPos;                          // Txy: where in its on-and-off it is
             public int NoteTicks;                          // ticks since the note started (Jxy goes round from there)
@@ -157,6 +160,10 @@ namespace AmosLikeBasic
         private static int _trackPosOrder, _trackPosRow;
         private static double _trackVolume = 1.0;
         private static int _trackGlobal = 64;   // Vxx / Wxy: the song's own volume, 0 – 64
+        private static bool _trackLed;          // E0x: the Amiga's filter (E00 on, E01 off)
+
+        // EFx, ProTracker's "invert loop": how fast it goes for x = 0 – F
+        private static readonly int[] FunkTable = { 0, 5, 6, 7, 8, 10, 11, 13, 16, 19, 22, 26, 32, 43, 64, 128 };
         private static bool _trackPreview;   // the editor previews notes without a song playing
 
         // Changes from the editor that the audio thread makes at the next sample
@@ -176,18 +183,19 @@ namespace AmosLikeBasic
             EnsureStarted();
         }
 
-        // Plays a single pattern over and over, for the editor
-        public static void TrackPlayPattern(TrackerSong song, int pattern, int row = 0)
+        // Plays a single pattern over and over, for the editor; with position, what that place in the
+        // order list plays (each channel from its own pattern)
+        public static void TrackPlayPattern(TrackerSong song, int pattern, int row = 0, int? position = null)
         {
-            var data = CompileSong(song, pattern);
+            var data = CompileSong(song, pattern, position);
             Volatile.Write(ref _trackPending, new TrackRequest(data, 0, Math.Max(0, row), true));
             EnsureStarted();
         }
 
         // Switches to a changed version of the song without starting again. With pattern only that pattern plays.
-        public static void TrackUpdate(TrackerSong song, int? pattern = null)
+        public static void TrackUpdate(TrackerSong song, int? pattern = null, int? position = null)
         {
-            var data = CompileSong(song, pattern);
+            var data = CompileSong(song, pattern, position);
             _trackCommands.Enqueue(() => ApplyTrackUpdate(data));
         }
 
@@ -420,22 +428,45 @@ namespace AmosLikeBasic
         // ════════════════════════════════════════════════════════════════
 
         // With onlyPattern the order list is just that pattern
-        private static TrackData CompileSong(TrackerSong song, int? onlyPattern = null)
+        private static TrackData CompileSong(TrackerSong song, int? onlyPattern = null, int? onlyPosition = null)
         {
+            // Channels with an order of their own: each place in the order list as the pattern it plays
+            List<TrackerPattern> patterns = song.Patterns;
+            int[] order = onlyPattern != null ? new[] { onlyPattern.Value }
+                : song.Order.Count > 0 ? song.Order.ToArray() : new[] { 0 };
+            if (onlyPosition is { } pos && song.Order.Count > 0)
+            {
+                patterns = new List<TrackerPattern> { song.Composed(Math.Clamp(pos, 0, song.Order.Count - 1)) };
+                order = new[] { 0 };
+            }
+            else if (onlyPattern == null && song.HasChannelOrder)
+            {
+                patterns = new List<TrackerPattern>();
+                var made = new Dictionary<string, int>();
+                for (int i = 0; i < song.Order.Count; i++)
+                {
+                    string key = string.Join(",", Enumerable.Range(0, song.Channels).Select(c => song.PatternAt(i, c)));
+                    if (!made.TryGetValue(key, out int p))
+                    {
+                        made[key] = p = patterns.Count;
+                        patterns.Add(song.Composed(i));
+                    }
+                    order[i] = p;
+                }
+            }
             var data = new TrackData
             {
                 Speed = Math.Clamp(song.Speed, 1, 31),
                 Tempo = Math.Clamp(song.Tempo, 32, 255),
-                Order = onlyPattern != null ? new[] { onlyPattern.Value }
-                    : song.Order.Count > 0 ? song.Order.ToArray() : new[] { 0 },
-                Patterns = new TrackerCell[song.Patterns.Count][][],
+                Order = order,
+                Patterns = new TrackerCell[patterns.Count][][],
                 Instruments = new TrackInstrument[song.Instruments.Count],
                 Channels = song.Channels
             };
 
-            for (int p = 0; p < song.Patterns.Count; p++)
+            for (int p = 0; p < patterns.Count; p++)
             {
-                var pat = song.Patterns[p];
+                var pat = patterns[p];
                 var rows = new TrackerCell[pat.Rows][];
                 for (int r = 0; r < pat.Rows; r++)
                 {
@@ -657,6 +688,8 @@ namespace AmosLikeBasic
                 ch.VibSpeed = ch.VibDepth = ch.VibPhase = ch.PortaSpeed = 0;
                 ch.TremSpeed = ch.TremDepth = ch.TremPhase = ch.LoopRow = ch.LoopCount = 0;
                 ch.VibWave = ch.TremWave = ch.TremorPos = 0;
+                ch.Funked = null;
+                ch.FunkSpeed = ch.FunkCounter = ch.FunkPos = 0;
                 ch.Glissando = false;
                 ch.DelayNote = TrackerCell.NoNote;
                 ch.Cutoff = ch.Resonance = ch.PulseWidth = ch.Pan = null;
@@ -664,6 +697,7 @@ namespace AmosLikeBasic
 
             _trackPreview = false;
             _trackGlobal = 64;
+            _trackLed = false;
             _trackLoop = req.Loop;
             _trackSpeed = req.Data.Speed;
             _trackTempo = req.Data.Tempo;
@@ -833,6 +867,8 @@ namespace AmosLikeBasic
                             case 0xB: ch.Vol = Math.Max(0, ch.Vol - y); break;                // fine volume down
                             case 0xC: if (y == 0) ch.Vol = 0; break;
                             case 0x3: ch.Glissando = y != 0; break;                            // glissando on/off
+                            case 0x0: _trackLed = y == 0; break;                               // the Amiga's filter
+                            case 0xF: ch.FunkSpeed = y; if (y > 0) Funk(c); break;              // invert loop
                             case 0x4: ch.VibWave = y; break;                                   // vibrato wave
                             case 0x7: ch.TremWave = y; break;                                  // tremolo wave
                             case 0x5:                                                          // finetune: eighths of a semitone, -8 – 7
@@ -962,6 +998,7 @@ namespace AmosLikeBasic
                     break;
                 case 'E':
                     if (x == 0xC && _trackTick == y) ch.Vol = 0;
+                    if (x == 0xF) Funk(c);
                     // Retrigger: the note is struck again every y ticks (drum rolls)
                     if (x == 0x9 && y > 0 && _trackTick % y == 0 && ch.Active) TriggerTrackNote(c, (int)Math.Round(ch.Note));
                     if (x == 0xD && _trackTick == y && ch.DelayNote >= 0)
@@ -1057,11 +1094,38 @@ namespace AmosLikeBasic
             v.EchoFeedback = inst.EchoFeedback;
             v.EchoMix = inst.EchoMix;
             v.Pan = ch.Pan ?? inst.Pan;
-            if (v.Sample != inst.Sample) v.SamplePos = 0;   // another sample: from its start
-            v.Sample = inst.Sample;
+            // (with EFx the channel plays its own copy, turned over as it goes)
+            var sample = inst.Sample != null && ch.Funked != null && ch.Funked.TryGetValue(inst.Sample, out var own) ? own : inst.Sample;
+            if (v.Sample != sample) v.SamplePos = 0;   // another sample: from its start
+            v.Sample = sample;
             v.SampleBaseFreq = inst.SampleBaseFreq;
             v.LoopStart = inst.LoopStart;
             v.LoopEnd = inst.LoopEnd;
+        }
+
+        // EFx each tick: as its counter reaches 128, the next byte of the sample's loop is turned over
+        // (in a copy of the sample that the channel keeps, as ProTracker changes the sample in memory)
+        private static void Funk(int c)
+        {
+            var ch = _trackChannels[c];
+            var v = _voices[c];
+            if (ch.FunkSpeed == 0 || v.Sample == null || v.LoopEnd <= v.LoopStart) return;
+            ch.FunkCounter += FunkTable[ch.FunkSpeed];
+            if (ch.FunkCounter < 128) return;
+            ch.FunkCounter = 0;
+            var original = ch.Inst?.Sample;
+            if (original == null) return;
+            ch.Funked ??= new Dictionary<SampleData, SampleData>();
+            if (!ch.Funked.TryGetValue(original, out var own))
+            {
+                own = new SampleData((float[])original.Data.Clone(), original.Rate);
+                ch.Funked[original] = own;
+                v.Sample = own;
+            }
+            int length = v.LoopEnd - v.LoopStart;
+            ch.FunkPos = (ch.FunkPos + 1) % length;
+            int at = v.LoopStart + ch.FunkPos;
+            if (at < own.Data.Length) own.Data[at] = -own.Data[at] - 1f / 128;   // NOT of a signed byte
         }
 
         // An instrument (from 1) of the song was changed: the notes that sound with it take the new
@@ -1146,6 +1210,7 @@ namespace AmosLikeBasic
             }
             else ch.TremorPos = 0;
             vol *= _trackGlobal / 64.0;
+            v.LedFilter = !ch.Sfx && _trackLed;
             if (inst.EnvTicks != null) vol *= NextEnvelope(ch, v, inst);
             if (inst.PanTicks != null)
             {

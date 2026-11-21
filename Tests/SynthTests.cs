@@ -925,4 +925,36 @@ public class SynthTests : IDisposable
         Assert.True(Rms(b, 0.05, 0.25) > 0.01, "it sounds");
         Assert.True(Math.Abs(mean) < Rms(b, 0.05, 0.25) * 0.1, $"no offset: mean {mean:0.0000}");
     }
+
+    // ── ProTracker's E0x and EFx ──
+
+    [Fact]
+    public void E00_turns_on_the_Amigas_filter_and_E01_off()
+    {
+        // A square at A-7 (3520 Hz), just above the filter's 3.3 kHz: much quieter with it on
+        S.TrackPlay(SongWith("", "A-7 01 ...", "--- .. ...", "--- .. ..."), loop: false);
+        double open = Rms(Render(0.2), 0.05, 0.15);
+        S.TrackPlay(SongWith("", "A-7 01 E00", "--- .. ...", "--- .. ..."), loop: false);
+        double filtered = Rms(Render(0.2), 0.05, 0.15);
+        Assert.True(filtered < open * 0.75, $"filtered {filtered:0.000}, open {open:0.000}");
+        S.TrackPlay(SongWith("", "A-7 01 E00", "--- .. E01", "--- .. ..."), loop: false);
+        Assert.InRange(Rms(Render(0.3), 0.18, 0.28) / open, 0.9, 1.1);   // off again on the second row
+    }
+
+    [Fact]
+    public void EFx_turns_over_the_samples_loop_as_it_plays()
+    {
+        // A looped sine; EFF turns a byte of the loop over every tick, so the sound changes as it goes
+        var file = SineWav(0.2);
+        string inst = SampleInstrument(file, "\"LoopStart\":0,\"LoopEnd\":200");
+        S.TrackPlay(SongWith(inst, "A-4 01 ...", "--- .. ...", "--- .. ...", "--- .. ..."), loop: false);
+        var plain = Render(0.4);
+        S.TrackPlay(SongWith(inst, "A-4 01 EFF", "--- .. EFF", "--- .. EFF", "--- .. EFF"), loop: false);
+        var funked = Render(0.4);
+        double early = 0, late = 0;
+        for (int i = (int)(0.02 * SR); i < (int)(0.05 * SR); i++) early += Math.Abs(plain[i] - funked[i]);
+        for (int i = (int)(0.35 * SR); i < (int)(0.38 * SR); i++) late += Math.Abs(plain[i] - funked[i]);
+        Assert.True(late > early * 3 && late > 1, $"early {early:0.00}, late {late:0.00}");
+        File.Delete(file);
+    }
 }

@@ -51,14 +51,147 @@ public static partial class YmImport
         var sounds = Sounds(ym, fx);
         var drums = sampleFolder != null ? DrumInstruments(ym, fx, sampleFolder, sampleFolderInSong ?? sampleFolder) : new Drums();
         var buzzers = sampleFolder != null ? BuzzerSamples(sampleFolder, sampleFolderInSong ?? sampleFolder) : ((string, string)?)null;
+        var dma = sampleFolder != null ? DmaInstruments(ym, sampleFolder, sampleFolderInSong ?? sampleFolder) : null;
         var found = new Found();
-        TrackerSong? song = analyse ? Analyse(ym, sounds, notes, found, drums, buzzers) : null;
+        TrackerSong? song = analyse ? Analyse(ym, sounds, notes, found, drums, buzzers,
+            decorate: (s, cells, rowFrames) => PlaceDma(s, dma, cells, rowFrames)) : null;
         bool analysed = song != null;
-        song ??= Dump(ym, sounds, drums, buzzers);
+        if (song == null)
+        {
+            song = Dump(ym, sounds, drums, buzzers);
+            PlaceDmaInDump(song, dma);
+        }
+        Compact(song);
+        int shared = song.ShareChannels();
         song.Title = ym.Title.Length > 0 ? ym.Title : name;
         song.Tempo = Math.Clamp((int)Math.Round(125.0 * ym.FrameRate / 50), 32, 255);
         if (fx.Hits.Count > 0 && sampleFolder == null) notes.Add("The digidrums were left out.");
-        return new ModImport.Result(song, drums.Instruments.Count, notes, Report(ym, song, analysed, found, analyse, fx, drums));
+        if (ym.Dma != null && sampleFolder == null) notes.Add("The STe's DMA sound was left out.");
+        string report = Report(ym, song, analysed, found, analyse, fx, drums) + SharedLine(song, shared);
+        if (dma != null)
+            report += "\n\n" + (ym.Dma!.OneShots
+                ? $"The STe's DMA sound: {dma.Instruments.Count} sample{(dma.Instruments.Count == 1 ? "" : "s")} became sampled instruments (DMA), played {dma.Notes.Count} times in channel {song.Channels}."
+                : $"The STe's DMA sound (a buffer the player fills as it plays) became one long sample (DMA sound), started in channel {song.Channels}.");
+        return new ModImport.Result(song, drums.Instruments.Count + (dma?.Instruments.Count ?? 0), notes, report);
+    }
+
+    // What writing each channel's parts once did
+    private static string SharedLine(TrackerSong song, int fewer) =>
+        fewer <= 0 || !song.HasChannelOrder ? ""
+            : $"\n\nEach channel's parts are written once: {fewer} pattern{(fewer == 1 ? "" : "s")} fewer. Where a channel repeats a part " +
+              "while the others change, it plays it from where it was first written (marked + in the order list, and Pxx over the channel).";
+
+    // The rows' columns while the song is made: the YM's three channels, one for the song's effects
+    // (Fxx, Bxx), and the STe's DMA sound. Compact() then packs them into as few channels as it can.
+    private const int Columns = 5;
+
+    // The song in as few channels as its sound has: the effects of the fourth column moved into a free
+    // effect column of the first three on the same row, the DMA sound to the fourth. Three channels for
+    // the chip alone, four with the DMA (one more where an effect finds no room).
+    private static void Compact(TrackerSong song)
+    {
+        bool dma = false, stays = false;
+        foreach (var p in song.Patterns)
+            for (int r = 0; r < p.Rows; r++)
+            {
+                if (p[r, 4].Note >= 0 || p[r, 4].Instrument > 0) dma = true;
+                var fx = p[r, 3];
+                if (fx.Effect == '\0' || fx.Note >= 0) continue;
+                int free = Enumerable.Range(0, 3).FirstOrDefault(c => p[r, c].Effect == '\0', -1);
+                if (free < 0) { stays = true; continue; }
+                var cell = p[r, free];
+                p[r, free] = new TrackerCell(cell.Note, cell.Instrument, fx.Effect, fx.Param, cell.Volume);
+                p[r, 3] = TrackerCell.Empty;
+            }
+        if (dma && !stays)
+            foreach (var p in song.Patterns)
+                for (int r = 0; r < p.Rows; r++)
+                {
+                    p[r, 3] = p[r, 4];
+                    p[r, 4] = TrackerCell.Empty;
+                }
+        song.Channels = 3 + (stays ? 1 : 0) + (dma ? 1 : 0);
+    }
+
+    // The STe's DMA sound as sampled instruments, written as WAV files: each sample it started, or the
+    // whole of it as one; and the notes, by the frame they start in
+    private sealed class DmaPart
+    {
+        public List<TrackerInstrument> Instruments = new();
+        public List<(int Frame, int Instrument, int Note)> Notes = new();
+    }
+
+    private static DmaPart? DmaInstruments(YmFile ym, string folder, string inSong)
+    {
+        var d = ym.Dma;
+        if (d == null) return null;
+        var part = new DmaPart();
+        TrackerInstrument Make(string name, string file, float[] data, int rate)
+        {
+            System.IO.Directory.CreateDirectory(folder);
+            SampleBank.WriteWav(System.IO.Path.Combine(folder, file), new SampleData(data, rate));
+            string path = inSong.TrimEnd('/') + "/" + file;
+            SampleBank.Forget(path);
+            // As loud against the YM channels as the STe mixes them (measured against the live sound)
+            return new TrackerInstrument
+            {
+                Name = name, Wave = "Sample", Sample = path, SampleNote = 60,
+                Volume = 0.70, Attack = 0, Decay = 0, Sustain = 100, Release = 5
+            };
+        }
+        if (d.OneShots)
+        {
+            for (int i = 0; i < d.Samples.Count; i++)
+                part.Instruments.Add(Make($"DMA {i + 1}", $"dma {i + 1:00}.wav", d.Samples[i].Data, d.Samples[i].Rate));
+            foreach (var hit in d.Hits)
+            {
+                int note = Math.Clamp(60 + (int)Math.Round(12 * Math.Log2(hit.Rate / d.Samples[hit.Sample].Rate)), 12, 119);
+                part.Notes.Add((hit.Frame, hit.Sample, note));
+            }
+        }
+        else
+        {
+            part.Instruments.Add(Make("DMA sound", "dma sound.wav", d.Stream, DmaRecording.StreamRate));
+            part.Notes.Add((d.FirstFrame, 0, 60));
+        }
+        return part;
+    }
+
+    // The DMA notes on the rows they start in (EDx when a frame or more into the row), in channel 5
+    private static void PlaceDma(TrackerSong song, DmaPart? dma, TrackerCell[,] cells, int[] rowFrames)
+    {
+        if (dma == null || dma.Notes.Count == 0) return;
+        int first = song.Instruments.Count + 1;
+        song.Instruments.AddRange(dma.Instruments);
+        song.Channels = Math.Max(song.Channels, Columns);
+        foreach (var (frame, instrument, note) in dma.Notes)
+        {
+            int r = Array.BinarySearch(rowFrames, frame);
+            if (r < 0) r = Math.Max(0, ~r - 1);
+            if (r >= cells.GetLength(0)) continue;
+            int delay = frame - rowFrames[r];
+            cells[r, 4] = delay > 0
+                ? new TrackerCell(note, first + instrument, 'E', 0xD0 | Math.Min(delay, 15))
+                : new TrackerCell(note, first + instrument, '\0', 0);
+        }
+    }
+
+    // In a song read one row per frame: the patterns are the frames in order
+    private static void PlaceDmaInDump(TrackerSong song, DmaPart? dma)
+    {
+        if (dma == null || dma.Notes.Count == 0) return;
+        int first = song.Instruments.Count + 1;
+        song.Instruments.AddRange(dma.Instruments);
+        song.Channels = Math.Max(song.Channels, Columns);
+        foreach (var (frame, instrument, note) in dma.Notes)
+        {
+            int f = frame;
+            foreach (var p in song.Patterns)
+            {
+                if (f < p.Rows) { p[f, 4] = new TrackerCell(note, first + instrument, '\0', 0); break; }
+                f -= p.Rows;
+            }
+        }
     }
 
     // Every `n` frames as one: the registers of the last, the envelope started again if any of them did,
@@ -83,7 +216,12 @@ public static partial class YmImport
         {
             Frames = regs, FrameRate = (int)Math.Round(ym.FrameRate / (double)n), Clock = ym.Clock,
             LoopFrame = ym.LoopFrame / n, Title = ym.Title, Author = ym.Author, Comment = ym.Comment,
-            UsesSpecialEffects = ym.UsesSpecialEffects, Version = ym.Version, Drums = ym.Drums, FrameEffects = effects
+            UsesSpecialEffects = ym.UsesSpecialEffects, Version = ym.Version, Drums = ym.Drums, FrameEffects = effects,
+            Dma = ym.Dma == null ? null : new DmaRecording
+            {
+                Samples = ym.Dma.Samples, Stream = ym.Dma.Stream, OneShots = ym.Dma.OneShots, FirstFrame = ym.Dma.FirstFrame / n,
+                Hits = ym.Dma.Hits.Select(h => (h.Frame / n, h.Sample, h.Rate)).ToList()
+            }
         };
     }
 
@@ -493,7 +631,7 @@ public static partial class YmImport
     // is not a new note); a YM's where the sound gets louder
     // decorate: adds to the rows before they become patterns (given the frame each row starts at)
     private static TrackerSong? Analyse(YmFile ym, Sound[,] sounds, List<string> notes, Found report, Drums drums,
-        (string, string)? buzzers, bool gated = false, Action<TrackerCell[,], int[]>? decorate = null)
+        (string, string)? buzzers, bool gated = false, Action<TrackerSong, TrackerCell[,], int[]>? decorate = null)
     {
         int frames = sounds.GetLength(0);
         if (frames == 0) return null;
@@ -581,9 +719,9 @@ public static partial class YmImport
         song.Instruments.AddRange(drums.Instruments);
 
         // The rows, then patterns that repeat written once
-        var cells = new TrackerCell[rows, 4];
+        var cells = new TrackerCell[rows, Columns];
         for (int r = 0; r < rows; r++)
-            for (int c = 0; c < 4; c++) cells[r, c] = TrackerCell.Empty;
+            for (int c = 0; c < Columns; c++) cells[r, c] = TrackerCell.Empty;
         foreach (var n in found)
         {
             int volume = Volume(n.Loudest);
@@ -597,7 +735,7 @@ public static partial class YmImport
             cells[rowOf[start], hit.Channel] = drums.Cell(hit, firstDrum, hit.Frame - start);
         }
         if (phase > 0) cells[phase, 3] = new TrackerCell(TrackerCell.NoNote, 0, 'F', speed);
-        decorate?.Invoke(cells, rowStarts);
+        decorate?.Invoke(song, cells, rowStarts);
         int loopRow = 0;
         if (ym.LoopFrame > 0 && ym.LoopFrame < frames)
         {
@@ -780,7 +918,7 @@ public static partial class YmImport
     private static int BuildPatterns(TrackerSong song, TrackerCell[,] cells, int loopRow, bool rowsAreFrames)
     {
         int rows = cells.GetLength(0);
-        string RowKey(int r) => string.Join("|", Enumerable.Range(0, 4).Select(c => cells[r, c].ToString()));
+        string RowKey(int r) => string.Join("|", Enumerable.Range(0, Columns).Select(c => cells[r, c].ToString()));
         var keys = Enumerable.Range(0, rows).Select(RowKey).ToArray();
 
         // Blocks of `length` rows on a grid starting at `offset` (the rows before it a pickup of their
@@ -871,7 +1009,7 @@ public static partial class YmImport
             {
                 var pattern = new TrackerPattern(to - from);
                 for (int r = from; r < to; r++)
-                    for (int c = 0; c < 4; c++) pattern[r - from, c] = cells[r, c];
+                    for (int c = 0; c < Columns; c++) pattern[r - from, c] = cells[r, c];
                 song.Patterns.Add(pattern);
                 p = song.Patterns.Count - 1;
                 if (!last) patternOf[key] = p;

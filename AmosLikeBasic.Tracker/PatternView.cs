@@ -25,6 +25,9 @@ public class PatternView : Control
 
     public TrackerSong? Song { get; set; }
     public int PatternIndex { get; set; }
+    // The place in the order list shown (-1: none): with it, each channel shows and edits the pattern
+    // it plays there, which may be another than the place's own
+    public int Position { get; set; } = -1;
     public int CursorRow { get; private set; }
     public int CursorChannel { get; private set; }
     public int CursorColumn { get; private set; }
@@ -92,6 +95,23 @@ public class PatternView : Control
 
     private TrackerPattern? Pattern =>
         Song != null && PatternIndex >= 0 && PatternIndex < Song.Patterns.Count ? Song.Patterns[PatternIndex] : null;
+
+    // The pattern a channel shows: its own at this place in the order list, or the place's
+    public int PatternIndexOf(int channel) =>
+        Song != null && Position >= 0 && Position < Song.Order.Count ? Song.PatternAt(Position, channel) : PatternIndex;
+
+    private TrackerPattern? PatternOf(int channel)
+    {
+        int p = PatternIndexOf(channel);
+        return Song != null && p >= 0 && p < Song.Patterns.Count ? Song.Patterns[p] : null;
+    }
+
+    private TrackerCell CellAt(int r, int c) => PatternOf(c) is { } p && r < p.Rows ? p[r, c] : TrackerCell.Empty;
+
+    private void SetCellAt(int r, int c, TrackerCell value)
+    {
+        if (PatternOf(c) is { } p && r < p.Rows) p[r, c] = value;
+    }
 
     private int Rows => Pattern?.Rows ?? TrackerSong.DefaultRows;
 
@@ -291,7 +311,7 @@ public class PatternView : Control
                 if (r >= s0 && r <= s1 && c >= sc0 && c <= sc1)
                     ctx.FillRectangle(selBrush, new Rect(x - _charW * 0.5, y, (CellChars + 1) * _charW, _rowH));
 
-                var cell = pattern[r, c];
+                var cell = CellAt(r, c);
                 bool muted = Muted[c];
                 string note = TrackerCell.NoteName(cell.Note);
                 string inst = cell.Instrument == 0 ? ".." : cell.Instrument.ToString("X2", CultureInfo.InvariantCulture);
@@ -316,7 +336,9 @@ public class PatternView : Control
         ctx.DrawLine(new Pen(border, 1), new Point(0, headerH - 1), new Point(w, headerH - 1));
         for (int c = FirstChannel; c < FirstChannel + VisibleChannels; c++)
         {
-            string h = Muted[c] ? $"CH{c + 1} MUTE" : $"CH{c + 1}";
+            // A channel playing another pattern than the place's own shows which
+            int own = PatternIndexOf(c);
+            string h = (Muted[c] ? $"CH{c + 1} MUTE" : $"CH{c + 1}") + (own != PatternIndex ? $" P{own:D2}" : "");
             ctx.DrawText(Text(h, Muted[c] ? dim : title), new Point(ChannelX(c), 3));
         }
         // More channels to the side: an arrow where they are
@@ -501,6 +523,18 @@ public class PatternView : Control
         bool cmd = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
         e.Handled = true;
 
+        // Alt (Option) with the arrows: the channel plays another pattern at this place in the order
+        // list; Alt+N: a new pattern of its own here, a copy of what it plays
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Alt) && !cmd)
+        {
+            switch (e.Key)
+            {
+                case Key.Up: Command?.Invoke("channel-pattern-up"); return;
+                case Key.Down: Command?.Invoke("channel-pattern-down"); return;
+                case Key.N: Command?.Invoke("channel-pattern-new"); return;
+            }
+        }
+
         if (cmd)
         {
             switch (e.Key)
@@ -625,8 +659,8 @@ public class PatternView : Control
 
     private TrackerCell Cell
     {
-        get => Pattern![CursorRow, CursorChannel];
-        set => Pattern![CursorRow, CursorChannel] = value;
+        get => CellAt(CursorRow, CursorChannel);
+        set => SetCellAt(CursorRow, CursorChannel, value);
     }
 
     private void SetNote(int note) => Change(() =>
@@ -676,7 +710,7 @@ public class PatternView : Control
         {
             for (int r = r0; r <= r1; r++)
             for (int c = c0; c <= c1; c++)
-                Pattern![r, c] = TrackerCell.Empty;
+                SetCellAt(r, c, TrackerCell.Empty);
         });
     }
 
@@ -686,7 +720,7 @@ public class PatternView : Control
         _clipboard = new TrackerCell[r1 - r0 + 1, c1 - c0 + 1];
         for (int r = r0; r <= r1; r++)
         for (int c = c0; c <= c1; c++)
-            _clipboard[r - r0, c - c0] = Pattern![r, c];
+            _clipboard[r - r0, c - c0] = CellAt(r, c);
     }
 
     private void Paste()
@@ -699,7 +733,7 @@ public class PatternView : Control
             for (int c = 0; c < clip.GetLength(1); c++)
             {
                 int row = CursorRow + r, ch = CursorChannel + c;
-                if (row < Rows && ch < ChannelCount) Pattern![row, ch] = clip[r, c];
+                if (row < Rows && ch < ChannelCount) SetCellAt(row, ch, clip[r, c]);
             }
         });
         ClearSelection();
@@ -722,10 +756,10 @@ public class PatternView : Control
             for (int r = r0; r <= r1; r++)
             for (int c = c0; c <= c1; c++)
             {
-                var cell = Pattern![r, c];
+                var cell = CellAt(r, c);
                 if (cell.Note < 0) continue;
                 int n = Math.Clamp(cell.Note + semis, 0, 119);
-                Pattern![r, c] = new TrackerCell(n, cell.Instrument, cell.Effect, cell.Param, cell.Volume);
+                SetCellAt(r, c, new TrackerCell(n, cell.Instrument, cell.Effect, cell.Param, cell.Volume));
             }
         });
     }
@@ -733,10 +767,10 @@ public class PatternView : Control
     // Pushes the rows from the cursor down and leaves an empty row. With allChannels in all channels.
     private void InsertRow(bool allChannels) => Change(() =>
     {
-        var p = Pattern!;
         for (int c = 0; c < ChannelCount; c++)
         {
             if (!allChannels && c != CursorChannel) continue;
+            if (PatternOf(c) is not { } p || CursorRow >= p.Rows) continue;
             for (int r = p.Rows - 1; r > CursorRow; r--) p[r, c] = p[r - 1, c];
             p[CursorRow, c] = TrackerCell.Empty;
         }
@@ -745,10 +779,10 @@ public class PatternView : Control
     // Removes the row at the cursor and pulls up the rows below
     private void DeleteRow(bool allChannels) => Change(() =>
     {
-        var p = Pattern!;
         for (int c = 0; c < ChannelCount; c++)
         {
             if (!allChannels && c != CursorChannel) continue;
+            if (PatternOf(c) is not { } p || CursorRow >= p.Rows) continue;
             for (int r = CursorRow; r < p.Rows - 1; r++) p[r, c] = p[r + 1, c];
             p[p.Rows - 1, c] = TrackerCell.Empty;
         }

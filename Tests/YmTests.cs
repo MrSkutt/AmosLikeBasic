@@ -138,7 +138,9 @@ public class YmTests : IDisposable
         // The part before the loop is a pattern of its own, so the jump lands on the loop frame
         Assert.Equal(100, song.Patterns[0].Rows);
         var last = song.Patterns[^1];
-        Assert.Equal(('B', 1), (last[last.Rows - 1, 3].Effect, last[last.Rows - 1, 3].Param));
+        // The three voices in three channels, the jump back in the first free effect column
+        Assert.Equal(3, song.Channels);
+        Assert.Contains(Enumerable.Range(0, 3), c => (last[last.Rows - 1, c].Effect, last[last.Rows - 1, c].Param) == ('B', 1));
     }
 
     // A tune as an ST music routine plays it: a note every 6 frames, each an arpeggio (0, 4, 7) that

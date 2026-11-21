@@ -10,6 +10,18 @@ namespace AmosLikeBasic;
 // 14 (or 16) of them for every frame, usually 50 times a second. Most YM files are packed with LHA
 // (-lh5-), which is unpacked here. YM2, YM3, YM3b, YM4, YM5 and YM6 are read, with the special
 // effects of YM5 and YM6 (digidrums, SID voice, sync buzzer), which Ym2149 plays.
+// What an STe's DMA sound played: the samples it started (each once, by its contents) and when, or,
+// when it was not used that way (a buffer going round, filled as it plays), the whole sound
+public sealed class DmaRecording
+{
+    public List<(float[] Data, int Rate)> Samples = new();
+    public List<(int Frame, int Sample, double Rate)> Hits = new();
+    public float[] Stream = Array.Empty<float>();
+    public const int StreamRate = 25033;
+    public bool OneShots;                      // the samples and hits are the sound; otherwise the stream
+    public int FirstFrame;                     // the frame it is first heard in
+}
+
 public sealed class YmFile
 {
     public byte[][] Frames = Array.Empty<byte[]>();   // [frame][register 0 – 15]
@@ -24,6 +36,8 @@ public sealed class YmFile
     // The timer effects of each frame, when they come from somewhere else than the registers' top bits
     // (an SNDH file's player, recorded): null means they are read from the registers as in YM5 and YM6
     public List<YmPlayer.Effect>[]? FrameEffects;
+    // An STe's DMA sound, recorded with an SNDH file (null: none)
+    public DmaRecording? Dma;
 
     public double Seconds => Frames.Length / (double)Math.Max(1, FrameRate);
 

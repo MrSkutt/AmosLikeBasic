@@ -101,6 +101,9 @@ namespace AmosLikeBasic
             public double Pan;                             // -1 left, 0 middle, 1 right
             // A sample instead of oscillator 1: its frames, the pitch it sounds at, and the loop (end 0: none)
             public SampleData? Sample;
+            // The Amiga's "LED" filter (E0x): a 12 dB low pass at about 3.3 kHz over the voice
+            public bool LedFilter;
+            public double Led1, Led2, LedIn1, LedIn2;
             public double SampleBaseFreq = 261.63;
             public int LoopStart, LoopEnd;
 
@@ -1090,6 +1093,7 @@ namespace AmosLikeBasic
                 if (v.Wrapped) v.Phase -= 1.0;
 
                 sample *= NextEnvelope(v, dt) * v.Gain * mod.Volume;
+                if (v.LedFilter) sample = Led(v, sample);
                 if (v.Filter != FilterMode.Off)
                     sample = ApplyFilter(v, sample, NextFilterEnvelope(v, dt), mod.Cutoff, mod.Resonance);
                 return sample;
@@ -1103,6 +1107,26 @@ namespace AmosLikeBasic
 
         // The voice's sample at its position, smoothed between frames, then the position moves on at the
         // note's pitch (so slides, vibrato and LFOs bend it); a loop jumps back, and without one it ends
+        // A Butterworth low pass at 3275 Hz, as the Amiga's filter
+        private static readonly (double b0, double b1, double b2, double a1, double a2) LedCoefficients = Butterworth(3275);
+
+        private static (double, double, double, double, double) Butterworth(double fc)
+        {
+            double k = Math.Tan(Math.PI * fc / SampleRate), q = Math.Sqrt(0.5);
+            double norm = 1 / (1 + k / q + k * k);
+            double b0 = k * k * norm;
+            return (b0, 2 * b0, b0, 2 * (k * k - 1) * norm, (1 - k / q + k * k) * norm);
+        }
+
+        private static double Led(Voice v, double x)
+        {
+            var (b0, b1, b2, a1, a2) = LedCoefficients;
+            double y = b0 * x + b1 * v.LedIn1 + b2 * v.LedIn2 - a1 * v.Led1 - a2 * v.Led2;
+            v.LedIn2 = v.LedIn1; v.LedIn1 = x;
+            v.Led2 = v.Led1; v.Led1 = y;
+            return y;
+        }
+
         private static double NextSampleFrame(Voice v, double freq)
         {
             var d = v.Sample!.Data;

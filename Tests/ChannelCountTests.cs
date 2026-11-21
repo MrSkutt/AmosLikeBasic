@@ -70,10 +70,11 @@ public class ChannelCountTests : IDisposable
     }
 
     [Theory]
-    [InlineData(1, 4)]
+    [InlineData(1, 3)]
+    [InlineData(3, 3)]
     [InlineData(12, 12)]
     [InlineData(40, 32)]
-    public void The_number_of_channels_stays_within_4_and_32(int asked, int got) =>
+    public void The_number_of_channels_stays_within_3_and_32(int asked, int got) =>
         Assert.Equal(got, new TrackerSong { Channels = asked }.Channels);
 
     [Fact]

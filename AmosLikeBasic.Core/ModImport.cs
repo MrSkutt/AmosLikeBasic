@@ -158,6 +158,7 @@ public static class ModImport
                     case 0x1: case 0x2: return ('E', (x << 4) | Math.Clamp((int)Math.Round(Sixteenths(y)), y == 0 ? 0 : 1, 15));
                     case 0x3: case 0x4: case 0x5: case 0x6: case 0x7: case 0x9: case 0xA: case 0xB: case 0xC: case 0xD: case 0xE: return ('E', param);
                     case 0x8: return ('8', y * 17);   // E8x: coarse pan (16 places)
+                    case 0x0: case 0xF: return ('E', param);   // the Amiga's filter, invert loop
                     default:
                         skipped.Add($"E{x:X}x");
                         return ('\0', 0);

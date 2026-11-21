@@ -71,7 +71,7 @@ public class ModImportTests : IDisposable
         Put(mod, 2, 1, 2, 428, 0, 0);        // sample 2 is empty: silence
         Put(mod, 3, 2, 0, 428, 0, 0);        // a note on a channel that has had no sample: silence
         Put(mod, 4, 0, 0, 0, 0xE, 0x93);     // E93 retrigger
-        Put(mod, 5, 0, 0, 0, 0xE, 0x01);     // E01 (the Amiga's filter) is not in the tracker
+        Put(mod, 5, 0, 0, 0, 0xE, 0x01);     // E01: the Amiga's filter off
 
         var r = ModImport.Import(mod, "tiny", _temp, _temp);
         var song = r.Song;
@@ -89,8 +89,7 @@ public class ModImportTests : IDisposable
         Assert.Equal(TrackerCell.NoteOff, p[2, 1].Note);
         Assert.Equal(TrackerCell.NoteOff, p[3, 2].Note);
         Assert.Equal(('E', 0x93), (p[4, 0].Effect, p[4, 0].Param));
-        Assert.Equal('\0', p[5, 0].Effect);
-        Assert.Contains(r.Notes, n => n.Contains("E0x"));
+        Assert.Equal(('E', 0x01), (p[5, 0].Effect, p[5, 0].Param));
     }
 
     [Fact]

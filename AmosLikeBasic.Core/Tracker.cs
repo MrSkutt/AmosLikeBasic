@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -19,7 +20,7 @@ namespace AmosLikeBasic
     public sealed class TrackerSong
     {
         public const int MaxChannels = 32;
-        public const int MinChannels = 4;
+        public const int MinChannels = 3;
         public const int DefaultChannels = 4;
         public const int DefaultRows = 64;
         public const int MaxRows = 256;
@@ -40,6 +41,145 @@ namespace AmosLikeBasic
         public List<TrackerInstrument> Instruments { get; set; } = new();
         public List<int> Order { get; set; } = new() { 0 };
         public List<TrackerPattern> Patterns { get; set; } = new() { new TrackerPattern() };
+
+        // A channel's own order: for a place in the order list, the pattern each channel takes its
+        // column from (none, or -1 for a channel: the place's own pattern). A bass line can then repeat
+        // while the melody above it changes, written once, as the C64's and the Atari's players did.
+        public List<int[]?> ChannelOrder { get; set; } = new();
+
+        public bool HasChannelOrder => ChannelOrder.Any(c => c != null && c.Any(p => p >= 0));
+
+        // The pattern a channel plays at a place in the order list
+        public int PatternAt(int position, int channel)
+        {
+            if (position < 0 || position >= Order.Count) return 0;
+            if (position < ChannelOrder.Count && ChannelOrder[position] is { } own && channel < own.Length
+                && own[channel] >= 0 && own[channel] < Patterns.Count)
+                return own[channel];
+            return Order[position];
+        }
+
+        public void SetPatternAt(int position, int channel, int pattern)
+        {
+            if (position < 0 || position >= Order.Count || channel < 0 || channel >= MaxChannels) return;
+            while (ChannelOrder.Count <= position) ChannelOrder.Add(null);
+            var own = ChannelOrder[position] ?? Enumerable.Repeat(-1, MaxChannels).ToArray();
+            if (own.Length < MaxChannels) own = own.Concat(Enumerable.Repeat(-1, MaxChannels - own.Length)).ToArray();
+            own[channel] = pattern == Order[position] ? -1 : pattern;
+            ChannelOrder[position] = own.Any(p => p >= 0) ? own : null;
+            TrimChannelOrder();
+        }
+
+        // The order list changed: a place put in (or taken out) moves the channels' own orders with it
+        public void InsertPosition(int position, int pattern)
+        {
+            Order.Insert(position, pattern);
+            if (position <= ChannelOrder.Count) ChannelOrder.Insert(Math.Min(position, ChannelOrder.Count), null);
+            TrimChannelOrder();
+        }
+
+        public void RemovePosition(int position)
+        {
+            Order.RemoveAt(position);
+            if (position < ChannelOrder.Count) ChannelOrder.RemoveAt(position);
+            TrimChannelOrder();
+        }
+
+        private void TrimChannelOrder()
+        {
+            while (ChannelOrder.Count > Order.Count) ChannelOrder.RemoveAt(ChannelOrder.Count - 1);
+            while (ChannelOrder.Count > 0 && ChannelOrder[^1] == null) ChannelOrder.RemoveAt(ChannelOrder.Count - 1);
+        }
+
+        // What a place in the order list plays, each channel from its own pattern, as one pattern
+        // (as long as the place's own pattern)
+        public TrackerPattern Composed(int position)
+        {
+            var main = Patterns[Math.Clamp(Order[Math.Clamp(position, 0, Order.Count - 1)], 0, Patterns.Count - 1)];
+            var result = new TrackerPattern(main.Rows);
+            for (int c = 0; c < MaxChannels; c++)
+            {
+                var from = Patterns[PatternAt(position, c)];
+                for (int r = 0; r < main.Rows; r++) result[r, c] = r < from.Rows ? from[r, c] : TrackerCell.Empty;
+            }
+            return result;
+        }
+
+        // Each channel's parts written once: the columns of the order list's patterns are gathered per
+        // channel, a column that comes again is played from where it was first written, and the new ones
+        // are packed into patterns (a place's columns kept together where they can be). For songs read
+        // from chip music, whose voices repeat on their own. Only done when it is clearly worth it (at
+        // least two patterns and a tenth fewer than the places themselves need); returns how many fewer.
+        public int ShareChannels()
+        {
+            int before = Patterns.Count;
+            // What the places need without it: each different place once
+            int whole = Enumerable.Range(0, Order.Count).Select(pos =>
+            {
+                var p = Composed(pos);
+                var key = new System.Text.StringBuilder().Append(p.Rows).Append(':');
+                for (int r = 0; r < p.Rows; r++)
+                    for (int c = 0; c < Channels; c++) key.Append(p[r, c]).Append('|');
+                return key.ToString();
+            }).Distinct().Count();
+            int channels = Channels;
+            var patterns = new List<TrackerPattern>();
+            var used = new List<bool[]>();
+            var seen = new Dictionary<string, int>[channels];
+            for (int c = 0; c < channels; c++) seen[c] = new Dictionary<string, int>();
+            var newOrder = new List<int>();
+            var newChannels = new List<int[]?>();
+
+            int Place(int rows, int c, int prefer)
+            {
+                if (prefer >= 0 && patterns[prefer].Rows == rows && !used[prefer][c]) return prefer;
+                for (int p = 0; p < patterns.Count; p++)
+                    if (patterns[p].Rows == rows && !used[p][c]) return p;
+                patterns.Add(new TrackerPattern(rows));
+                used.Add(new bool[MaxChannels]);
+                return patterns.Count - 1;
+            }
+
+            for (int pos = 0; pos < Order.Count; pos++)
+            {
+                var src = Composed(pos);
+                int rows = src.Rows, home = -1;
+                var at = new int[channels];
+                for (int c = 0; c < channels; c++)
+                {
+                    var key = new System.Text.StringBuilder().Append(rows).Append(':');
+                    bool empty = true;
+                    for (int r = 0; r < rows; r++)
+                    {
+                        var cell = src[r, c];
+                        if (!cell.Equals(TrackerCell.Empty)) empty = false;
+                        key.Append(cell).Append('|');
+                    }
+                    int p;
+                    // An empty column is played from the place's pattern if it has room, so that
+                    // silence does not send a channel to another pattern
+                    if (empty && home >= 0 && patterns[home].Rows == rows && !used[home][c]) { p = home; used[p][c] = true; }
+                    else if (!seen[c].TryGetValue(key.ToString(), out p))
+                    {
+                        p = Place(rows, c, home);
+                        used[p][c] = true;
+                        for (int r = 0; r < rows; r++) patterns[p][r, c] = src[r, c];
+                        seen[c][key.ToString()] = p;
+                    }
+                    if (c == 0) home = p;
+                    at[c] = p;
+                }
+                newOrder.Add(at[0]);
+                var own = Enumerable.Range(0, MaxChannels).Select(c => c < channels && at[c] != at[0] ? at[c] : -1).ToArray();
+                newChannels.Add(own.Any(p => p >= 0) ? own : null);
+            }
+            if (patterns.Count > whole - Math.Max(2, whole / 10)) return 0;
+            Patterns = patterns;
+            Order = newOrder;
+            ChannelOrder = newChannels;
+            TrimChannelOrder();
+            return before - Patterns.Count;
+        }
 
         // Patterns that are the same, cell for cell, become one: the order list plays it each time.
         // Returns how many patterns there were fewer.
@@ -66,7 +206,18 @@ namespace AmosLikeBasic
             if (merged == 0) return 0;
             for (int o = 0; o < Order.Count; o++)
                 if (Order[o] >= 0 && Order[o] < newIndex.Length) Order[o] = newIndex[Order[o]];
+            foreach (var own in ChannelOrder)
+                if (own != null)
+                    for (int c = 0; c < own.Length; c++)
+                        if (own[c] >= 0 && own[c] < newIndex.Length) own[c] = newIndex[own[c]];
+            for (int o = 0; o < ChannelOrder.Count; o++)
+                if (ChannelOrder[o] is { } own2 && o < Order.Count)
+                {
+                    for (int c = 0; c < own2.Length; c++) if (own2[c] == Order[o]) own2[c] = -1;
+                    if (!own2.Any(p => p >= 0)) ChannelOrder[o] = null;
+                }
             Patterns = kept;
+            TrimChannelOrder();
             return merged;
         }
 
@@ -82,6 +233,8 @@ namespace AmosLikeBasic
             public int Channels { get; set; } = DefaultChannels;
             public List<TrackerInstrument> Instruments { get; set; } = new();
             public List<int> Order { get; set; } = new();
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public List<int[]?>? ChannelOrder { get; set; }
             public List<List<string>> Patterns { get; set; } = new();
         }
 
@@ -133,6 +286,11 @@ namespace AmosLikeBasic
             foreach (int o in song.Order)
                 if (o < 0 || o >= song.Patterns.Count)
                     throw new FormatException($"The order list points to pattern {o}, which does not exist");
+            song.ChannelOrder = file.ChannelOrder ?? new();
+            foreach (var own in song.ChannelOrder)
+                if (own != null && own.Any(p => p >= song.Patterns.Count))
+                    throw new FormatException("A channel's order points to a pattern that does not exist");
+            song.TrimChannelOrder();
             foreach (var inst in song.Instruments) inst.Table ??= new();
             return song;
         }
@@ -146,7 +304,8 @@ namespace AmosLikeBasic
                 Tempo = Tempo,
                 Channels = Channels,
                 Instruments = Instruments,
-                Order = Order
+                Order = Order,
+                ChannelOrder = HasChannelOrder ? ChannelOrder.Select(o => o?.Take(Channels).ToArray()).ToList() : null
             };
             foreach (var p in Patterns)
             {

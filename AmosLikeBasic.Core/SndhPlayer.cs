@@ -181,6 +181,30 @@ public sealed class SteSound
     private double _wireCycles;             // 68000 cycles left of the 16 µs the Microwire shifts for
     private double _master = 1, _left = 1, _right = 1;
     public double YmLevel { get; private set; } = 1;
+    // A frame starting: its start and end address, rate in Hz, stereo, and whether it is the loop going round
+    public Action<uint, uint, double, bool, bool>? FrameStarted;
+    // While set, the sound heard is added to it at DmaRecording.StreamRate
+    public List<float>? Recording;
+    // While set, each sample the DMA plays is added to it, at its own rate (to take a sample as it is
+    // heard: players may write into it while it plays)
+    public List<float>? Capture;
+    private double _recordCycles;
+
+    // A frame's samples from memory (both sides together) at the volume set now, -1 – 1
+    public float[] FrameData(uint start, uint end, bool stereo)
+    {
+        float left = (float)(_master * _left), right = (float)(_master * _right);
+        int step = stereo ? 2 : 1;
+        int n = (int)Math.Clamp((end - start) / step, 0, 1 << 20);
+        var data = new float[n];
+        for (int i = 0; i < n; i++)
+        {
+            uint a = (start + (uint)(i * step)) & 0x3FFFFF;
+            data[i] = stereo ? ((sbyte)_ram[a] * left + (sbyte)_ram[(a + 1) & 0x3FFFFF] * right) / 256f
+                : (sbyte)_ram[a] * (left + right) / 256f;
+        }
+        return data;
+    }
 
     public SteSound(byte[] ram, Mfp mfp) { _ram = ram; _mfp = mfp; }
 
@@ -216,7 +240,7 @@ public sealed class SteSound
             case 0x01:
                 bool was = Playing;
                 _control = (byte)(v & 3);
-                if (!was && Playing) StartFrame();
+                if (!was && Playing) { StartFrame(); FrameStarted?.Invoke(_address, _frameEnd, Rates[_mode & 3], !Mono, false); }
                 break;
             case 0x03: _start = (_start & 0x00FFFF) | (uint)(v & 0x3F) << 16; break;
             case 0x05: _start = (_start & 0xFF00FF) | (uint)v << 8; break;
@@ -264,18 +288,50 @@ public sealed class SteSound
     public void Run(double cycles)
     {
         _wireCycles -= cycles;
-        if (!Playing) return;
-        _position += cycles * Rates[_mode & 3] / SndhMachine.CpuClock;
-        int frameBytes = Mono ? 1 : 2;
-        while (_position >= 1 && Playing)
+        if (Recording == null) { Advance(cycles); return; }
+        // Recording: the frame moves on up to each moment a value is taken
+        double per = SndhMachine.CpuClock / DmaRecording.StreamRate;
+        while (cycles > 0)
         {
-            _position -= 1;
-            _address += (uint)frameBytes;
+            double step = Math.Min(cycles, per - _recordCycles);
+            Advance(step);
+            cycles -= step;
+            _recordCycles += step;
+            if (_recordCycles >= per - 1e-9) { _recordCycles -= per; Recording.Add((float)TakeAverage()); }
+        }
+    }
+
+    // The frame played on for some cycles, its sound added up over them (each value for as long as it lasts)
+    private double _sum, _sumCycles;
+
+    private void Advance(double cycles)
+    {
+        while (cycles > 0 && Playing)
+        {
+            double perStep = SndhMachine.CpuClock / Rates[_mode & 3];
+            double c = Math.Min(cycles, (1 - _position) * perStep);
+            _sum += Sample() * c;
+            _sumCycles += c;
+            _position += c / perStep;
+            cycles -= c;
+            if (_position < 1 - 1e-9) continue;
+            Capture?.Add((float)Sample());
+            _position = 0;
+            _address += Mono ? 1u : 2u;
             if (_address < _frameEnd) continue;
             _mfp.DmaFrameEnded();
-            if ((_control & 2) != 0) StartFrame();
+            if ((_control & 2) != 0) { StartFrame(); FrameStarted?.Invoke(_address, _frameEnd, Rates[_mode & 3], !Mono, true); }
             else _control &= 0xFE;
         }
+        _sumCycles += Math.Max(0, cycles);    // stopped: silence
+    }
+
+    // The sound since the last call, averaged (as the STe's output filter smooths it), -1 – 1
+    public double TakeAverage()
+    {
+        double v = _sumCycles > 0 ? _sum / _sumCycles : Sample();
+        _sum = _sumCycles = 0;
+        return v;
     }
 
     // The sample heard now (both sides together), -1 – 1
@@ -440,13 +496,14 @@ public sealed class SndhMachine
 
     // One instruction (or, when stopped, a jump to the next event), the timers, and their interrupts.
     // The timers run to wherever the 68000's clock is, so the cycles an interrupt takes count too.
-    private void Step()
+    // (a stopped 68000 jumps to the next event, but not past `until`: the sound is taken there)
+    private void Step(double until = double.MaxValue)
     {
         if (Cpu.Stopped)
         {
             double toTimer = St.Mfp.ClocksToNextEvent() * CpuClock / Mfp.Clock;
             double toCall = _nextCall - Cpu.Cycles;
-            Cpu.Cycles += (long)Math.Max(4, Math.Min(Math.Min(toTimer, toCall), 2000));
+            Cpu.Cycles += (long)Math.Max(4, Math.Min(Math.Min(Math.Min(toTimer, toCall), until - Cpu.Cycles), 2000));
         }
         else Cpu.Step();
         St.Mfp.Run((Cpu.Cycles - _mfpCycles) * Mfp.Clock / CpuClock);
@@ -477,7 +534,7 @@ public sealed class SndhMachine
                 St.Write32(0x462, St.Read32(0x462) + 1);
                 DosoundTick();
             }
-            Step();
+            Step(cycle);
         }
     }
 
@@ -652,7 +709,7 @@ public sealed class SndhSound : IChipMusic
             _machine.RunUntil(_cycle);
             double ym = _chip.Next();
             var dma = _machine.St.Dma;
-            dest[i] = (float)(ym * dma.YmLevel + dma.Sample() * 0.7);
+            dest[i] = (float)(ym * dma.YmLevel + dma.TakeAverage() * 0.7);
         }
     }
 }
@@ -682,9 +739,38 @@ public static class SndhPlayer
         var writes = new List<(int register, byte value)>[frames];
         List<(int, byte)> current = new();
         st.YmWritten = (r, v) => current.Add((r, v));
+        // The DMA sound: each sample started (by its contents) and the frame it starts in, and all of it
+        var dma = new DmaRecording();
+        var stream = new List<float>();
+        var known = new Dictionary<string, int>();
+        int frame = 0, loops = 0;
+        st.Dma.Recording = stream;
+        // Each sample as the DMA plays it, from its start to the next start (or its end)
+        (int frame, double rate)? playing = null;
+        void Finish()
+        {
+            if (playing is not { } p || st.Dma.Capture is not { Count: > 0 } played) return;
+            var data = played.ToArray();
+            string key = Convert.ToBase64String(System.Security.Cryptography.SHA1.HashData(
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(data.AsSpan()))) + p.rate;
+            if (!known.TryGetValue(key, out int index))
+            {
+                known[key] = index = dma.Samples.Count;
+                dma.Samples.Add((data, (int)Math.Round(p.rate)));
+            }
+            dma.Hits.Add((p.frame, index, p.rate));
+        }
+        st.Dma.FrameStarted = (start, end, rate, stereo, loop) =>
+        {
+            if (loop) { loops++; return; }
+            Finish();
+            playing = (frame, rate);
+            st.Dma.Capture = new List<float>();
+        };
         double cycle = machine.Cpu.Cycles, perFrame = SndhMachine.CpuClock / machine.Rate;
         for (int f = 0; f < frames; f++)
         {
+            frame = f;
             if (progress != null && f % Math.Max(1, frames / 100) == 0) progress((double)f / frames);
             current = new List<(int, byte)>();
             writes[f] = current;
@@ -706,6 +792,19 @@ public static class SndhPlayer
             Comment = sndh.Year
         };
         FindTimerEffects(ym, writes);
+        Finish();
+        st.Dma.Capture = null;
+        st.Dma.Recording = null;
+        st.Dma.FrameStarted = null;
+        // Heard at all: as its samples when it only plays them once each time (as drums), else as the stream
+        int heardFrom = stream.FindIndex(v => Math.Abs(v) > 0.002);
+        if (heardFrom >= 0)
+        {
+            dma.OneShots = dma.Hits.Count > 0 && loops == 0 && dma.Samples.Count <= 64;
+            dma.FirstFrame = (int)((long)heardFrom * machine.Rate / DmaRecording.StreamRate);
+            if (!dma.OneShots) dma.Stream = stream.Skip(heardFrom).ToArray();
+            ym.Dma = dma;
+        }
         return ym;
     }
 

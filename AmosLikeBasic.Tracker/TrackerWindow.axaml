@@ -59,7 +59,7 @@
                 </StackPanel>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Channels" Classes="amos-label" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                    <NumericUpDown Name="ChannelsBox" Minimum="4" Maximum="32" Increment="1" FormatString="0" Width="110"
+                    <NumericUpDown Name="ChannelsBox" Minimum="3" Maximum="32" Increment="1" FormatString="0" Width="110"
                                    ToolTip.Tip="How many channels the song uses, 4 – 32. Sound effects (TRACK SFX) use channels 5 – 8 above the song's, or borrow channel 8."/>
                 </StackPanel>
             </WrapPanel>

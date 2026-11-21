@@ -233,7 +233,9 @@ public partial class TrackerWindow : Window
     {
         bool was = _loading;
         _loading = true;
-        OrderList.ItemsSource = _song.Order.Select((p, i) => $"{i:D2}  pattern {p:D2}").ToList();
+        // "+": a channel plays a pattern of its own there
+        OrderList.ItemsSource = _song.Order.Select((p, i) =>
+            $"{i:D2}  pattern {p:D2}{(Enumerable.Range(0, _song.Channels).Any(c => _song.PatternAt(i, c) != p) ? " +" : "")}").ToList();
         OrderList.SelectedIndex = _orderPos;
         _loading = was;
     }
@@ -252,6 +254,7 @@ public partial class TrackerWindow : Window
         _orderPos = Math.Clamp(pos, 0, _song.Order.Count - 1);
         int pattern = _song.Order[_orderPos];
         Pattern.PatternIndex = pattern;
+        Pattern.Position = _orderPos;
         int rows = _song.Patterns[pattern].Rows;
         Pattern.SetCursor(keepRow ? Math.Min(Pattern.CursorRow, rows - 1) : 0, Pattern.CursorChannel, Pattern.CursorColumn);
 
@@ -262,7 +265,48 @@ public partial class TrackerWindow : Window
         _loading = was;
 
         // If a pattern is playing while switching, play the new one instead
-        if (_playMode == PlayMode.Pattern) TryEngine(() => ChiptuneSynth.TrackPlayPattern(_song, pattern, 0));
+        if (_playMode == PlayMode.Pattern) TryEngine(() => ChiptuneSynth.TrackPlayPattern(_song, pattern, 0, PositionToPlay));
+    }
+
+    // When channels have orders of their own, what the shown place plays (else the pattern itself)
+    private int? PositionToPlay => _song.HasChannelOrder ? _orderPos : null;
+
+    // Alt+arrows: the channel under the cursor plays the next or the previous pattern at this place;
+    // Alt+N: a new pattern of its own, a copy of the column it plays
+    private void ChangeChannelPattern(int delta)
+    {
+        int c = Pattern.CursorChannel;
+        int now = _song.PatternAt(_orderPos, c);
+        int next = now + delta;
+        if (next < 0 || next >= _song.Patterns.Count) return;
+        PushUndo();
+        _song.SetPatternAt(_orderPos, c, next);
+        ChannelPatternChanged(c);
+    }
+
+    private void NewChannelPattern()
+    {
+        int c = Pattern.CursorChannel;
+        var from = _song.Patterns[_song.PatternAt(_orderPos, c)];
+        int rows = _song.Patterns[_song.Order[_orderPos]].Rows;
+        PushUndo();
+        var copy = new TrackerPattern(rows);
+        for (int r = 0; r < rows && r < from.Rows; r++) copy[r, c] = from[r, c];
+        _song.Patterns.Add(copy);
+        _song.SetPatternAt(_orderPos, c, _song.Patterns.Count - 1);
+        ChannelPatternChanged(c);
+    }
+
+    private void ChannelPatternChanged(int c)
+    {
+        RefreshOrderList();
+        SelectOrder(_orderPos, keepRow: true);
+        SongChanged();
+        int p = _song.PatternAt(_orderPos, c);
+        SetStatus(p == _song.Order[_orderPos]
+            ? $"Channel {c + 1} plays this place's pattern {p:D2}."
+            : $"Channel {c + 1} plays pattern {p:D2} here (the place's own is {_song.Order[_orderPos]:D2}).");
+        KeepTypingFocus();
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -924,7 +968,7 @@ public partial class TrackerWindow : Window
         UpdateTitle();
         Pattern.InvalidateVisual();
         if (_playMode == PlayMode.Song) TryEngine(() => ChiptuneSynth.TrackUpdate(_song));
-        else if (_playMode == PlayMode.Pattern) TryEngine(() => ChiptuneSynth.TrackUpdate(_song, Pattern.PatternIndex));
+        else if (_playMode == PlayMode.Pattern) TryEngine(() => ChiptuneSynth.TrackUpdate(_song, Pattern.PatternIndex, PositionToPlay));
     }
 
     // The song cannot be played if an instrument has a bad table step
@@ -963,7 +1007,7 @@ public partial class TrackerWindow : Window
     private void PlayPattern(int row)
     {
         ApplyMutes();
-        if (TryEngine(() => ChiptuneSynth.TrackPlayPattern(_song, Pattern.PatternIndex, row)))
+        if (TryEngine(() => ChiptuneSynth.TrackPlayPattern(_song, Pattern.PatternIndex, row, PositionToPlay)))
             _playMode = PlayMode.Pattern;
         KeepTypingFocus();
     }
@@ -1011,6 +1055,9 @@ public partial class TrackerWindow : Window
             case "play-pattern": PlayPattern(0); break;
             case "play-cursor": PlayPattern(Pattern.CursorRow); break;
             case "stop": Stop(); break;
+            case "channel-pattern-up": ChangeChannelPattern(+1); break;
+            case "channel-pattern-down": ChangeChannelPattern(-1); break;
+            case "channel-pattern-new": NewChannelPattern(); break;
             case "toggle-edit":
                 if (_playMode != PlayMode.None) Stop();
                 else SetEditMode(!Pattern.EditMode);
@@ -1140,7 +1187,9 @@ public partial class TrackerWindow : Window
     private void OrderInsert_OnClick(object? sender, RoutedEventArgs e)
     {
         PushUndo();
-        _song.Order.Insert(_orderPos + 1, _song.Order[_orderPos]);
+        _song.InsertPosition(_orderPos + 1, _song.Order[_orderPos]);
+        // The new place plays what the one before it does, channels and all
+        for (int c = 0; c < _song.Channels; c++) _song.SetPatternAt(_orderPos + 1, c, _song.PatternAt(_orderPos, c));
         _orderPos++;
         RefreshOrderList();
         SelectOrder(_orderPos);
@@ -1151,7 +1200,7 @@ public partial class TrackerWindow : Window
     {
         if (_song.Order.Count <= 1) return;
         PushUndo();
-        _song.Order.RemoveAt(_orderPos);
+        _song.RemovePosition(_orderPos);
         _orderPos = Math.Min(_orderPos, _song.Order.Count - 1);
         RefreshOrderList();
         SelectOrder(_orderPos);
