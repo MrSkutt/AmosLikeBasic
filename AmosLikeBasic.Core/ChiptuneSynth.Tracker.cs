@@ -23,12 +23,14 @@ namespace AmosLikeBasic
             public readonly WaveformType? Wave;
             public readonly double Offset;       // semitones from the note (fractions for vibrato)
             public readonly double? PulseWidth;  // 0 – 1
+            public readonly double? Osc2;        // oscillator 2's pitch, semitones from the note
 
-            public TableStep(WaveformType? wave, double offset, double? pulseWidth)
+            public TableStep(WaveformType? wave, double offset, double? pulseWidth, double? osc2 = null)
             {
                 Wave = wave;
                 Offset = offset;
                 PulseWidth = pulseWidth;
+                Osc2 = osc2;
             }
         }
 
@@ -44,6 +46,7 @@ namespace AmosLikeBasic
             public int RingSource = -1, SyncSource = -1;
             public WaveformType? Osc2Wave;
             public double Osc2Ratio = 1, Osc2Mix = 0.5;
+            public Osc2Mode Osc2Mode;
             public LfoSettings?[] Lfos = NoLfos;
             public double EchoTime = 0.3, EchoFeedback = 0.4, EchoMix;
             public int EchoSyncRows;
@@ -508,6 +511,7 @@ namespace AmosLikeBasic
                 Osc2Wave = CompileOsc2Wave(src.Osc2Wave),
                 Osc2Ratio = Math.Pow(2, (Math.Clamp(src.Osc2Semitones, -48, 48) + Math.Clamp(src.Osc2Detune, -1200, 1200) / 100.0) / 12.0),
                 Osc2Mix = Math.Clamp(src.Osc2Mix / 100.0, 0, 1),
+                Osc2Mode = (src.Osc2Mode ?? "").ToUpperInvariant() switch { "RING" => Osc2Mode.Ring, "SYNC" => Osc2Mode.Sync, _ => Osc2Mode.Mix },
                 Lfos = new[] { CompileLfo(src.Lfo1), CompileLfo(src.Lfo2) },
                 EchoTime = Math.Clamp(src.EchoTime, 1, MaxEchoSeconds * 1000) / 1000.0,
                 EchoSyncRows = Math.Clamp(src.EchoSyncRows, 0, 64),
@@ -576,12 +580,12 @@ namespace AmosLikeBasic
                                    depth, Math.Max(0, delayMs) / 1000.0, retrigger);
         }
 
-        // "NOISE +24", "PULSE", "-12", "+0.25" (a quarter of a semitone), "P30", "TRIANGLE 0 P50"
+        // "NOISE +24", "PULSE", "-12", "+0.25" (a quarter of a semitone), "P30", "TRIANGLE 0 P50", "O-12" (osc 2)
         private static TableStep ParseTableStep(string text, int instrument)
         {
             WaveformType? wave = null;
             double offset = 0;
-            double? pulse = null;
+            double? pulse = null, osc2 = null;
             foreach (var word in text.Split(new[] { ' ', ',', '\t' }, StringSplitOptions.RemoveEmptyEntries))
             {
                 if (double.TryParse(word, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out double n))
@@ -589,12 +593,15 @@ namespace AmosLikeBasic
                 else if ((word[0] == 'P' || word[0] == 'p') && word.Length > 1 &&
                          double.TryParse(word[1..], NumberStyles.Float, CultureInfo.InvariantCulture, out double pw))
                     pulse = Math.Clamp(pw / 100.0, 0.01, 0.99);
+                else if ((word[0] == 'O' || word[0] == 'o') && word.Length > 1 &&
+                         double.TryParse(word[1..], NumberStyles.Float, CultureInfo.InvariantCulture, out double o2))
+                    osc2 = Math.Clamp(o2, -96, 96);
                 else if (word.ToUpperInvariant() is "SQUARE" or "PULSE" or "TRIANGLE" or "SAWTOOTH" or "SAW" or "SINE" or "NOISE")
                     wave = ParseWave(word);
                 else
                     throw new FormatException($"Instrument {instrument:X2}: '{text}' is not a table step");
             }
-            return new TableStep(wave, offset, pulse);
+            return new TableStep(wave, offset, pulse, osc2);
         }
 
         // ════════════════════════════════════════════════════════════════
@@ -1040,6 +1047,7 @@ namespace AmosLikeBasic
             v.Osc2Wave = inst.Osc2Wave;
             v.Osc2Ratio = inst.Osc2Ratio;
             v.Osc2Mix = inst.Osc2Mix;
+            v.Osc2Mode = inst.Osc2Mode;
             v.Lfos = inst.Lfos;
             // An echo that starts is empty, so that an old one does not come back
             if (v.EchoMix <= 0 && inst.EchoMix > 0) Array.Clear(v.EchoBuffer);
@@ -1103,6 +1111,7 @@ namespace AmosLikeBasic
                 var step = table[ch.TableIndex];
                 if (step.Wave.HasValue) v.Wave = step.Wave.Value;
                 if (step.PulseWidth.HasValue) v.PulseWidth = step.PulseWidth.Value;
+                if (step.Osc2.HasValue) v.Osc2Ratio = Math.Pow(2, step.Osc2.Value / 12);
                 ch.TableOffset = step.Offset;
                 if (++ch.TableIndex >= table.Length)
                     ch.TableIndex = inst.TableLoop >= 0 ? inst.TableLoop : table.Length - 1;

@@ -90,6 +90,7 @@ namespace AmosLikeBasic
             // A second oscillator: its wave (null = off), pitch as a factor of the note, and its share of the sound
             public WaveformType? Osc2Wave;
             public double Osc2Ratio = 1, Osc2Mix = 0.5;
+            public Osc2Mode Osc2Mode;
             // Two LFOs (null = off); the settings are shared and never changed, the state is below
             public LfoSettings?[] Lfos = NoLfos;
             // Echo: the sound comes back after EchoTime seconds (or EchoSyncRows rows of the song),
@@ -153,7 +154,7 @@ namespace AmosLikeBasic
                 Glide = s.Glide; Bend = s.Bend;
                 RingSource = s.RingSource; SyncSource = s.SyncSource;
                 Gate = s.Gate;
-                Osc2Wave = s.Osc2Wave; Osc2Ratio = s.Osc2Ratio; Osc2Mix = s.Osc2Mix;
+                Osc2Wave = s.Osc2Wave; Osc2Ratio = s.Osc2Ratio; Osc2Mix = s.Osc2Mix; Osc2Mode = s.Osc2Mode;
                 Lfos = s.Lfos;
                 EchoTime = s.EchoTime; EchoFeedback = s.EchoFeedback; EchoMix = s.EchoMix; EchoSyncRows = s.EchoSyncRows;
                 Pan = s.Pan;
@@ -174,7 +175,7 @@ namespace AmosLikeBasic
                 RingSource = -1; SyncSource = -1;
                 Gate = 0.9;
                 CutoffSlideLeft = 0; VolumeSlideLeft = 0;
-                Osc2Wave = null; Osc2Ratio = 1; Osc2Mix = 0.5;
+                Osc2Wave = null; Osc2Ratio = 1; Osc2Mix = 0.5; Osc2Mode = Osc2Mode.Mix;
                 Lfos = NoLfos;
                 EchoTime = 0.3; EchoFeedback = 0.4; EchoMix = 0; EchoSyncRows = 0;
                 Pan = 0;
@@ -183,6 +184,9 @@ namespace AmosLikeBasic
         }
 
         public enum LfoShape { Sine, Triangle, Square, SawUp, SawDown, Random }
+        // Oscillator 2 heard with the first, or (not heard itself) ring-modulating or hard-syncing it
+        public enum Osc2Mode { Mix, Ring, Sync }
+
         public enum LfoTarget { Off, Pitch, Volume, Cutoff, Resonance, PulseWidth, Osc2Pitch, Osc2Mix, Pan }
 
         // An LFO's settings. Depth is in the target's unit: semitones for pitch and the cutoff,
@@ -1034,6 +1038,19 @@ namespace AmosLikeBasic
 
                 if (v.SyncSource >= 0 && _voices[v.SyncSource].Wrapped) v.Phase = 0;
 
+                // Oscillator 2 as a modulator: it runs at its pitch, and the first starts again when it
+                // goes round (sync) or is turned upside down in its second half (ring)
+                bool ring = false;
+                if (v.Osc2Mode != Osc2Mode.Mix)
+                {
+                    double ratio = mod.Osc2Semis == 0 ? v.Osc2Ratio : v.Osc2Ratio * Math.Pow(2, mod.Osc2Semis / 12.0);
+                    v.Osc2Phase += Math.Min(freq * ratio * dt, 0.5);
+                    bool wrapped = v.Osc2Phase >= 1.0;
+                    if (wrapped) v.Osc2Phase -= 1.0;
+                    if (v.Osc2Mode == Osc2Mode.Sync && wrapped) v.Phase = 0;
+                    ring = v.Osc2Mode == Osc2Mode.Ring && v.Osc2Phase >= 0.5;
+                }
+
                 double t = v.Phase;
                 double width = v.Wave == WaveformType.Square ? 0.5 : v.PulseWidth;
                 if (v.PwmDepth > 0 && v.PwmRate > 0)
@@ -1046,8 +1063,10 @@ namespace AmosLikeBasic
                 sample = v.Sample != null ? NextSampleFrame(v, freq)
                     : Oscillator(v.Wave, t, inc, width, ref v.NoiseClock, ref v.Lfsr, ref v.NoiseOut);
 
+                if (ring) sample = -sample;
+
                 // The second oscillator, at its own pitch, mixed in
-                if (v.Osc2Wave is { } wave2)
+                if (v.Osc2Mode == Osc2Mode.Mix && v.Osc2Wave is { } wave2)
                 {
                     double ratio = mod.Osc2Semis == 0 ? v.Osc2Ratio : v.Osc2Ratio * Math.Pow(2, mod.Osc2Semis / 12.0);
                     double inc2 = Math.Min(freq * ratio * dt, 0.5);

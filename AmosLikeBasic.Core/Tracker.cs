@@ -182,6 +182,10 @@ namespace AmosLikeBasic
         public double Osc2Semitones { get; set; }          // -24 – 24
         public double Osc2Detune { get; set; }             // cent
         public double Osc2Mix { get; set; } = 50;          // procent of oscillator 2 in the sound
+        // What oscillator 2 does: Mix (heard with the first), Ring (it turns the first upside down every
+        // other half of its period, a ring modulation as the SID's) or Sync (the first starts again
+        // each time it goes round, the SID's hard sync). With Ring or Sync it is not heard itself.
+        public string Osc2Mode { get; set; } = "Mix";
 
         // A sampled instrument (Wave "Sample"): a WAV file played at the note's pitch. SampleNote is the
         // note the file sounds at (60 = C-4); a loop from LoopStart to LoopEnd (in sample frames) keeps

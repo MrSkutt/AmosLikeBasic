@@ -858,4 +858,57 @@ public class SynthTests : IDisposable
         Assert.InRange(Semitones(Pitch(b, 0.024, 0.038), 440), 11.7, 12.3);
         Assert.InRange(Semitones(Pitch(b, 0.044, 0.058), 440), -0.3, 0.3);
     }
+
+    // ── Oscillator 2 as the SID's ring modulation and hard sync ──
+
+    private static float[] PlayOsc2(string wave, string mode, double semitones, params string[] table)
+    {
+        var song = SongWith("", "A-4 01 ...", "--- .. ...", "--- .. ...");
+        var inst = song.Instruments[0];
+        (inst.Wave, inst.Osc2Mode, inst.Osc2Semitones, inst.Table) = (wave, mode, semitones, table.ToList());
+        S.TrackPlay(song, loop: false);
+        return Render(0.3);
+    }
+
+    // The rate the wave repeats at: the shortest lag (60 – 1000 Hz) at which it nearly matches itself
+    private static double Repeats(float[] b, double t0, double t1)
+    {
+        int a = (int)(t0 * SR), n = (int)((t1 - t0) * SR) - SR / 60;
+        double Match(int lag)
+        {
+            double s = 0, e1 = 0, e2 = 0;
+            for (int i = a; i < a + n; i++) { s += b[i] * b[i + lag]; e1 += b[i] * b[i]; e2 += b[i + lag] * b[i + lag]; }
+            return s / Math.Sqrt(e1 * e2);
+        }
+        var matches = Enumerable.Range(SR / 1000, SR / 60 - SR / 1000).Select(lag => (lag, m: Match(lag))).ToList();
+        double best = matches.Max(x => x.m);
+        // the first peak that is nearly as good as the best
+        var first = matches.First(x => x.m >= best * 0.97);
+        int lagAt = first.lag;
+        while (lagAt + 1 < SR / 60 && Match(lagAt + 1) > Match(lagAt)) lagAt++;
+        return (double)SR / lagAt;
+    }
+
+    [Fact]
+    public void Sync_makes_the_note_go_round_at_oscillator_2s_pitch()
+    {
+        // A saw at A-4 restarted by oscillator 2 a fifth down: the wave repeats at 294 Hz
+        Assert.InRange(Repeats(PlayOsc2("Sawtooth", "Sync", -7), 0.05, 0.25), 289, 299);
+        Assert.InRange(Repeats(PlayOsc2("Sawtooth", "Mix", -7), 0.05, 0.25), 433, 447);   // MIX with osc 2 off: as it is
+    }
+
+    [Fact]
+    public void Ring_modulation_turns_the_note_over_at_oscillator_2s_pitch()
+    {
+        // A triangle at A-4 turned over in every other half period of 220 Hz: the wave repeats at 220 Hz
+        Assert.InRange(Repeats(PlayOsc2("Triangle", "Ring", -12), 0.05, 0.25), 216, 224);
+        Assert.InRange(Repeats(PlayOsc2("Triangle", "Mix", -12), 0.05, 0.25), 433, 447);
+    }
+
+    [Fact]
+    public void A_table_step_sets_oscillator_2s_pitch()
+    {
+        // O-7 in the table, the instrument's own setting 0: the sync is a fifth down
+        Assert.InRange(Repeats(PlayOsc2("Sawtooth", "Sync", 0, "SAWTOOTH O-7"), 0.05, 0.25), 289, 299);
+    }
 }

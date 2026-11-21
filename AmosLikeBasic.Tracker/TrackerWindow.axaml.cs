@@ -336,6 +336,10 @@ public partial class TrackerWindow : Window
         AddSubHeading(osc, "OSC 2");
         AddChoice(osc, new[] { "Off", "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise" },
             new[] { "OFF", "PULSE", "SQUARE", "TRI", "SAW", "SINE", "NOISE" }, i => i.Osc2Wave ?? "Off", (i, v) => i.Osc2Wave = v, "osc2 wave");
+        // MIX: heard with oscillator 1; RING and SYNC: it changes oscillator 1 (as the SID's ring
+        // modulation and hard sync) and is not heard itself, so its wave does not matter
+        AddChoice(osc, new[] { "Mix", "Ring", "Sync" }, new[] { "MIX", "RING", "SYNC" },
+            i => i.Osc2Mode ?? "Mix", (i, v) => i.Osc2Mode = v, "osc2 mode");
         var o2 = KnobRow(osc);
         AddKnob(o2, "SEMI", -24, 24, i => i.Osc2Semitones, (i, v) => i.Osc2Semitones = v, "osc2 semi", "+0;-0;0", bipolar: true, step: 1);
         AddKnob(o2, "DETUNE", -100, 100, i => i.Osc2Detune, (i, v) => i.Osc2Detune = v, "osc2 detune", "+0;-0;0", "c", bipolar: true, step: 1);

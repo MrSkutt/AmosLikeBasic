@@ -27,8 +27,10 @@ public static partial class YmImport
 
     // What a channel does in a frame: Step is the YM's volume step 0 – 31 (a SID's envelope is read as
     // the nearest), Width a pulse's width in per cent, Filter the SID filter it goes through (0 none,
-    // 1 low, 2 band, 3 high pass, plus 4 × the tracker's resonance in per cent)
-    private readonly record struct Sound(Mode Mode, double Semis, int Step, bool Retrigger, int Width = 50, int Filter = 0)
+    // 1 low, 2 band, 3 high pass, plus 4 × the tracker's resonance in per cent), Mod a SID's ring
+    // modulation (1) or hard sync (2) by another voice, ModOffset that voice's pitch from this one
+    private readonly record struct Sound(Mode Mode, double Semis, int Step, bool Retrigger, int Width = 50, int Filter = 0,
+        int Mod = 0, double ModOffset = 0)
     {
         public bool Sounds => Mode != Mode.Silent && Step > 0;
     }
@@ -464,10 +466,12 @@ public static partial class YmImport
     // arpeggio comes out a little differently on each note.
     // Two frames of notes are the same when they sound alike: pulse widths a few per cent apart count as
     // one (a pulse swept on across a whole song would make every note an instrument of its own)
-    private readonly record struct Step(Mode Mode, double Offset, int Down, int Width = 50, int Filter = 0)
+    private readonly record struct Step(Mode Mode, double Offset, int Down, int Width = 50, int Filter = 0,
+        int Mod = 0, double ModOffset = 0)
     {
         public bool Same(Step o) => Mode == o.Mode && (Mode == Mode.Silent ||
-            (Down == o.Down && Math.Abs(Offset - o.Offset) < 0.15 && Filter == o.Filter && (Mode != Mode.Pulse || Math.Abs(Width - o.Width) <= 6)));
+            (Down == o.Down && Math.Abs(Offset - o.Offset) < 0.15 && Filter == o.Filter && (Mode != Mode.Pulse || Math.Abs(Width - o.Width) <= 6)
+             && Mod == o.Mod && (Mod == 0 || Math.Abs(ModOffset - o.ModOffset) < 0.15)));
     }
 
     private sealed class Note
@@ -616,7 +620,7 @@ public static partial class YmImport
         for (int f = from; f < end; f++)
         {
             var s = sounds[f, n.Channel];
-            n.Steps[f - from] = s.Sounds ? new Step(s.Mode, s.Semis - n.Pitch, n.Loudest - s.Step, s.Width, s.Filter) : new Step(Mode.Silent, 0, 0);
+            n.Steps[f - from] = s.Sounds ? new Step(s.Mode, s.Semis - n.Pitch, n.Loudest - s.Step, s.Width, s.Filter, s.Mod, s.ModOffset) : new Step(Mode.Silent, 0, 0);
         }
         return n;
     }
@@ -681,7 +685,10 @@ public static partial class YmImport
             };
             // Whole semitones as such; the rest (vibrato, detune) to a hundredth
             double offset = Math.Abs(s.Offset - Math.Round(s.Offset)) < 0.03 ? Math.Round(s.Offset) : Math.Round(s.Offset, 2);
-            table.Add(offset == 0 ? wave : wave + " " + offset.ToString("+0.##;-0.##", CultureInfo.InvariantCulture));
+            string step = offset == 0 ? wave : wave + " " + offset.ToString("+0.##;-0.##", CultureInfo.InvariantCulture);
+            // A ring-modulating or syncing voice: oscillator 2 at its pitch
+            if (s.Mod != 0) step += " O" + Math.Round(s.ModOffset, 2).ToString("+0.##;-0.##;0", CultureInfo.InvariantCulture);
+            table.Add(step);
         }
 
         // The envelope: a point per frame, without the ones on a straight line between their neighbours
@@ -701,6 +708,8 @@ public static partial class YmImport
         if (modes.Count == 1 && modes[0] is Mode.BuzzSaw or Mode.BuzzTriangle) UseBuzzerSample(inst, modes[0], buzzers);
         inst.Table = table;
         inst.TableLoop = loopLength > 0 ? loopStart : -1;
+        int mod = steps.FirstOrDefault(s => s.Mod != 0).Mod;
+        if (mod != 0) inst.Osc2Mode = mod == 1 ? "Ring" : "Sync";
         int filter = steps.FirstOrDefault(s => s.Mode != Mode.Silent).Filter;
         if (filter > 0)
         {
