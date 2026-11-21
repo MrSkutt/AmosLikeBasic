@@ -15,7 +15,7 @@ namespace AmosLikeBasic;
 // The song then sounds nearly, not exactly, as before; undo brings the old one back.
 public static class InstrumentSimplifier
 {
-    public sealed record Result(int Before, int After, int Arpeggios, int Vibratos);
+    public sealed record Result(int Before, int After, int Arpeggios, int Vibratos, int PatternsMerged = 0);
 
     private sealed class Part
     {
@@ -95,7 +95,9 @@ public static class InstrumentSimplifier
         }
         song.Instruments.Clear();
         song.Instruments.AddRange(instruments);
-        return new Result(before, instruments.Count, parts.Values.Count(p => p.Effect?.effect is '0' or 'J'), parts.Values.Count(p => p.Effect?.effect == '4'));
+        // Patterns the merged instruments made the same are written once
+        int merged = song.MergeSamePatterns();
+        return new Result(before, instruments.Count, parts.Values.Count(p => p.Effect?.effect is '0' or 'J'), parts.Values.Count(p => p.Effect?.effect == '4'), merged);
     }
 
     private static Dictionary<int, int> CountUses(TrackerSong song)
@@ -125,7 +127,8 @@ public static class InstrumentSimplifier
             foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
                 if (double.TryParse(word, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out double n)) offset = n;
-                else if (word.ToUpperInvariant() is "SQUARE" or "PULSE" or "TRIANGLE" or "SAWTOOTH" or "SAW" or "SINE" or "NOISE") stepWave = word.ToUpperInvariant();
+                else if (word.ToUpperInvariant() is "SQUARE" or "PULSE" or "TRIANGLE" or "SAWTOOTH" or "SAW" or "SINE" or "NOISE"
+                         or "PULSESAW" or "PULSETRI" or "SAWTRI" or "PULSESAWTRI") stepWave = word.ToUpperInvariant();
                 else return null;
             }
             steps.Add((stepWave, offset));

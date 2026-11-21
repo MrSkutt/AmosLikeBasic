@@ -20,9 +20,10 @@ namespace AmosLikeBasic
         public const int Voices = 32;     // all of them: a tracker song can have up to 32 channels
         private const int SfxSlots = 4;
 
+        // The last four are the SID's combined waves: the waves chosen ANDed together bit by bit
         public enum WaveformType
         {
-            Square, Triangle, Sawtooth, Noise, Pulse, Drums, Sine
+            Square, Triangle, Sawtooth, Noise, Pulse, Drums, Sine, PulseSaw, PulseTriangle, SawTriangle, PulseSawTriangle
         }
 
         public enum FilterMode
@@ -387,6 +388,10 @@ namespace AmosLikeBasic
                 "PULSE" => WaveformType.Pulse,
                 "DRUMS" => WaveformType.Drums,
                 "SINE" => WaveformType.Sine,
+                "PULSESAW" => WaveformType.PulseSaw,
+                "PULSETRI" or "PULSETRIANGLE" => WaveformType.PulseTriangle,
+                "SAWTRI" or "SAWTRIANGLE" => WaveformType.SawTriangle,
+                "PULSESAWTRI" or "PULSESAWTRIANGLE" => WaveformType.PulseSawTriangle,
                 _ => WaveformType.Square
             };
         }
@@ -1145,9 +1150,45 @@ namespace AmosLikeBasic
                     }
                     return noiseOut;
                 }
+                case WaveformType.PulseSaw:
+                case WaveformType.PulseTriangle:
+                case WaveformType.SawTriangle:
+                case WaveformType.PulseSawTriangle:
+                    return Combined(wave, t, width) - CombinedMean(wave, width);
                 default:
                     return 0;
             }
+        }
+
+        // A combined wave as the SID makes it: the 12-bit values of the waves ANDed, -1 – 1. Mostly thin
+        // spikes, so its average (taken away) is far from 0.
+        private static double Combined(WaveformType wave, double t, double width)
+        {
+            int saw = Math.Min(4095, (int)(t * 4096));
+            int tri = Math.Min(4095, (int)((t < 0.5 ? t : 1 - t) * 8192));
+            int pulse = t < width ? 4095 : 0;
+            int v = wave switch
+            {
+                WaveformType.PulseSaw => pulse & saw,
+                WaveformType.PulseTriangle => pulse & tri,
+                WaveformType.SawTriangle => saw & tri,
+                _ => pulse & saw & tri
+            };
+            return v / 2047.5 - 1;
+        }
+
+        // Its average over a period, worked out once for each wave and pulse width (in 256ths)
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, double> CombinedMeans = new();
+
+        private static double CombinedMean(WaveformType wave, double width)
+        {
+            int w = (int)Math.Round(Math.Clamp(width, 0, 1) * 256);
+            return CombinedMeans.GetOrAdd((int)wave << 10 | w, _ =>
+            {
+                double sum = 0;
+                for (int i = 0; i < 1024; i++) sum += Combined(wave, (i + 0.5) / 1024, w / 256.0);
+                return sum / 1024;
+            });
         }
 
         // Pulse wave with smoothed edges (PolyBLEP), so that high notes do not sound ugly

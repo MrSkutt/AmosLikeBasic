@@ -911,4 +911,18 @@ public class SynthTests : IDisposable
         // O-7 in the table, the instrument's own setting 0: the sync is a fifth down
         Assert.InRange(Repeats(PlayOsc2("Sawtooth", "Sync", 0, "SAWTOOTH O-7"), 0.05, 0.25), 289, 299);
     }
+
+    [Theory]
+    [InlineData("PulseSaw")]
+    [InlineData("PulseTri")]
+    [InlineData("SawTri")]
+    [InlineData("PulseSawTri")]
+    public void The_SIDs_combined_waves_play_at_the_note_without_an_offset(string wave)
+    {
+        var b = PlayOsc2(wave, "Mix", 0);
+        Assert.InRange(Repeats(b, 0.05, 0.25), 433, 447);
+        double mean = b[(int)(0.05 * SR)..(int)(0.25 * SR)].Average();
+        Assert.True(Rms(b, 0.05, 0.25) > 0.01, "it sounds");
+        Assert.True(Math.Abs(mean) < Rms(b, 0.05, 0.25) * 0.1, $"no offset: mean {mean:0.0000}");
+    }
 }

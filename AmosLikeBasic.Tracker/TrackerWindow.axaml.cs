@@ -328,6 +328,9 @@ public partial class TrackerWindow : Window
         AddSubHeading(osc, "OSC 1");
         AddChoice(osc, new[] { "Pulse", "Square", "Triangle", "Sawtooth", "Sine", "Noise", "Sample" },
             new[] { "PULSE", "SQUARE", "TRI", "SAW", "SINE", "NOISE", "SAMPLE" }, i => i.Wave, (i, v) => i.Wave = v, "wave");
+        // The SID's combined waves (the waves ANDed: thin, nasal, buzzing)
+        AddChoice(osc, new[] { "PulseSaw", "PulseTri", "SawTri", "PulseSawTri" },
+            new[] { "P+SAW", "P+TRI", "SAW+TRI", "P+S+T" }, i => i.Wave, (i, v) => i.Wave = v, "wave");
         var o1 = KnobRow(osc);
         AddKnob(o1, "VOLUME", 0, 1, i => i.Volume, (i, v) => i.Volume = v, "volume", "0.00", step: 0.01);
         AddKnob(o1, "WIDTH", 1, 99, i => i.PulseWidth, (i, v) => i.PulseWidth = v, "width", unit: "%", step: 1);
@@ -1604,7 +1607,8 @@ public partial class TrackerWindow : Window
         SongChanged();
         string effects = r.Arpeggios + r.Vibratos > 0
             ? $" {r.Arpeggios} arpeggios became 0xy and {r.Vibratos} vibratos 4xy in the patterns." : "";
-        SetStatus($"{r.Before} instruments became {r.After}.{effects} It sounds nearly as before; undo ({(OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl")}+Z) brings the old ones back.");
+        string patterns = r.PatternsMerged > 0 ? $" {r.PatternsMerged} patterns that became the same are written once." : "";
+        SetStatus($"{r.Before} instruments became {r.After}.{effects}{patterns} It sounds nearly as before; undo ({(OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl")}+Z) brings the old ones back.");
         KeepTypingFocus();
     }
 

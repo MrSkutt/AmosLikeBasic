@@ -41,6 +41,35 @@ namespace AmosLikeBasic
         public List<int> Order { get; set; } = new() { 0 };
         public List<TrackerPattern> Patterns { get; set; } = new() { new TrackerPattern() };
 
+        // Patterns that are the same, cell for cell, become one: the order list plays it each time.
+        // Returns how many patterns there were fewer.
+        public int MergeSamePatterns()
+        {
+            string Key(TrackerPattern p)
+            {
+                var b = new System.Text.StringBuilder().Append(p.Rows).Append(':');
+                for (int r = 0; r < p.Rows; r++)
+                    for (int c = 0; c < MaxChannels; c++) b.Append(p[r, c]).Append('|');
+                return b.ToString();
+            }
+            var first = new Dictionary<string, int>();
+            var newIndex = new int[Patterns.Count];
+            var kept = new List<TrackerPattern>();
+            for (int i = 0; i < Patterns.Count; i++)
+            {
+                string key = Key(Patterns[i]);
+                if (first.TryGetValue(key, out int k)) { newIndex[i] = k; continue; }
+                first[key] = newIndex[i] = kept.Count;
+                kept.Add(Patterns[i]);
+            }
+            int merged = Patterns.Count - kept.Count;
+            if (merged == 0) return 0;
+            for (int o = 0; o < Order.Count; o++)
+                if (Order[o] >= 0 && Order[o] < newIndex.Length) Order[o] = newIndex[Order[o]];
+            Patterns = kept;
+            return merged;
+        }
+
         // ── Filformat ────────────────────────────────────────────────
 
         private sealed class SongFile

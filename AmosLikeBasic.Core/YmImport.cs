@@ -23,7 +23,8 @@ namespace AmosLikeBasic;
 public static partial class YmImport
 {
     // The YM's kinds of sound, then the SID's waves (the YM's tone is a square, a pulse of 50 %)
-    private enum Mode { Silent, Tone, Noise, ToneNoise, BuzzSaw, BuzzTriangle, Triangle, Saw, Pulse }
+    private enum Mode { Silent, Tone, Noise, ToneNoise, BuzzSaw, BuzzTriangle, Triangle, Saw, Pulse, PulseSaw, PulseTri, SawTri, PulseSawTri }
+    private static bool HasPulse(Mode m) => m is Mode.Pulse or Mode.PulseSaw or Mode.PulseTri or Mode.PulseSawTri;
 
     // What a channel does in a frame: Step is the YM's volume step 0 – 31 (a SID's envelope is read as
     // the nearest), Width a pulse's width in per cent, Filter the SID filter it goes through (0 none,
@@ -359,12 +360,16 @@ public static partial class YmImport
         UseBuzzerSample(song.Instruments[3], Mode.BuzzSaw, buzzers);
         UseBuzzerSample(song.Instruments[4], Mode.BuzzTriangle, buzzers);
         // A SID's waves, numbered as their modes (6 – 8)
-        bool sid = sounds.Cast<Sound>().Any(s => s.Mode is Mode.Triangle or Mode.Saw or Mode.Pulse);
+        bool sid = sounds.Cast<Sound>().Any(s => s.Mode >= Mode.Triangle);
         if (sid)
         {
             song.Instruments.Add(Instrument("SID triangle", "Triangle"));
             song.Instruments.Add(Instrument("SID saw", "Sawtooth"));
             song.Instruments.Add(Instrument("SID pulse", "Square"));
+            song.Instruments.Add(Instrument("SID pulse + saw", "PulseSaw"));
+            song.Instruments.Add(Instrument("SID pulse + triangle", "PulseTri"));
+            song.Instruments.Add(Instrument("SID saw + triangle", "SawTri"));
+            song.Instruments.Add(Instrument("SID pulse + saw + triangle", "PulseSawTri"));
         }
         int firstDrum = song.Instruments.Count + 1;
         song.Instruments.AddRange(drums.Instruments);
@@ -470,7 +475,7 @@ public static partial class YmImport
         int Mod = 0, double ModOffset = 0)
     {
         public bool Same(Step o) => Mode == o.Mode && (Mode == Mode.Silent ||
-            (Down == o.Down && Math.Abs(Offset - o.Offset) < 0.15 && Filter == o.Filter && (Mode != Mode.Pulse || Math.Abs(Width - o.Width) <= 6)
+            (Down == o.Down && Math.Abs(Offset - o.Offset) < 0.15 && Filter == o.Filter && (!HasPulse(Mode) || Math.Abs(Width - o.Width) <= 6)
              && Mod == o.Mod && (Mod == 0 || Math.Abs(ModOffset - o.ModOffset) < 0.15)));
     }
 
@@ -681,6 +686,10 @@ public static partial class YmImport
                 Mode.BuzzSaw or Mode.Saw => "SAWTOOTH",
                 Mode.BuzzTriangle or Mode.Triangle => "TRIANGLE",
                 Mode.Pulse => "PULSE P" + s.Width,
+                Mode.PulseSaw => "PULSESAW P" + s.Width,
+                Mode.PulseTri => "PULSETRI P" + s.Width,
+                Mode.SawTri => "SAWTRI",
+                Mode.PulseSawTri => "PULSESAWTRI P" + s.Width,
                 _ => "SQUARE"
             };
             // Whole semitones as such; the rest (vibrato, detune) to a hundredth
@@ -748,12 +757,14 @@ public static partial class YmImport
     {
         var sounding = steps.Where(s => s.Mode != Mode.Silent).ToList();
         bool noise = sounding.Any(s => s.Mode is Mode.Noise or Mode.ToneNoise);
-        bool tone = sounding.Any(s => s.Mode is Mode.Tone or Mode.Triangle or Mode.Saw or Mode.Pulse);
+        bool tone = sounding.Any(s => s.Mode is Mode.Tone or Mode.Triangle or Mode.Saw or Mode.Pulse
+            or Mode.PulseSaw or Mode.PulseTri or Mode.SawTri or Mode.PulseSawTri);
         string kind = sounding.Any(s => s.Mode is Mode.BuzzSaw or Mode.BuzzTriangle) ? "Buzzer"
             : noise && tone ? "Drum"
             : noise ? "Noise"
             : sounding.Select(s => Math.Round(s.Offset)).Distinct().Count() > 1 ? "Arp"
             : sounding.Any(s => Math.Abs(s.Offset - sounding[0].Offset) > 0.05) ? "Vibrato"
+            : sounding.Any(s => s.Mode is Mode.PulseSaw or Mode.PulseTri or Mode.SawTri or Mode.PulseSawTri) ? "Combined"
             : sounding.Any(s => s.Mode == Mode.Pulse && s.Width != sounding[0].Width) ? "Pulse sweep"
             : sounding.All(s => s.Mode == Mode.Triangle) ? "Triangle"
             : sounding.All(s => s.Mode == Mode.Saw) ? "Saw"

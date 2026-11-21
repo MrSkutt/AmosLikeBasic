@@ -596,7 +596,8 @@ namespace AmosLikeBasic
                 else if ((word[0] == 'O' || word[0] == 'o') && word.Length > 1 &&
                          double.TryParse(word[1..], NumberStyles.Float, CultureInfo.InvariantCulture, out double o2))
                     osc2 = Math.Clamp(o2, -96, 96);
-                else if (word.ToUpperInvariant() is "SQUARE" or "PULSE" or "TRIANGLE" or "SAWTOOTH" or "SAW" or "SINE" or "NOISE")
+                else if (word.ToUpperInvariant() is "SQUARE" or "PULSE" or "TRIANGLE" or "SAWTOOTH" or "SAW" or "SINE" or "NOISE"
+                         or "PULSESAW" or "PULSETRI" or "SAWTRI" or "PULSESAWTRI")
                     wave = ParseWave(word);
                 else
                     throw new FormatException($"Instrument {instrument:X2}: '{text}' is not a table step");
