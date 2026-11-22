@@ -126,7 +126,8 @@ public class SndhTests
     // A SID voice made as Atari players make it: init sets Timer A of the MFP going (predivisor 4, count 61:
     // 2.4576 MHz / 244 = 10 072 Hz) with a routine at $134 that flips channel A's volume between 15 and 0
     // on every interrupt. The tone generators are off, so the flipping is the sound: 5036 Hz.
-    private static byte[] TimerTune()
+    // (data and control: Timer A's; 61 and predivisor 4 by default, about 10 000 interrupts a second)
+    private static byte[] TimerTune(int data = 61, int control = 1)
     {
         var code = new List<ushort>();
         int init = 0x40;
@@ -136,8 +137,8 @@ public class SndhTests
             0x11FC, 0x0007, 0x8800,             // MOVE.B #7,$8800.W   (the mixer:
             0x11FC, 0x003F, 0x8802,             // MOVE.B #$3F,$8802.W  everything off)
             0x11FC, 0x0008, 0x8800,             // MOVE.B #8,$8800.W   (channel A's volume picked)
-            0x11FC, 0x003D, 0xFA1F,             // MOVE.B #61,$FA1F.W  (Timer A data)
-            0x11FC, 0x0001, 0xFA19,             // MOVE.B #1,$FA19.W   (Timer A control: predivisor 4)
+            0x11FC, (ushort)data, 0xFA1F,       // MOVE.B #data,$FA1F.W     (Timer A data)
+            0x11FC, (ushort)control, 0xFA19,    // MOVE.B #control,$FA19.W  (Timer A control: predivisor 4 by default)
             0x08F8, 0x0005, 0xFA07,             // BSET #5,$FA07.W     (enable Timer A's interrupt)
             0x08F8, 0x0005, 0xFA13,             // BSET #5,$FA13.W     (and unmask it)
             0x4E75                              // RTS
@@ -187,6 +188,18 @@ public class SndhTests
         Assert.All(sids, e => Assert.Equal(0, e.Channel));
         Assert.InRange(sids.Average(e => e.Frequency), 9800, 10300);
         Assert.Empty(ym.Drums);
+    }
+
+    [Fact]
+    public void A_slow_SID_voice_is_recognised_from_the_times_of_its_writes()
+    {
+        // Predivisor 200, data 192: 64 interrupts a second, about one a frame (a bass at 32 Hz, made with
+        // the tone off): too few in a frame to count, but they go on and off, from a timer
+        var ym = SndhPlayer.Record(SndhFile.Read(TimerTune(192, 7)), seconds: 2);
+        Assert.NotNull(ym.FrameEffects);
+        var sids = ym.FrameEffects!.SelectMany(e => e).Where(e => e.Kind == YmPlayer.EffectKind.Sid).ToList();
+        Assert.True(sids.Count > 50, "nearly every frame");
+        Assert.All(sids, e => Assert.InRange(e.Frequency, 62, 66));
     }
 
     // ── The rest of the machine that players use ──

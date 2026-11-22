@@ -431,6 +431,7 @@ public sealed class SndhMachine
     private readonly double _cyclesPerCall;
     private double _nextCall;
     private bool _inPlay;
+    public bool InPlay => _inPlay;           // play is running (a write now is play's, not a timer's)
     private uint _heap = 0x200000;
     private long _mfpCycles;                  // the 68000 cycle the MFP's timers have run to
     private double _nextVbl;
@@ -738,7 +739,14 @@ public static class SndhPlayer
         // Every write to the sound chip in each frame, to find what timer interrupts did between the frames
         var writes = new List<(int register, byte value)>[frames];
         List<(int, byte)> current = new();
-        st.YmWritten = (r, v) => current.Add((r, v));
+        // and the volumes a timer interrupt writes (not play), with the cycle: slow SID voices
+        var timerVolumes = new List<(int frame, int channel, long cycle, byte value)>();
+        int recording = 0;
+        st.YmWritten = (r, v) =>
+        {
+            current.Add((r, v));
+            if (r is >= 8 and <= 10 && !machine.InPlay) timerVolumes.Add((recording, r - 8, machine.Cpu.Cycles, v));
+        };
         // The DMA sound: each sample started (by its contents) and the frame it starts in, and all of it
         var dma = new DmaRecording();
         var stream = new List<float>();
@@ -774,6 +782,7 @@ public static class SndhPlayer
             if (progress != null && f % Math.Max(1, frames / 100) == 0) progress((double)f / frames);
             current = new List<(int, byte)>();
             writes[f] = current;
+            recording = f;
             st.EnvelopeWritten = false;
             cycle += perFrame;
             machine.RunUntil(cycle);
@@ -791,7 +800,7 @@ public static class SndhPlayer
             Author = sndh.Composer,
             Comment = sndh.Year
         };
-        FindTimerEffects(ym, writes);
+        FindTimerEffects(ym, writes, timerVolumes);
         Finish();
         st.Dma.Capture = null;
         st.Dma.Recording = null;
@@ -814,12 +823,45 @@ public static class SndhPlayer
     //  - its volume written with ever other values: a digidrum, its values the sample (the same sample
     //    played again is the same drum);
     //  - the envelope's shape written many times a frame: a sync buzzer.
-    private static void FindTimerEffects(YmFile ym, List<(int register, byte value)>[] writes)
+    private static void FindTimerEffects(YmFile ym, List<(int register, byte value)>[] writes,
+        List<(int frame, int channel, long cycle, byte value)> timerVolumes)
     {
         int frames = writes.Length;
         var effects = new List<YmPlayer.Effect>[frames];
         for (int f = 0; f < frames; f++) effects[f] = new List<YmPlayer.Effect>();
         bool any = false;
+
+        // Slow SID voices: a timer switching a channel's volume on and off, a few times a frame or less
+        // (a bass of 40 Hz needs only 80 a second). A run of such writes that go between 0 and a level
+        // is the voice, at half the rate the timer writes them (taken from their times). Only with the
+        // channel's tone off, when the switching is the sound; on a tone it is more a tremolo, which the
+        // tracker cannot play as such.
+        for (int c = 0; c < 3; c++)
+        {
+            var mine = timerVolumes.Where(t => t.channel == c).ToList();
+            int start = 0;
+            for (int i = 1; i <= mine.Count; i++)
+            {
+                bool goesOn = i < mine.Count
+                    && ((mine[i].value & 15) == 0) != ((mine[i - 1].value & 15) == 0)
+                    && mine[i].cycle - mine[i - 1].cycle < SndhMachine.CpuClock / 20;   // within 50 ms
+                if (goesOn) continue;
+                int count = i - start;
+                if (count >= 6)
+                {
+                    var gaps = Enumerable.Range(start + 1, count - 1).Select(k => (double)(mine[k].cycle - mine[k - 1].cycle)).OrderBy(g => g).ToList();
+                    double rate = SndhMachine.CpuClock / gaps[gaps.Count / 2];   // writes a second
+                    // Faster ones (more writes a frame) are found by counting them, below
+                    if (rate >= TimerWrites * (double)ym.FrameRate) { start = i; continue; }
+                    int level = mine.Skip(start).Take(count).Max(t => t.value & 15);
+                    for (int f = mine[start].frame; f <= mine[i - 1].frame && f < frames; f++)
+                        if (!effects[f].Any(e => e.Channel == c) && (ym.Frames[f][7] & (1 << c)) != 0)
+                            effects[f].Add(new YmPlayer.Effect(YmPlayer.EffectKind.Sid, c, rate, level));
+                    any = true;
+                }
+                start = i;
+            }
+        }
         var drumOf = new Dictionary<string, int>();
 
         for (int c = 0; c < 3; c++)
@@ -850,6 +892,7 @@ public static class SndhPlayer
                 }
                 if (f == frames || !timer) continue;
                 double rate = volumes.Count * (double)ym.FrameRate;   // writes a second: the timer's frequency
+                if (toggling && effects[f].Any(e => e.Channel == c && e.Kind == YmPlayer.EffectKind.Sid)) continue;   // found above
                 if (toggling)
                 {
                     effects[f].Add(new YmPlayer.Effect(YmPlayer.EffectKind.Sid, c, rate, volumes.Max(v => v & 15)));

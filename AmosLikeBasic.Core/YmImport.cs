@@ -417,6 +417,10 @@ public static partial class YmImport
         return s;
     }
 
+    // The width of that pulse: where tone and switching meet differs from note to note; a quarter is
+    // what sounds most like it over many songs (measured against the songs played live)
+    private const int SidPulseWidth = 25;
+
     private static Sound Read(YmFile ym, byte[] r, int c, int envShape, int framesSinceEnv, bool envWritten,
         double sidFrequency = 0, int sidVolume = 0, double syncFrequency = 0)
     {
@@ -438,6 +442,10 @@ public static partial class YmImport
             freq = tone ? ym.Clock / 16.0 / tonePeriod : sidFrequency / 2;
             step = sidVolume == 0 ? 0 : sidVolume * 2 + 1;
             if (freq > 12000) mode = Mode.Silent;
+            // The tone and the volume switched at its own pitch (MaxYMiser's "square + SID"): together a
+            // pulse narrower than the square, its width set by how the two meet
+            else if (tone && !noise && Math.Abs(12 * Math.Log2(sidFrequency / 2 / freq)) < 0.5)
+                return new Sound(Mode.Pulse, 69 + 12 * Math.Log2(freq / 440.0), step, false, SidPulseWidth);
         }
         else if (syncFrequency > 0 && env)
         {
