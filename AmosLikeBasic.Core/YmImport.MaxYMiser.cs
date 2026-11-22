@@ -73,6 +73,7 @@ public static partial class YmImport
         private readonly List<TrackerInstrument> _instruments = new();
         private readonly Dictionary<string, int> _sounds = new();          // a sound's key → instrument (from 1)
         private readonly Dictionary<string, Rendered> _rendered = new();
+        private readonly Dictionary<string, int> _contents = new();        // an instrument's settings → its number
         private readonly Dictionary<int, string> _digiFiles = new();
         private int _retriggers, _legato;
 
@@ -93,6 +94,9 @@ public static partial class YmImport
             public int[] Flags = new int[6];         // portamento, arpeggio, vibrato, transpose, fixed frequency, fixed detune
             public int Speed, Width, BuzzerWave, Digi, DigiRate, Volume, Coarse, Fine;
             public int[] Seq = new int[8];           // volume, arpeggio, vibrato, mixer, noise, fixed, timer, PWM
+            // The PWM slide (7xx): added to the pulse width every tick of the note, unless 9xx set the width
+            public int PwmSlide;
+            public bool PwmFixed;
 
             public static Voice From(MaxYMiserSong.Instrument i, int number) => new()
             {
@@ -103,7 +107,7 @@ public static partial class YmImport
                 Seq = new[] { i.VolumeSeq, i.ArpeggioSeq, i.VibratoSeq, i.MixerSeq, i.NoiseSeq, i.FixedSeq, i.TimerSeq, i.PwmSeq }
             };
 
-            public string Key => $"{Number}:{string.Join(",", Flags)}:{Speed},{Width},{BuzzerWave},{Digi},{DigiRate},{Volume},{Coarse},{Fine}:{string.Join(",", Seq)}";
+            public string Key => $"{Number}:{string.Join(",", Flags)}:{Speed},{Width},{BuzzerWave},{Digi},{DigiRate},{Volume},{Coarse},{Fine}:{string.Join(",", Seq)}:{PwmSlide},{PwmFixed}";
         }
 
         // A channel as the replay routine keeps it
@@ -259,6 +263,8 @@ public static partial class YmImport
                         c.Modified = false;
                     }
                     // The sequences start again; what belongs to the note is cleared (the slides kept for a portamento)
+                    c.Voice.PwmSlide = 0;
+                    c.Voice.PwmFixed = false;
                     c.Transpose = c.NoiseTranspose = c.VolumeColumn = 0;
                     c.ArpX = c.ArpY = 0;
                     if (!porta) c.Porta = c.Slide = c.PortaTarget = 0;
@@ -321,7 +327,8 @@ public static partial class YmImport
                         switch (e)
                         {
                             case >= '1' and <= '6': v.Flags[e - '1'] = p; break;
-                            case '9': v.Width = p; break;
+                            case '9': v.Width = p; v.PwmFixed = true; break;
+                            case '7': v.PwmSlide = p == 0x80 ? 0 : (sbyte)p; v.PwmFixed = false; break;
                             case 'A': v.Seq[1] = p; break;
                             case 'C': break;
                             case 'D': v.Coarse = (sbyte)p; break;
@@ -337,7 +344,7 @@ public static partial class YmImport
                             case 'V': v.Seq[2] = p; break;
                             case 'W': v.BuzzerWave = p & 15; break;
                             case '8': v.Seq[7] = p; break;
-                            default: changes = false; break;   // 7 (PWM slide), U, Y, Z: not played
+                            default: changes = false; break;   // U, Y, Z: not played
                         }
                         if (changes) c.Modified = true;
                         break;
@@ -364,6 +371,9 @@ public static partial class YmImport
             {
                 int source = SourceBit(voice, track);
                 int written = c.Note + ((voice.Flags[3] & source) != 0 ? c.Transpose : 0);
+                // Into the tracker's notes, C-0 – B-8, by octaves
+                while (written < 12) written += 12;
+                while (written > 119) written -= 12;
                 if (retrigger)
                 {
                     var (number, rendered) = Sound(voice, written, c.NoiseTranspose, track);
@@ -465,9 +475,18 @@ public static partial class YmImport
             string key = r.Absolute ? keyed : plain;
             _rendered[key] = r;
             var inst = MakeMymInstrument(v, r, note);
-            _instruments.Add(inst);
-            _sounds[key] = _instruments.Count;
-            return (_instruments.Count, r);
+            // Sounds that come out the same (the effects changed what is not heard) are one instrument
+            string name = inst.Name;
+            inst.Name = "";
+            string content = System.Text.Json.JsonSerializer.Serialize(inst);
+            inst.Name = name;
+            if (!_contents.TryGetValue(content, out n))
+            {
+                _instruments.Add(inst);
+                _contents[content] = n = _instruments.Count;
+            }
+            _sounds[key] = n;
+            return (n, r);
         }
 
         // ── A sound, tick by tick ─────────────────────────────────────────
@@ -496,7 +515,7 @@ public static partial class YmImport
             var counter = new int[8];
             var value = new int[8];
             var done = new bool[8];
-            int speedCount = 0;
+            int speedCount = 0, pwmSlide = 0;
             var r = new Rendered();
             var steps = new List<Step>();
             int timerSeq = v.Seq[6];
@@ -526,7 +545,9 @@ public static partial class YmImport
                             if (q.Repeat == len - 1) done[i] = true;
                         }
                     }
-                steps.Add(Tick(v, note, noiseTranspose, timerOn, value, timerSeq, r));
+                steps.Add(Tick(v, note, noiseTranspose, timerOn, value, timerSeq, r, pwmSlide));
+                // The PWM slide moves after the tick, up to ±255
+                pwmSlide = Math.Clamp(pwmSlide + v.PwmSlide, -255, 255);
             }
             r.Steps = steps.ToArray();
             return r;
@@ -540,7 +561,7 @@ public static partial class YmImport
         }
 
         // What the chip plays in a tick, from the sequences' values
-        private Step Tick(Voice v, int note, int noiseTranspose, bool timerOn, int[] value, int timerSeq, Rendered r)
+        private Step Tick(Voice v, int note, int noiseTranspose, bool timerOn, int[] value, int timerSeq, Rendered r, int pwmSlide)
         {
             var silent = new Step(Mode.Silent, 0, 31);
             int vol = value[0], mix = value[3];
@@ -623,8 +644,9 @@ public static partial class YmImport
             }
             if (timer == 9 && !noise)
             {
-                int pw = value[7] != 0 ? value[7] & 0xFF : v.Width;
-                double duty = pw / 256.0;
+                // The timer's two halves are the period ± w/256 of it: from a square (0) to a thin pulse (255)
+                int w = Math.Clamp(v.Width + (v.PwmFixed ? 0 : pwmSlide) + (value[7] & 0xFF), 0, 255);
+                double duty = 0.5 * (1 + w / 256.0);
                 int width = (int)Math.Round(tone ? 50 * duty : 100 * duty);
                 return new Step(Mode.Pulse, offset, down, Math.Clamp(width, 3, 97));
             }
