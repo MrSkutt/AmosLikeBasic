@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -11,6 +12,7 @@ public class AppConfig
     public int WindowLeft { get; set; } = 0;
     public bool IsMaximized { get; set; } = false;
     public string DefaultTheme { get; set; } = "ClassicBlue";
+    public List<string> RecentFiles { get; set; } = new();   // the tracker's, newest first
 
     // Add more settings here
 }

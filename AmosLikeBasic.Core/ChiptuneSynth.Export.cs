@@ -54,6 +54,53 @@ namespace AmosLikeBasic
             return all.GetRange(0, end).ToArray();
         }
 
+        // Single notes of instruments, each held for its ticks at the tempo and cut there (mono, from the
+        // middle; the instrument's pan, echo send and all else as it is). For turning the synth's
+        // instruments into samples. While it renders the synth belongs to it, as for RenderSong.
+        public static List<float[]> RenderNotes(IReadOnlyList<(TrackerInstrument Instrument, int Note, int Ticks)> notes,
+                                                int tempo, Action<double>? progress = null)
+        {
+            bool was = ManualRendering;
+            ManualRendering = true;
+            Thread.Sleep(30);
+            var result = new List<float[]>();
+            double perTick = SampleRate / (Math.Clamp(tempo, 32, 255) * 0.4);
+            try
+            {
+                for (int i = 0; i < notes.Count; i++)
+                {
+                    var (inst, note, ticks) = notes[i];
+                    ticks = Math.Max(1, ticks);
+                    // A song of one channel: the note on the first row, a tick a row, long enough to hold it
+                    var song = new TrackerSong { Speed = 1, Tempo = tempo, Channels = TrackerSong.MinChannels };
+                    song.Instruments.Add(inst);
+                    song.Patterns.Clear();
+                    song.Order.Clear();
+                    for (int rows = ticks + 1; rows > 0; rows -= TrackerSong.MaxRows)
+                    {
+                        song.Order.Add(song.Patterns.Count);
+                        song.Patterns.Add(new TrackerPattern(Math.Min(rows, TrackerSong.MaxRows)));
+                    }
+                    song.Patterns[0][0, 0] = new TrackerCell(note, 1, '\0', 0);
+                    Reset();
+                    Render(new float[64]);
+                    TrackPlay(song, loop: false);
+                    var data = new float[(int)Math.Round(ticks * perTick)];
+                    Render(data);
+                    TrackStop();
+                    result.Add(data);
+                    progress?.Invoke((i + 1) / (double)notes.Count);
+                }
+            }
+            finally
+            {
+                Reset();
+                Render(new float[64]);
+                ManualRendering = was;
+            }
+            return result;
+        }
+
         // A WAV file: 16-bit stereo (left and right in turn) at the synth's sample rate
         public static void WriteWav(string path, float[] samples)
         {

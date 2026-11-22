@@ -18,6 +18,7 @@ public partial class TrackerApp : Application
             config.Load();
             ThemeResources.Apply(AmosThemes.ByName(config.Config.DefaultTheme));
 
+            TrackerWindow.RecentSettings = "AmosTracker";
             var tracker = new TrackerWindow();
             if (Program.FileToOpen is { } file) tracker.Opened += (_, _) => tracker.LoadFile(file);
             desktop.MainWindow = tracker;

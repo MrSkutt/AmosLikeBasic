@@ -12,18 +12,70 @@
         </Style>
     </Window.Styles>
     <DockPanel>
+        <!-- The menu: what the buttons do, and more -->
+        <Menu DockPanel.Dock="Top" Name="MainMenu" Background="{DynamicResource AmosPanelBg}" Foreground="{DynamicResource AmosTitleFg}">
+            <MenuItem Header="_File">
+                <MenuItem Header="_New" Name="MenuNew" Click="New_OnClick"/>
+                <MenuItem Header="_Open..." Name="MenuOpen" Click="Load_OnClick" ToolTip.Tip="Tracker songs, MOD and XM modules, YM, SNDH and SID chip music"/>
+                <MenuItem Header="Open _chip music..." Click="YmBrowser_OnClick"/>
+                <MenuItem Header="Open _recent" Name="RecentMenu"/>
+                <Separator/>
+                <MenuItem Header="_Save" Name="MenuSave" Click="Save_OnClick"/>
+                <MenuItem Header="Save _as..." Name="MenuSaveAs" Click="SaveAs_OnClick"/>
+                <Separator/>
+                <MenuItem Header="Save as _WAV..." Click="ExportWav_OnClick"/>
+                <MenuItem Header="Save as _XM (FastTracker 2)..." Click="ExportXm_OnClick"/>
+                <Separator/>
+                <MenuItem Header="_Close" Name="MenuClose" Click="MenuClose_OnClick"/>
+            </MenuItem>
+            <MenuItem Header="_Edit">
+                <MenuItem Header="_Undo" Name="MenuUndo" Click="MenuUndo_OnClick"/>
+                <MenuItem Header="_Redo" Name="MenuRedo" Click="MenuRedo_OnClick"/>
+                <Separator/>
+                <MenuItem Header="_Edit mode" InputGesture="Space" Click="MenuEditMode_OnClick"/>
+                <MenuItem Header="_Clone pattern" Click="ClonePattern_OnClick"/>
+            </MenuItem>
+            <MenuItem Header="_Song">
+                <MenuItem Header="Play _song" InputGesture="F5" Click="PlaySong_OnClick"/>
+                <MenuItem Header="Play _pattern" InputGesture="F6" Click="PlayPattern_OnClick"/>
+                <MenuItem Header="Play from the _row" InputGesture="F7" Click="MenuPlayFromRow_OnClick"/>
+                <MenuItem Header="S_top" InputGesture="Escape" Click="Stop_OnClick"/>
+                <MenuItem Header="P_anic (all sound off)" Click="Panic_OnClick"/>
+            </MenuItem>
+            <MenuItem Header="_Instrument">
+                <MenuItem Header="_Edit instrument" InputGesture="F4" Click="InstrumentTab_OnClick"/>
+                <MenuItem Header="_Add" Click="InstAdd_OnClick"/>
+                <MenuItem Header="_Clone" Click="InstClone_OnClick"/>
+                <MenuItem Header="_Delete" Click="InstDelete_OnClick"/>
+                <Separator/>
+                <MenuItem Header="_Library..." Click="InstLibrary_OnClick"/>
+                <MenuItem Header="_Simplify" Click="InstSimplify_OnClick"/>
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem Header="_Pattern" InputGesture="F3" Click="PatternTab_OnClick"/>
+                <MenuItem Header="_Instrument" InputGesture="F4" Click="InstrumentTab_OnClick"/>
+                <Separator/>
+                <MenuItem Header="_Theme" Name="ThemeMenu"/>
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_Keys..." Click="MenuKeys_OnClick"/>
+                <MenuItem Header="_About AMOS Tracker..." Click="MenuAbout_OnClick"/>
+            </MenuItem>
+        </Menu>
         <!-- Verktygsrad -->
         <Border DockPanel.Dock="Top" Background="{DynamicResource AmosPanelBg}" BorderBrush="{DynamicResource AmosPanelBorder}" BorderThickness="0,0,0,2" Padding="6">
             <StackPanel Spacing="6">
             <WrapPanel Orientation="Horizontal">
                 <Button Content="NEW" Classes="amos-button" Click="New_OnClick" Focusable="False" Margin="0,0,4,0"/>
                 <Button Content="LOAD" Classes="amos-button" Click="Load_OnClick" Focusable="False" Margin="0,0,4,0"/>
-                <Button Content="CHIP..." Classes="amos-button" Click="YmBrowser_OnClick" Focusable="False" Margin="0,0,4,0"
+                <Button Content="CHIP..." Classes="amos-button" Click="YmBrowser_OnClick" Focusable="False" Margin="0,0,14,0"
                         ToolTip.Tip="Browse Atari ST chip music (YM and SNDH files): hear a song by choosing it, and open it in the tracker"/>
                 <Button Content="SAVE" Classes="amos-button" Click="Save_OnClick" Focusable="False" Margin="0,0,4,0"/>
-                <Button Content="SAVE AS" Classes="amos-button" Click="SaveAs_OnClick" Focusable="False"/>
-                <Button Name="ExportWavButton" Content="WAV" Classes="amos-button" Click="ExportWav_OnClick" Focusable="False" Margin="0,0,14,0"
+                <Button Content="SAVE AS" Classes="amos-button" Click="SaveAs_OnClick" Focusable="False" Margin="0,0,4,0"/>
+                <Button Name="ExportWavButton" Content="WAV" Classes="amos-button" Click="ExportWav_OnClick" Focusable="False" Margin="0,0,4,0"
                         ToolTip.Tip="Save the song as a sound file (WAV), as you hear it: muted channels are left out"/>
+                <Button Name="ExportXmButton" Content="XM" Classes="amos-button" Click="ExportXm_OnClick" Focusable="False" Margin="0,0,14,0"
+                        ToolTip.Tip="Save the song as a FastTracker 2 module (XM), for other trackers and players: the synth's instruments are played into samples"/>
                 <Button Content="PLAY SONG" Classes="amos-button" Click="PlaySong_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F5"/>
                 <Button Content="PLAY PATTERN" Classes="amos-button" Click="PlayPattern_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="F6"/>
                 <Button Content="STOP" Classes="amos-button" Click="Stop_OnClick" Focusable="False" Margin="0,0,4,0" ToolTip.Tip="Esc"/>

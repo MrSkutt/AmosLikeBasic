@@ -545,7 +545,7 @@ public class PatternView : Control
                 case Key.A: SelectAll(); return;
                 case Key.Z: Command?.Invoke(shift ? "redo" : "undo"); return;
                 case Key.Y: Command?.Invoke("redo"); return;
-                case Key.S: Command?.Invoke("save"); return;
+                case Key.S: Command?.Invoke(shift ? "save-as" : "save"); return;
                 case Key.Up: Transpose(shift ? 12 : 1); return;
                 case Key.Down: Transpose(shift ? -12 : -1); return;
                 // Mac keyboards have no Insert, and their delete key is Backspace

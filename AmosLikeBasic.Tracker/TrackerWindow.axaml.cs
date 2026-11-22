@@ -136,6 +136,14 @@ public partial class TrackerWindow : Window
             SongChanged();
         };
 
+        NumberBox(SpeedBox, () => _song.Speed);
+        NumberBox(TempoBox, () => _song.Tempo);
+        NumberBox(OctaveBox, () => Pattern.Octave);
+        NumberBox(StepBox, () => Pattern.EditStep);
+        NumberBox(ChannelsBox, () => _song.Channels);
+        NumberBox(RowsBox, () => _song.Patterns[Pattern.PatternIndex].Rows);
+
+        BuildMenu();
         BuildInstrumentPanel();
         AddHandler(KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Bubble);
         Closing += OnClosing;
@@ -1068,7 +1076,33 @@ public partial class TrackerWindow : Window
             case "undo": Undo(); break;
             case "redo": Redo(); break;
             case "save": _ = SaveAsync(false); break;
+            case "save-as": _ = SaveAsync(true); break;
         }
+    }
+
+    // A number box in the toolbar: only digits can be typed in it. Its arrows (and the mouse wheel)
+    // change the value without taking the keys from the pattern; after typing a number, Enter keeps
+    // it and Esc goes back to the one before, and either gives the keys back. Left empty, it shows
+    // the value it had.
+    private void NumberBox(NumericUpDown box, Func<int> current)
+    {
+        box.ParsingNumberStyle = NumberStyles.Integer;
+        box.AddHandler(TextInputEvent, (_, e) =>
+        {
+            if (e.Text != null && !e.Text.All(char.IsAsciiDigit)) e.Handled = true;
+        }, RoutingStrategies.Tunnel);
+        box.Spinned += (_, _) => KeepTypingFocus();
+        box.AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key is not (Key.Enter or Key.Escape)) return;
+            if (e.Key == Key.Escape) box.Text = current().ToString(CultureInfo.InvariantCulture);
+            e.Handled = true;
+            KeepTypingFocus();
+        }, RoutingStrategies.Tunnel);
+        box.LostFocus += (_, _) =>
+        {
+            if (box.Value == null) box.Value = current();
+        };
     }
 
     // Picking an instrument or a position in a list should not take the keys away from the
@@ -1160,7 +1194,10 @@ public partial class TrackerWindow : Window
             case Key.F3: ShowInstrumentPage(false); break;
             case Key.F4: ShowInstrumentPage(true); break;
             case Key.Escape: Stop(); break;
-            case Key.S when cmd: _ = SaveAsync(false); break;
+            case Key.S when cmd: _ = SaveAsync(e.KeyModifiers.HasFlag(KeyModifiers.Shift)); break;
+            case Key.N when cmd: New_OnClick(this, e); break;
+            case Key.O when cmd: Load_OnClick(this, e); break;
+            case Key.W when cmd: Close(); break;
             case Key.Z when cmd: if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) Redo(); else Undo(); break;
             default: return;
         }
@@ -1421,6 +1458,7 @@ public partial class TrackerWindow : Window
             _dirty = false;
             UpdateTitle();
             UpdateStatus();
+            AddRecent(path);
             KeepTypingFocus();
         }
         catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)
@@ -1504,6 +1542,7 @@ public partial class TrackerWindow : Window
             Stop();
             _song = result.Song;
             _path = null;   // saved as a tracker song the first time SAVE is pressed
+            AddRecent(path);
             _undo.Clear();
             _redo.Clear();
             LoadSongIntoUi();
@@ -1566,6 +1605,207 @@ public partial class TrackerWindow : Window
         }
     }
 
+    // The song as a FastTracker 2 module; the synth's instruments are played into samples, which takes
+    // the synth a moment, as the WAV file does
+    private async void ExportXm_OnClick(object? sender, RoutedEventArgs e)
+    {
+        string name = string.IsNullOrWhiteSpace(_song.Title) ? "song" : _song.Title;
+        if (_path != null) name = Path.GetFileNameWithoutExtension(_path);
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save the song as XM",
+            SuggestedFileName = name + ".xm",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound),
+            FileTypeChoices = new[] { new FilePickerFileType("FastTracker 2 module") { Patterns = new[] { "*.xm" } } }
+        });
+        if (file?.TryGetLocalPath() is not { } path) return;
+
+        Stop();
+        ReleasePageNotes();
+        ExportXmButton.IsEnabled = false;
+        var song = TrackerSong.FromJson(_song.ToJson());   // a copy, so editing on does not change it half way
+        try
+        {
+            var result = await Task.Run(() => XmExport.Write(song, (notes, tempo) => ChiptuneSynth.RenderNotes(notes, tempo,
+                done => Dispatcher.UIThread.Post(() => SetStatus($"Making the XM file... {(int)(done * 100)} %")))));
+            await File.WriteAllBytesAsync(path, result.Bytes);
+            SetStatus($"Saved {Path.GetFileName(path)} ({result.Bytes.Length / 1024} KB)");
+            if (result.Notes.Count > 0)
+                _ = ShowReportAsync("Saved " + Path.GetFileName(path), string.Join("\n\n", result.Notes));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            SetStatus("Could not save the XM file: " + ex.Message);
+        }
+        finally
+        {
+            ExportXmButton.IsEnabled = true;
+            ApplyMutes();
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //  The menu
+    // ════════════════════════════════════════════════════════════════
+
+    // Set by AMOS Like Basic, so that a theme chosen here is its theme too; on its own the tracker
+    // keeps the theme in AMOS Like Basic's settings, which both read when they start
+    public static Action<string>? ThemeChanger { get; set; }
+
+    private static readonly (string Name, string Key)[] Themes =
+    {
+        ("Light Clean", "LightClean"), ("Dark Pro", "DarkPro"), ("Classic AMOS", "ClassicBlue"), ("Workbench", "Workbench"),
+        ("C64", "C64"), ("Stos Classic", "StosClassic"), ("Stos Editor", "StosEditor"), ("Emerald", "Emerald"),
+        ("Neon Night", "NeonNight"), ("Catppuccin Mocha", "CatppuccinMocha")
+    };
+
+    private void BuildMenu()
+    {
+        // Cmd on a Mac, Ctrl elsewhere
+        var cmd = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+        MenuNew.InputGesture = new KeyGesture(Key.N, cmd);
+        MenuOpen.InputGesture = new KeyGesture(Key.O, cmd);
+        MenuSave.InputGesture = new KeyGesture(Key.S, cmd);
+        MenuSaveAs.InputGesture = new KeyGesture(Key.S, cmd | KeyModifiers.Shift);
+        MenuClose.InputGesture = new KeyGesture(Key.W, cmd);
+        MenuUndo.InputGesture = new KeyGesture(Key.Z, cmd);
+        MenuRedo.InputGesture = new KeyGesture(Key.Z, cmd | KeyModifiers.Shift);
+
+        // The themes, the one in use marked (looked up again when the menu opens, as AMOS Like Basic
+        // may have changed it)
+        var themeItems = Themes.Select(t =>
+        {
+            var item = new MenuItem { Header = t.Name, ToggleType = MenuItemToggleType.Radio, Tag = t.Key };
+            item.Click += (_, _) => ChangeTheme(t.Key);
+            return item;
+        }).ToList();
+        ThemeMenu.ItemsSource = themeItems;
+        void MarkTheme()
+        {
+            var config = new ConfigService("AmosProject");
+            config.Load();
+            string current = AmosThemes.ByName(config.Config.DefaultTheme).Name;
+            foreach (var item in themeItems) item.IsChecked = AmosThemes.ByName((string)item.Tag!).Name == current;
+        }
+        ThemeMenu.SubmenuOpened += (_, _) => MarkTheme();
+        MarkTheme();
+
+        FillRecentMenu();
+    }
+
+    private static void ChangeTheme(string key)
+    {
+        if (ThemeChanger != null) { ThemeChanger(key); return; }
+        ThemeResources.Apply(AmosThemes.ByName(key));
+        var config = new ConfigService("AmosProject");
+        config.Load();
+        config.Config.DefaultTheme = key;
+        config.Save();
+    }
+
+    // The songs and music opened or saved last, newest first, in the settings of this name (the
+    // programs that open the tracker set it; without it nothing is remembered, as in the tests)
+    public static string? RecentSettings { get; set; }
+    private const int RecentCount = 10;
+
+    private static List<string> RecentFiles()
+    {
+        if (RecentSettings == null) return new List<string>();
+        var config = new ConfigService(RecentSettings);
+        config.Load();
+        return config.Config.RecentFiles;
+    }
+
+    private void AddRecent(string path)
+    {
+        if (RecentSettings == null) return;
+        try
+        {
+            var config = new ConfigService(RecentSettings);
+            config.Load();
+            var list = config.Config.RecentFiles;
+            list.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+            list.Insert(0, path);
+            if (list.Count > RecentCount) list.RemoveRange(RecentCount, list.Count - RecentCount);
+            config.Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        FillRecentMenu();
+    }
+
+    private void FillRecentMenu()
+    {
+        var files = RecentFiles().Where(File.Exists).ToList();
+        RecentMenu.IsEnabled = files.Count > 0;
+        RecentMenu.ItemsSource = files.Select(f =>
+        {
+            var item = new MenuItem { Header = Path.GetFileName(f) };
+            ToolTip.SetTip(item, f);
+            item.Click += async (_, _) =>
+            {
+                if (!await ConfirmDiscardAsync()) return;
+                await LoadFile(f);
+            };
+            return (object)item;
+        }).ToList();
+    }
+
+    private void MenuClose_OnClick(object? sender, RoutedEventArgs e) => Close();
+    private void MenuUndo_OnClick(object? sender, RoutedEventArgs e) => Undo();
+    private void MenuRedo_OnClick(object? sender, RoutedEventArgs e) => Redo();
+    private void MenuEditMode_OnClick(object? sender, RoutedEventArgs e) { SetEditMode(!Pattern.EditMode); KeepTypingFocus(); }
+    private void MenuPlayFromRow_OnClick(object? sender, RoutedEventArgs e) => PlayPattern(Pattern.CursorRow);
+
+    private void MenuKeys_OnClick(object? sender, RoutedEventArgs e)
+    {
+        string c = OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl";
+        string alt = OperatingSystem.IsMacOS() ? "Option" : "Alt";
+        _ = ShowReportAsync("Keys", string.Join("\n", new[]
+        {
+            "Notes: the bottom row of letters (Z S X D C V G B H N J M) is one octave, the top row (Q 2 W 3 E R 5 T 6 Y 7 U I) the next; 1 lets go of the note (===).",
+            "F1 / F2   the octave down / up",
+            "Space   edit mode on and off (stops the music when it plays)",
+            "Arrows, Tab, Page Up / Down, Home / End   move around the pattern",
+            "Delete   clears the cell",
+            "",
+            "F3 / F4   the pattern page / the instrument page",
+            "F5   play the song      F6   play the pattern      F7   play from the row      Esc   stop",
+            "",
+            $"{c}+C / X / V   copy, cut and paste the selection (Shift and the arrows select)",
+            $"{c}+A   select all      {c}+↑ / ↓   transpose a semitone (with Shift an octave)",
+            $"{c}+I / {c}+Backspace   insert / delete a row in the channel (with Shift in all of them)",
+            $"{c}+Z   undo      {c}+Shift+Z or {c}+Y   redo",
+            $"{alt}+↑ / ↓   the channel plays another pattern at this place      {alt}+N   a pattern of its own",
+            "",
+            $"{c}+N   new      {c}+O   open      {c}+S   save      {c}+Shift+S   save as      {c}+W   close",
+            "The number boxes: their arrows or the mouse wheel; type a number and Enter keeps it, Esc goes back."
+        }));
+    }
+
+    private void MenuAbout_OnClick(object? sender, RoutedEventArgs e)
+    {
+        string version = System.Reflection.Assembly.GetEntryAssembly()?
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion.Split('+')[0] ?? "";
+        if (version is "" or "1.0.0") version = "a build of its own";
+        _ = ShowReportAsync("About AMOS Tracker", string.Join("\n", new[]
+        {
+            "AMOS Tracker, version " + version,
+            "Part of AMOS Like Basic: github.com/MrSkutt/AmosLikeBasic",
+            "",
+            "A tracker for chip music with a synth of its own, which also reads and writes the music of",
+            "the old machines:",
+            "  MOD and XM modules (ProTracker, FastTracker 2), read and saved as XM",
+            "  YM and SNDH from the Atari ST, played on an emulated 68000 and STe",
+            "  maxYMiser songs in SNDH files, read from the song itself",
+            "  SID files from the Commodore 64, played on an emulated 6510 and SID",
+            "",
+            "Songs are played in BASIC with TRACK LOAD and TRACK PLAY.",
+            "",
+            "Thanks to the SNDH archive, the High Voltage SID Collection and gwEm's maxYMiser."
+        }));
+    }
+
     private async void Save_OnClick(object? sender, RoutedEventArgs e) => await SaveAsync(false);
     private async void SaveAs_OnClick(object? sender, RoutedEventArgs e) => await SaveAsync(true);
 
@@ -1593,6 +1833,7 @@ public partial class TrackerWindow : Window
             _song.Save(path);
             _path = path;
             _dirty = false;
+            AddRecent(path);
             UpdateTitle();
             UpdateStatus();
             SetStatus("Saved. Play it in BASIC with " + LoadLine());

@@ -1103,6 +1103,8 @@ public partial class MainWindow : Window
             _trackerWindow.Activate();
             return;
         }
+        TrackerWindow.ThemeChanger = ChangeTheme;
+        TrackerWindow.RecentSettings = "AmosTracker";
         _trackerWindow = new TrackerWindow();
         _trackerWindow.Closed += (_, _) => _trackerWindow = null;
         _trackerWindow.Show();
