@@ -1477,7 +1477,7 @@ public partial class TrackerWindow : Window
                 var bytes = File.ReadAllBytes(path);
                 return XmImport.IsXm(bytes) ? XmImport.Import(bytes, name, folder, inSong)
                     : SidFile.IsSid(bytes) ? YmImport.ImportSid(SidFile.Load(path), name, tune, progress: Progress)
-                    : YmFile.IsChipMusic(bytes) ? YmImport.Import(YmFile.ReadChipMusic(bytes, tune, Progress), name, true, folder, inSong)
+                    : YmFile.IsChipMusic(bytes) ? YmImport.ImportChipMusic(bytes, name, tune, folder, inSong, Progress)
                     : ModImport.Import(bytes, name, folder, inSong);
             });
             // Only a read that takes a while shows the window
