@@ -49,6 +49,10 @@ namespace AmosLikeBasic
 
         public bool HasChannelOrder => ChannelOrder.Any(c => c != null && c.Any(p => p >= 0));
 
+        // YM mode (null: the synth, as always): channels 1 – 3 are played by the Atari ST's sound chip,
+        // each instrument by its YM part (a maxYMiser instrument), as a song read from maxYMiser sounds.
+        public TrackerYmSong? Ym { get; set; }
+
         // The pattern a channel plays at a place in the order list
         public int PatternAt(int position, int channel)
         {
@@ -235,6 +239,8 @@ namespace AmosLikeBasic
             public List<int> Order { get; set; } = new();
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
             public List<int[]?>? ChannelOrder { get; set; }
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public TrackerYmSong? Ym { get; set; }
             public List<List<string>> Patterns { get; set; } = new();
         }
 
@@ -291,6 +297,7 @@ namespace AmosLikeBasic
                 if (own != null && own.Any(p => p >= song.Patterns.Count))
                     throw new FormatException("A channel's order points to a pattern that does not exist");
             song.TrimChannelOrder();
+            song.Ym = file.Ym;
             foreach (var inst in song.Instruments) inst.Table ??= new();
             return song;
         }
@@ -305,7 +312,8 @@ namespace AmosLikeBasic
                 Channels = Channels,
                 Instruments = Instruments,
                 Order = Order,
-                ChannelOrder = HasChannelOrder ? ChannelOrder.Select(o => o?.Take(Channels).ToArray()).ToList() : null
+                ChannelOrder = HasChannelOrder ? ChannelOrder.Select(o => o?.Take(Channels).ToArray()).ToList() : null,
+                Ym = Ym
             };
             foreach (var p in Patterns)
             {
@@ -420,6 +428,67 @@ namespace AmosLikeBasic
         // TableLoop is the step the table jumps back to, -1 stays on the last step.
         public List<string> Table { get; set; } = new();
         public int TableLoop { get; set; } = -1;
+
+        // The instrument as the Atari ST's sound chip plays it, in a song in YM mode (null: none)
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public TrackerYmInstrument? Ym { get; set; }
+    }
+
+    // A song in YM mode: how the chip's channels are played
+    public sealed class TrackerYmSong
+    {
+        // The timer effects each channel may use: bit 2 channel 1, bit 1 channel 2, bit 0 channel 3
+        public int Timers { get; set; } = 7;
+        // The replay's calls in each tick of the tracker (more than 1 for a replay faster than ~100 Hz)
+        public double CallsPerTick { get; set; } = 1;
+        // The buzzer's shape from the mixer sequence (maxYMiser's newer songs), or always the instrument's
+        public bool ShapeFromMixer { get; set; } = true;
+    }
+
+    // An instrument for the sound chip, as maxYMiser has them: sequences stepped every Speed ticks
+    // from the note's start, each going round from its Repeat (or staying on its last step when that
+    // is the repeat). What they hold:
+    //   Volume   the chip's volume 0 – 15
+    //   Arpeggio semitones; Vibrato and Fixed tone periods (Fixed: the period itself, $FFFF none)
+    //   Mixer    a word: $0100 the tone, $1000 noise, $00x0 the buzzer (x its shape; 1 the instrument's),
+    //            $000x the timer effect (5 SID, 9 PWM, B sync buzzer, D digidrum)
+    //   Noise    the noise period 0 – 31;  Timer  the SID's steps (the volume less each);  Pwm  widths
+    // The flags say what the pitch effects act on: bit 2 the tone, 1 the buzzer, 0 the timer.
+    public sealed class TrackerYmInstrument
+    {
+        public int Speed { get; set; } = 1;
+        public int Volume { get; set; }                  // taken off the volume sequence, 0 – 15
+        public int Portamento { get; set; }
+        public int Arpeggio { get; set; }
+        public int Vibrato { get; set; }
+        public int Transpose { get; set; }
+        public int FixedFrequency { get; set; }
+        public int FixedDetune { get; set; }
+        public int DetuneCoarse { get; set; }            // semitones
+        public int DetuneFine { get; set; }              // tone periods
+        public int PulseWidth { get; set; }              // the PWM timer's width, 0 – 255
+        public int PwmSlide { get; set; }                // added to it each tick
+        public bool PwmFixed { get; set; }               // the width as set, without the slide
+        // The slide's sum goes on from note to note in a channel; this note starts it from 0 again
+        public bool PwmReset { get; set; }
+        public int BuzzerWave { get; set; } = 8;         // the envelope's shape, 0 – 15
+        public int NoiseTranspose { get; set; }
+        public string DigiSample { get; set; } = "";     // a WAV file (8-bit levels), for the digidrum timer
+        public int DigiRate { get; set; } = 0x20;        // its MFP timer data: 614400 / rate Hz
+        public TrackerYmSequence? VolumeSeq { get; set; }
+        public TrackerYmSequence? ArpeggioSeq { get; set; }
+        public TrackerYmSequence? VibratoSeq { get; set; }
+        public TrackerYmSequence? MixerSeq { get; set; }
+        public TrackerYmSequence? NoiseSeq { get; set; }
+        public TrackerYmSequence? FixedSeq { get; set; }
+        public TrackerYmSequence? TimerSeq { get; set; }
+        public TrackerYmSequence? PwmSeq { get; set; }
+    }
+
+    public sealed class TrackerYmSequence
+    {
+        public List<int> Steps { get; set; } = new();
+        public int Repeat { get; set; }
     }
 
     public sealed class TrackerEnvelopePoint

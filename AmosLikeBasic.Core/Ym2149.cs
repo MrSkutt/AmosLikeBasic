@@ -26,9 +26,13 @@ public sealed class Ym2149
     private readonly double[] _sidStep = new double[3], _sidPhase = new double[3];
     private readonly int[] _sidVolume = new int[3];
     private readonly bool[] _sidSine = new bool[3];
+    private readonly int[]?[] _sidLevels = new int[]?[3];   // a SID's own steps (maxYMiser's), or null for on / off
+    private readonly double[] _sidDuty = new double[3];
     private readonly float[]?[] _drum = new float[]?[3];
     private readonly double[] _drumPos = new double[3], _drumStep = new double[3];
     private double _syncStep, _syncPhase;
+    private int[]? _syncShapes;   // the shapes a sync buzzer writes in turn (maxYMiser's), or null: the same again
+    private int _syncIndex;
 
     // The 32 volume steps of the YM2149, about 1.5 dB apart (a 4-bit volume v is step 2v + 1)
     private static readonly double[] Level = BuildLevels();
@@ -60,9 +64,25 @@ public sealed class Ym2149
         _sidStep[channel] = frequency / 2 / _clockTicks;
         _sidVolume[channel] = volume & 15;
         _sidSine[channel] = sine;
+        _sidLevels[channel] = null;
     }
 
-    public void StopSid(int channel) => _sidStep[channel] = 0;
+    // A SID that writes its own steps, the volumes 0 – 15 one after another, a round of them `frequency`
+    // times a second. Two steps take `duty` and the rest of the round (a PWM); more take equal parts.
+    // Started again only when the rate or the steps change, so that it runs on through the frames.
+    public void StartSidSteps(int channel, double frequency, int[] levels, double duty = 0.5)
+    {
+        double step = frequency / _clockTicks;
+        var old = _sidLevels[channel];
+        bool same = old != null && old.AsSpan().SequenceEqual(levels);
+        _sidStep[channel] = step;
+        _sidLevels[channel] = levels;
+        _sidDuty[channel] = Math.Clamp(duty, 0, 1);
+        _sidSine[channel] = false;
+        if (!same) _sidPhase[channel] = 0;
+    }
+
+    public void StopSid(int channel) { _sidStep[channel] = 0; _sidLevels[channel] = null; }
 
     public void StartDrum(int channel, float[] sample, double frequency)
     {
@@ -71,10 +91,29 @@ public sealed class Ym2149
         _drumStep[channel] = frequency / _clockTicks;
     }
 
-    public void StartSyncBuzzer(double frequency) { _syncStep = frequency / _clockTicks; _syncPhase = 0; }
-    public void StopSyncBuzzer() => _syncStep = 0;
+    public void StartSyncBuzzer(double frequency) { _syncStep = frequency / _clockTicks; _syncPhase = 0; _syncShapes = null; }
 
-    private void RestartEnvelope() => Write(13, (byte)(_r[13] & 15));
+    // A sync buzzer that writes its own shapes, one after another, `frequency` times a second (each
+    // write starts the envelope). It runs on through the frames while the shapes stay the same.
+    public void StartSyncBuzzer(double frequency, int[] shapes)
+    {
+        bool same = _syncStep > 0 && _syncShapes != null && _syncShapes.AsSpan().SequenceEqual(shapes);
+        _syncStep = frequency / _clockTicks;
+        _syncShapes = shapes;
+        if (!same) { _syncPhase = 0; _syncIndex = 0; }
+    }
+
+    public void StopSyncBuzzer() { _syncStep = 0; _syncShapes = null; }
+
+    private void RestartEnvelope()
+    {
+        if (_syncShapes is { Length: > 0 } shapes)
+        {
+            Write(13, (byte)(shapes[_syncIndex] & 15));
+            _syncIndex = (_syncIndex + 1) % shapes.Length;
+        }
+        else Write(13, (byte)(_r[13] & 15));
+    }
 
     // A register from a YM file, where 0xFF in register 13 means "not written this frame"
     public void Write(int register, byte value)
@@ -163,9 +202,16 @@ public sealed class Ym2149
                     // SID voice: the volume on in the timer's first half and off in the other (or a sine)
                     _sidPhase[c] += _sidStep[c];
                     if (_sidPhase[c] >= 1) _sidPhase[c] -= 1;
-                    level = VolumeLevel(_sidVolume[c]) * (_sidSine[c]
-                        ? 0.5 - 0.5 * Math.Cos(_sidPhase[c] * 2 * Math.PI)
-                        : _sidPhase[c] < 0.5 ? 1 : 0);
+                    if (_sidLevels[c] is { } steps)
+                    {
+                        int k = steps.Length == 2 ? (_sidPhase[c] < _sidDuty[c] ? 0 : 1)
+                            : Math.Min(steps.Length - 1, (int)(_sidPhase[c] * steps.Length));
+                        level = VolumeLevel(steps[k]);
+                    }
+                    else
+                        level = VolumeLevel(_sidVolume[c]) * (_sidSine[c]
+                            ? 0.5 - 0.5 * Math.Cos(_sidPhase[c] * 2 * Math.PI)
+                            : _sidPhase[c] < 0.5 ? 1 : 0);
                 }
                 else
                 {

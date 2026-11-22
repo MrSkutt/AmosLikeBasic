@@ -213,6 +213,7 @@ public partial class TrackerWindow : Window
         _loading = true;
         try
         {
+            UpdateYmMode();
             TitleBox.Text = _song.Title;
             SpeedBox.Value = _song.Speed;
             TempoBox.Value = _song.Tempo;
@@ -350,7 +351,16 @@ public partial class TrackerWindow : Window
         });
 
         var cards = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
+        // In a song in YM mode, an instrument with a YM part is edited as the chip plays it
+        var ymPanel = BuildYmPanel();
+        panel.Children.Add(ymPanel);
         panel.Children.Add(cards);
+        _instrumentRefresh.Add(() =>
+        {
+            bool ym = _song.Ym != null && CurrentInstrument?.Ym != null;
+            ymPanel.IsVisible = ym;
+            cards.IsVisible = !ym;
+        });
 
         // Enter in a box (Esc in the table, where Enter makes a new line) goes back to playing notes.
         // handledEventsToo: the number box has used Enter to take the typed value by then.
@@ -837,6 +847,195 @@ public partial class TrackerWindow : Window
         card.Children.Add(graph);
     }
 
+    // ── The YM part of an instrument (a song in YM mode) ─────────────────
+
+    private static readonly string[] YmFlagNames = { "Portamento", "Arpeggio", "Vibrato", "Transpose", "Fixed frequency", "Fixed detune" };
+
+    private static readonly (string Label, string Help)[] YmSequenceNames =
+    {
+        ("Volume", "the chip's volume, 0 – F"),
+        ("Arpeggio", "semitones from the note (with the arpeggio flags)"),
+        ("Vibrato", "tone periods off the note (with the vibrato flags)"),
+        ("Mixer", "0100 tone, 1000 noise, 00x0 buzzer (x its shape, 1 the instrument's), 000x timer: 5 SID, 9 PWM, B sync buzzer, D digidrum"),
+        ("Noise", "the noise period, 0 – 1F"),
+        ("Fixed", "a tone period of its own, FFFF none (with the fixed frequency flags)"),
+        ("Timer", "the SID's steps (the volume less each), or the sync buzzer's shapes"),
+        ("PWM", "the PWM timer's width added, 0 – FF")
+    };
+
+    private static TrackerYmSequence? GetYmSeq(TrackerYmInstrument y, int i) => i switch
+    {
+        0 => y.VolumeSeq, 1 => y.ArpeggioSeq, 2 => y.VibratoSeq, 3 => y.MixerSeq,
+        4 => y.NoiseSeq, 5 => y.FixedSeq, 6 => y.TimerSeq, _ => y.PwmSeq
+    };
+
+    private static void SetYmSeq(TrackerYmInstrument y, int i, TrackerYmSequence? q)
+    {
+        switch (i)
+        {
+            case 0: y.VolumeSeq = q; break;
+            case 1: y.ArpeggioSeq = q; break;
+            case 2: y.VibratoSeq = q; break;
+            case 3: y.MixerSeq = q; break;
+            case 4: y.NoiseSeq = q; break;
+            case 5: y.FixedSeq = q; break;
+            case 6: y.TimerSeq = q; break;
+            default: y.PwmSeq = q; break;
+        }
+    }
+
+    // A sequence as text: its steps in hex, "|" before the step it goes round from (none: it stays on
+    // its last step). The mixer's words with four digits.
+    public static string YmSequenceText(TrackerYmSequence? q, bool words)
+    {
+        if (q == null || q.Steps.Count == 0) return "";
+        var parts = q.Steps.Select(v => v < 0 ? "-" + (-v).ToString("X") : v.ToString(words ? "X4" : "X")).ToList();
+        if (q.Repeat < q.Steps.Count - 1) parts.Insert(Math.Max(0, q.Repeat), "|");
+        return string.Join(" ", parts);
+    }
+
+    public static TrackerYmSequence? ParseYmSequence(string text)
+    {
+        var steps = new List<int>();
+        int repeat = -1;
+        foreach (var raw in text.Replace("|", " | ").Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (raw == "|") { repeat = steps.Count; continue; }
+            bool minus = raw.StartsWith('-');
+            int v = int.Parse(minus ? raw[1..] : raw, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            steps.Add(minus ? -v : v);
+        }
+        if (steps.Count == 0) return null;
+        if (steps.Count > 63) throw new FormatException("A sequence has at most 63 steps");
+        return new TrackerYmSequence { Steps = steps, Repeat = repeat < 0 || repeat >= steps.Count ? steps.Count - 1 : repeat };
+    }
+
+    private StackPanel BuildYmPanel()
+    {
+        var panel = new StackPanel { Spacing = 6, Margin = new Thickness(0, 10, 0, 0), MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Left };
+        AddHeading(panel, "YM INSTRUMENT: THE SOUND CHIP");
+        panel.Children.Add(new TextBlock
+        {
+            Text = "The song is in YM mode: channels 1 – 3 are played by the Atari ST's sound chip, as maxYMiser does. " +
+                   "The sequences are stepped every Speed ticks from the note's start; each is written in hex, with | before " +
+                   "the step it goes round from (without it, it stays on its last step).",
+            Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap
+        });
+
+        void Number(string label, int min, int max, Func<TrackerYmInstrument, int> get, Action<TrackerYmInstrument, int> set)
+        {
+            var box = new NumericUpDown { Minimum = min, Maximum = max, Increment = 1, FormatString = "0", Width = 150, HorizontalAlignment = HorizontalAlignment.Left };
+            box.ValueChanged += (_, _) =>
+            {
+                if (box.Value is decimal d) EditInstrument("ym:" + label, i => { if (i.Ym != null) set(i.Ym, (int)d); });
+            };
+            AddRow(panel, label, box);
+            _instrumentRefresh.Add(() =>
+            {
+                var y = CurrentInstrument?.Ym;
+                box.IsEnabled = y != null;
+                box.Value = y == null ? null : Math.Clamp(get(y), min, max);
+            });
+        }
+        Number("Speed", 1, 63, y => y.Speed, (y, v) => y.Speed = v);
+        Number("Volume off", 0, 15, y => y.Volume, (y, v) => y.Volume = v);
+        Number("Detune coarse", -96, 96, y => y.DetuneCoarse, (y, v) => y.DetuneCoarse = v);
+        Number("Detune fine", -128, 127, y => y.DetuneFine, (y, v) => y.DetuneFine = v);
+        Number("Pulse width", 0, 255, y => y.PulseWidth, (y, v) => y.PulseWidth = v);
+        Number("PWM slide", -128, 127, y => y.PwmSlide, (y, v) => y.PwmSlide = v);
+        Number("Buzzer shape", 0, 15, y => y.BuzzerWave, (y, v) => y.BuzzerWave = v);
+        Number("Noise transpose", -31, 31, y => y.NoiseTranspose, (y, v) => y.NoiseTranspose = v);
+        Number("Digi rate", 0x18, 0xCD, y => y.DigiRate, (y, v) => y.DigiRate = v);
+
+        // What the pitch effects act on: the tone, the buzzer, the timer
+        AddHeading(panel, "WHAT THE PITCH ACTS ON");
+        var flags = new Grid { ColumnDefinitions = new ColumnDefinitions("140,80,80,80") };
+        for (int r = 0; r <= YmFlagNames.Length; r++) flags.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        string[] sources = { "Tone", "Buzzer", "Timer" };
+        for (int k = 0; k < 3; k++)
+        {
+            var head = new TextBlock { Text = sources[k], Classes = { "amos-label" } };
+            Grid.SetColumn(head, k + 1);
+            flags.Children.Add(head);
+        }
+        for (int f = 0; f < YmFlagNames.Length; f++)
+        {
+            var name = new TextBlock { Text = YmFlagNames[f], Classes = { "amos-label" }, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetRow(name, f + 1);
+            flags.Children.Add(name);
+            for (int k = 0; k < 3; k++)
+            {
+                int flag = f, bit = 4 >> k;
+                var check = new CheckBox { Focusable = false };
+                Grid.SetRow(check, f + 1);
+                Grid.SetColumn(check, k + 1);
+                check.IsCheckedChanged += (_, _) => EditInstrument("ym:flags", i =>
+                {
+                    if (i.Ym == null) return;
+                    int v = GetYmFlag(i.Ym, flag);
+                    SetYmFlag(i.Ym, flag, check.IsChecked == true ? v | bit : v & ~bit);
+                });
+                flags.Children.Add(check);
+                _instrumentRefresh.Add(() =>
+                {
+                    var y = CurrentInstrument?.Ym;
+                    check.IsEnabled = y != null;
+                    check.IsChecked = y != null && (GetYmFlag(y, flag) & bit) != 0;
+                });
+            }
+        }
+        panel.Children.Add(flags);
+
+        // The sequences
+        AddHeading(panel, "SEQUENCES");
+        for (int i = 0; i < YmSequenceNames.Length; i++)
+        {
+            int index = i;
+            var box = new TextBox { FontFamily = new FontFamily("Menlo, Consolas, Courier New, monospace"), Watermark = YmSequenceNames[i].Help };
+            ToolTip.SetTip(box, YmSequenceNames[i].Help);
+            void Commit()
+            {
+                if (_loading) return;
+                try
+                {
+                    var q = ParseYmSequence(box.Text ?? "");
+                    box.BorderBrush = null;
+                    EditInstrument("ym:seq" + index, inst => { if (inst.Ym != null) SetYmSeq(inst.Ym, index, q); });
+                }
+                catch (FormatException e) { box.BorderBrush = Brushes.Red; SetStatus($"{YmSequenceNames[index].Label}: {e.Message}"); }
+            }
+            box.LostFocus += (_, _) => Commit();
+            box.KeyDown += (_, e) => { if (e.Key == Key.Enter) Commit(); };
+            AddRow(panel, YmSequenceNames[i].Label, box);
+            _instrumentRefresh.Add(() =>
+            {
+                var y = CurrentInstrument?.Ym;
+                box.IsEnabled = y != null;
+                box.BorderBrush = null;
+                box.Text = y == null ? "" : YmSequenceText(GetYmSeq(y, index), index is 3 or 5);
+            });
+        }
+        return panel;
+    }
+
+    private static int GetYmFlag(TrackerYmInstrument y, int f) => f switch
+    {
+        0 => y.Portamento, 1 => y.Arpeggio, 2 => y.Vibrato, 3 => y.Transpose, 4 => y.FixedFrequency, _ => y.FixedDetune
+    };
+
+    private static void SetYmFlag(TrackerYmInstrument y, int f, int v)
+    {
+        switch (f)
+        {
+            case 0: y.Portamento = v; break;
+            case 1: y.Arpeggio = v; break;
+            case 2: y.Vibrato = v; break;
+            case 3: y.Transpose = v; break;
+            case 4: y.FixedFrequency = v; break;
+            default: y.FixedDetune = v; break;
+        }
+    }
+
     private void AddHeading(StackPanel panel, string text) =>
         panel.Children.Add(new TextBlock { Text = text, Classes = { "amos-title" }, Margin = new Thickness(0, 8, 0, 0) });
 
@@ -1288,6 +1487,47 @@ public partial class TrackerWindow : Window
 
     private void InstAdd_OnClick(object? sender, RoutedEventArgs e) =>
         AddInstrument(new TrackerInstrument { Name = "Instrument " + (_song.Instruments.Count + 1) });
+
+    // An instrument for the chip: the tone at full volume (and the synth's square for it, heard when
+    // the song is not in YM mode). The song goes into YM mode with it.
+    private void InstAddYm_OnClick(object? sender, RoutedEventArgs e)
+    {
+        var inst = new TrackerInstrument
+        {
+            Name = "YM " + (_song.Instruments.Count + 1), Wave = "Square", Volume = 0.21, Attack = 0, Decay = 0, Sustain = 100, Release = 2,
+            Ym = new TrackerYmInstrument
+            {
+                VolumeSeq = new TrackerYmSequence { Steps = { 15 } },
+                MixerSeq = new TrackerYmSequence { Steps = { 0x100 } }
+            }
+        };
+        if (_song.Ym == null)
+        {
+            PushUndo("ym mode");
+            _song.Ym = new TrackerYmSong();
+            UpdateYmMode();
+        }
+        AddInstrument(inst);
+    }
+
+    // YM mode on and off. The instruments keep both parts, so nothing is lost either way.
+    private void MenuYmMode_OnClick(object? sender, RoutedEventArgs e)
+    {
+        PushUndo("ym mode");
+        _song.Ym = _song.Ym == null ? new TrackerYmSong() : null;
+        UpdateYmMode();
+        SongChanged();
+        RefreshInstrumentPanel();
+        SetStatus(_song.Ym != null
+            ? "YM mode: channels 1 – 3 are the sound chip's, for the instruments with a YM part."
+            : "The synth plays all the channels again (the YM parts are kept).");
+    }
+
+    private void UpdateYmMode()
+    {
+        MenuYmMode.IsChecked = _song.Ym != null;
+        UpdateTitle();
+    }
 
     private void InstClone_OnClick(object? sender, RoutedEventArgs e)
     {
@@ -2000,7 +2240,7 @@ public partial class TrackerWindow : Window
     private void UpdateTitle()
     {
         string name = _path != null ? Path.GetFileName(_path) : "untitled";
-        Title = $"Tracker - {name}{(_dirty ? " *" : "")}";
+        Title = $"Tracker - {name}{(_song.Ym != null ? " (YM)" : "")}{(_dirty ? " *" : "")}";
     }
 
     private string? _message;

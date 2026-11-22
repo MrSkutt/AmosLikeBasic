@@ -52,6 +52,14 @@ public static partial class YmImport
         var conv = new MymConverter(m, sampleFolder, sampleFolderInSong ?? sampleFolder);
         var dma = recording?.Dma != null && sampleFolder != null ? DmaInstruments(recording, sampleFolder, sampleFolderInSong ?? sampleFolder) : null;
         var song = conv.Convert(dma);
+        if (song == null)
+        {
+            // Too many sounds: without an instrument for each note of the noises and fixed pitches (the
+            // chip plays them exactly anyway; the synth's sound for them is then the first note's)
+            conv = new MymConverter(m, sampleFolder, sampleFolderInSong ?? sampleFolder, byNote: false);
+            dma = recording?.Dma != null && sampleFolder != null ? DmaInstruments(recording, sampleFolder, sampleFolderInSong ?? sampleFolder) : null;
+            song = conv.Convert(dma);
+        }
         if (song == null) return null;
         Compact(song);
         int shared = song.ShareChannels();
@@ -77,8 +85,11 @@ public static partial class YmImport
         private readonly Dictionary<int, string> _digiFiles = new();
         private int _retriggers, _legato;
 
-        public MymConverter(MaxYMiserSong m, string? folder, string? inSong)
+        private readonly bool _byNote;
+
+        public MymConverter(MaxYMiserSong m, string? folder, string? inSong, bool byNote = true)
         {
+            _byNote = byNote;
             _m = m;
             _folder = folder;
             _inSong = inSong;
@@ -96,7 +107,7 @@ public static partial class YmImport
             public int[] Seq = new int[8];           // volume, arpeggio, vibrato, mixer, noise, fixed, timer, PWM
             // The PWM slide (7xx): added to the pulse width every tick of the note, unless 9xx set the width
             public int PwmSlide;
-            public bool PwmFixed;
+            public bool PwmFixed, PwmReset;   // PwmReset: 780 on the note's line, the slide's sum back to 0
 
             public static Voice From(MaxYMiserSong.Instrument i, int number) => new()
             {
@@ -107,7 +118,7 @@ public static partial class YmImport
                 Seq = new[] { i.VolumeSeq, i.ArpeggioSeq, i.VibratoSeq, i.MixerSeq, i.NoiseSeq, i.FixedSeq, i.TimerSeq, i.PwmSeq }
             };
 
-            public string Key => $"{Number}:{string.Join(",", Flags)}:{Speed},{Width},{BuzzerWave},{Digi},{DigiRate},{Volume},{Coarse},{Fine}:{string.Join(",", Seq)}:{PwmSlide},{PwmFixed}";
+            public string Key => $"{Number}:{string.Join(",", Flags)}:{Speed},{Width},{BuzzerWave},{Digi},{DigiRate},{Volume},{Coarse},{Fine}:{string.Join(",", Seq)}:{PwmSlide},{PwmFixed},{PwmReset}";
         }
 
         // A channel as the replay routine keeps it
@@ -119,6 +130,7 @@ public static partial class YmImport
             public int Transpose, NoiseTranspose, VolumeColumn;
             public int ArpX, ArpY;                   // the extra arpeggio (X), 0 0: off
             public int Porta, Slide;                 // rates (period units a tick); a portamento goes on until it arrives
+            public int PwmSlide;                     // 7xx: it stays with the channel, through new notes
             public int PortaTarget;
             public bool Sounding;                    // a note of the tracker plays
             public int WrittenNote;                  // the note the tracker plays
@@ -216,6 +228,8 @@ public static partial class YmImport
                 if (free >= 0) last[free] = new TrackerCell(last[free].Note, last[free].Instrument, 'B', _m.Repeat, last[free].Volume);
             }
             song.Instruments = _instruments;
+            // Played by the sound chip as maxYMiser does (the tables and envelopes are for the synth)
+            song.Ym = new TrackerYmSong { Timers = _m.TimerEnables, CallsPerTick = Math.Round(_rho, 4), ShapeFromMixer = _m.Version != 0 };
 
             // The STe's DMA sound, as the recording heard it
             var grid = new TrackerCell[rows.Count, Columns];
@@ -252,6 +266,7 @@ public static partial class YmImport
             int[] fp = { l.Param1, l.Param2 };
             bool porta = fx.Contains('P');
             bool retrigger = false, legato = false, silence = false;
+            bool midNote = false;   // the instrument changed under a note that goes on: no new note
 
             if (!muted)
             {
@@ -263,8 +278,10 @@ public static partial class YmImport
                         c.Modified = false;
                     }
                     // The sequences start again; what belongs to the note is cleared (the slides kept for a portamento)
-                    c.Voice.PwmSlide = 0;
+                    // The PWM slide goes on from note to note (only 9xx on the line stops it for the note)
+                    c.Voice.PwmSlide = c.PwmSlide;
                     c.Voice.PwmFixed = false;
+                    c.Voice.PwmReset = false;
                     c.Transpose = c.NoiseTranspose = c.VolumeColumn = 0;
                     c.ArpX = c.ArpY = 0;
                     if (!porta) c.Porta = c.Slide = c.PortaTarget = 0;
@@ -328,7 +345,11 @@ public static partial class YmImport
                         {
                             case >= '1' and <= '6': v.Flags[e - '1'] = p; break;
                             case '9': v.Width = p; v.PwmFixed = true; break;
-                            case '7': v.PwmSlide = p == 0x80 ? 0 : (sbyte)p; v.PwmFixed = false; break;
+                            case '7':
+                                c.PwmSlide = v.PwmSlide = p == 0x80 ? 0 : (sbyte)p;
+                                v.PwmFixed = false;
+                                if (p == 0x80) v.PwmReset = true;
+                                break;
                             case 'A': v.Seq[1] = p; break;
                             case 'C': break;
                             case 'D': v.Coarse = (sbyte)p; break;
@@ -351,7 +372,12 @@ public static partial class YmImport
                 }
                 // An effect that changes the sound mid-note starts it again (the tracker's instruments do
                 // not change under a note)
-                if (changes && !retrigger && c.Note != 0 && c.Voice != null) { retrigger = true; _retriggers++; }
+                if (changes && !retrigger && c.Note != 0 && c.Voice != null)
+                {
+                    retrigger = true;
+                    midNote = l.Note == 0 && c.Sounding;
+                    _retriggers++;
+                }
             }
 
             if (muted) return TrackerCell.Empty;
@@ -377,7 +403,7 @@ public static partial class YmImport
                 if (retrigger)
                 {
                     var (number, rendered) = Sound(voice, written, c.NoiseTranspose, track);
-                    note = written;
+                    note = midNote ? TrackerCell.NoNote : written;
                     instrument = number;
                     c.Sounding = true;
                     c.WrittenNote = written;
@@ -472,9 +498,10 @@ public static partial class YmImport
             if (_sounds.TryGetValue(keyed, out int n)) return (n, _rendered[keyed]);
             if (_sounds.TryGetValue(plain, out n)) return (n, _rendered[plain]);
             var r = Render(v, note, noiseTranspose, TimerOn(track));
-            string key = r.Absolute ? keyed : plain;
+            string key = r.Absolute && _byNote ? keyed : plain;
             _rendered[key] = r;
             var inst = MakeMymInstrument(v, r, note);
+            inst.Ym = YmPart(v, noiseTranspose);
             // Sounds that come out the same (the effects changed what is not heard) are one instrument
             string name = inst.Name;
             inst.Name = "";
@@ -717,6 +744,31 @@ public static partial class YmImport
         }
 
         private readonly Dictionary<int, int> _digiRates = new();
+
+        // The instrument as maxYMiser has it, for the sound chip
+        private TrackerYmInstrument YmPart(Voice v, int noiseTranspose)
+        {
+            TrackerYmSequence? Seq(int i)
+            {
+                int n = v.Seq[i];
+                if (n <= 0 || n >= _m.Sequences.Count) return null;
+                var q = _m.Sequences[n];
+                return new TrackerYmSequence { Steps = q.Steps.Select(x => i is 1 or 2 ? x : x & 0xFFFF).ToList(), Repeat = q.Repeat };
+            }
+            return new TrackerYmInstrument
+            {
+                Speed = Math.Max(1, v.Speed), Volume = v.Volume,
+                Portamento = v.Flags[0], Arpeggio = v.Flags[1], Vibrato = v.Flags[2], Transpose = v.Flags[3],
+                FixedFrequency = v.Flags[4], FixedDetune = v.Flags[5],
+                DetuneCoarse = v.Coarse, DetuneFine = v.Fine, PulseWidth = v.Width, PwmSlide = v.PwmSlide, PwmFixed = v.PwmFixed,
+                PwmReset = v.PwmReset,
+                BuzzerWave = v.BuzzerWave & 15, NoiseTranspose = noiseTranspose,
+                DigiSample = v.Digi is >= 1 and <= 8 && v.Digi <= _m.Digidrums.Count && _m.Digidrums[v.Digi - 1].Length > 0 && _folder != null ? DigiFile(v.Digi) : "",
+                DigiRate = v.DigiRate is >= 0x18 and <= 0xCD ? v.DigiRate : 0x20,
+                VolumeSeq = Seq(0), ArpeggioSeq = Seq(1), VibratoSeq = Seq(2), MixerSeq = Seq(3),
+                NoiseSeq = Seq(4), FixedSeq = Seq(5), TimerSeq = Seq(6), PwmSeq = Seq(7)
+            };
+        }
         private readonly string?[] _gated = new string?[2];
 
         // The buzzer's sawtooth (256 frames, a round of the envelope) or triangle (512), as the plain
@@ -788,7 +840,7 @@ public static partial class YmImport
             };
             if (_m.Repeat > 0) lines.Add($"At the end it jumps back to place {_m.Repeat}.");
             if (_legato > 0) lines.Add($"{_legato} notes without an instrument change the pitch of the one playing (3FF).");
-            if (_retriggers > 0) lines.Add($"{_retriggers} effects that change an instrument under a note start it again.");
+            if (_retriggers > 0) lines.Add($"{_retriggers} effects change an instrument under a note: the instrument is changed on the row, and the note goes on.");
             if (dma != null && dma.Notes.Count > 0) lines.Add($"The STe's DMA sound: {dma.Instruments.Count} sample{(dma.Instruments.Count == 1 ? "" : "s")} from the song as played, in channel {song.Channels}.");
             else if (_m.DmaUsed) lines.Add("The STe's DMA track was left out.");
             return string.Join("\n", lines);

@@ -365,6 +365,7 @@ namespace AmosLikeBasic
         public static void Reset()
         {
             StopMusic();
+            _ym = null;
             foreach (var v in _voices) v.ResetSettings();
             _bpm = 120;
             _trackVolume = 1.0;
@@ -897,6 +898,14 @@ namespace AmosLikeBasic
                 right += pan < 0 ? s * (1 + pan) : s;
             }
             _scopePos = (pos + 1) & (ScopeSize - 1);
+
+            // A song in YM mode: the sound chip plays its first three channels
+            if (_ym is { } ym)
+            {
+                double y = ym.Next() * _trackVolume;
+                left += y;
+                right += y;
+            }
 
             // A YM file played next to the synth (the tracker's YM browser)
             var chip = Volatile.Read(ref _chipMusic);

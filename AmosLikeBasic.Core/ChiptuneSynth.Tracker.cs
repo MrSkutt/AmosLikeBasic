@@ -66,6 +66,7 @@ namespace AmosLikeBasic
             public int[]? PanTicks;
             public double[] PanLevels = Array.Empty<double>();
             public int PanSustain = -1, PanLoopStart = -1, PanLoopEnd = -1;
+            public YmInstrument? Ym;   // played by the sound chip in a song in YM mode
         }
 
         private sealed class TrackData
@@ -75,6 +76,7 @@ namespace AmosLikeBasic
             public TrackInstrument[] Instruments = Array.Empty<TrackInstrument>();
             public int Speed = 6, Tempo = 125;
             public int Channels = TrackerSong.DefaultChannels;
+            public TrackerYmSong? Ym;
         }
 
         private sealed class TrackRequest
@@ -207,6 +209,7 @@ namespace AmosLikeBasic
             var inst = instrument >= 1 && instrument <= song.Instruments.Count
                 ? CompileInstrument(song.Instruments[instrument - 1], instrument) : DefaultInstrument;
             int tempo = Math.Clamp(song.Tempo, 32, 255);
+            var ym = song.Ym;
             _trackCommands.Enqueue(() =>
             {
                 int c = channel - 1;
@@ -217,6 +220,9 @@ namespace AmosLikeBasic
                     _trackTempo = tempo;
                     _trackTick = 0;
                     _trackUsed = used;
+                    // A song in YM mode: the chip plays the notes tried on the keys too
+                    if (ym == null) _ym = null;
+                    else if (_ym == null || _ymSong != ym) StartYm(new TrackData { Ym = ym });
                 }
                 ch.Inst = inst;
                 ch.InstNumber = instrument;
@@ -241,6 +247,7 @@ namespace AmosLikeBasic
             {
                 if (!_trackPreview) return;
                 _trackPreview = false;
+                if (_track == null) _ym = null;
                 for (int c = 0; c < _trackUsed; c++)
                     if (!_trackChannels[c].Sfx) _trackChannels[c].Active = false;
                 ReleaseTrackVoices();
@@ -461,7 +468,8 @@ namespace AmosLikeBasic
                 Order = order,
                 Patterns = new TrackerCell[patterns.Count][][],
                 Instruments = new TrackInstrument[song.Instruments.Count],
-                Channels = song.Channels
+                Channels = song.Channels,
+                Ym = song.Ym
             };
 
             for (int p = 0; p < patterns.Count; p++)
@@ -507,6 +515,7 @@ namespace AmosLikeBasic
                 ? SampleBank.Get(src.Sample) ?? new SampleData(Array.Empty<float>(), 44100) : null;
             return new TrackInstrument
             {
+                Ym = src.Ym != null ? CompileYm(src.Ym) : null,
                 Wave = wave == WaveformType.Drums ? WaveformType.Noise : wave,
                 Volume = Math.Clamp(src.Volume, 0, 1),
                 PulseWidth = Math.Clamp(src.PulseWidth / 100.0, 0.01, 0.99),
@@ -666,8 +675,10 @@ namespace AmosLikeBasic
             {
                 if (_track != null) ReleaseTrackVoices();
                 Volatile.Write(ref _track, null);
+                _ym = null;
                 return;
             }
+            StartYm(req.Data);
 
             // Channels a sound effect is using right now are left alone; the song takes them over afterwards
             if (_track != null) ReleaseTrackVoices();
@@ -762,6 +773,7 @@ namespace AmosLikeBasic
                 // Only previewing: the instruments' tables should still run
                 for (int c = 0; c < _trackUsed; c++)
                     if (!_trackChannels[c].Sfx) UpdateTrackVoice(c);
+                YmFrame();
                 return;
             }
             // A row repeated by EE plays its effects again, but not its notes
@@ -772,6 +784,7 @@ namespace AmosLikeBasic
 
             for (int c = 0; c < d.Channels; c++)
                 if (!_trackChannels[c].Sfx) UpdateTrackVoice(c);
+            YmFrame();
 
             if (++_trackTick >= _trackSpeed)
             {
@@ -1036,6 +1049,7 @@ namespace AmosLikeBasic
             ch.EnvTick = ch.PanEnvTick = 0;
             ch.KeyOff = false;
             ch.Fade = 1;
+            if (c < 3) YmNoteStarts(c);
 
             var v = _voices[c];
             SetVoiceFromInstrument(ch, v, inst);
@@ -1153,6 +1167,7 @@ namespace AmosLikeBasic
         private static void ReleaseTrackVoice(int c)
         {
             var ch = _trackChannels[c];
+            if (YmPlays(c)) { ch.Active = false; return; }   // the chip's note stops at once, as in maxYMiser
             if (ch.Active && !ch.Sfx && ch.Inst?.EnvTicks != null)
             {
                 ch.KeyOff = true;
@@ -1173,6 +1188,8 @@ namespace AmosLikeBasic
             var table = inst.Table;
             if (table.Length > 0)
             {
+                // Another instrument under a note that goes on: its table from as far as it has
+                if (ch.TableIndex >= table.Length) ch.TableIndex = inst.TableLoop >= 0 && inst.TableLoop < table.Length ? inst.TableLoop : table.Length - 1;
                 var step = table[ch.TableIndex];
                 if (step.Wave.HasValue) v.Wave = step.Wave.Value;
                 if (step.PulseWidth.HasValue) v.PulseWidth = step.PulseWidth.Value;
@@ -1210,6 +1227,13 @@ namespace AmosLikeBasic
             }
             else ch.TremorPos = 0;
             vol *= _trackGlobal / 64.0;
+            if (YmPlays(c))
+            {
+                // The sound chip plays it; the instrument's table is the synth's, not the chip's
+                YmChannel(c, semis - ch.TableOffset, vol);
+                v.Volume = 0;
+                return;
+            }
             v.LedFilter = !ch.Sfx && _trackLed;
             if (inst.EnvTicks != null) vol *= NextEnvelope(ch, v, inst);
             if (inst.PanTicks != null)
@@ -1303,6 +1327,7 @@ namespace AmosLikeBasic
                 {
                     ReleaseTrackVoices();
                     Volatile.Write(ref _track, null);
+                    _ym = null;
                     return;
                 }
                 _trackOrder = _trackJumpOrder;
@@ -1320,6 +1345,7 @@ namespace AmosLikeBasic
                 {
                     ReleaseTrackVoices();
                     Volatile.Write(ref _track, null);
+                    _ym = null;
                     return;
                 }
                 _trackOrder = 0;
