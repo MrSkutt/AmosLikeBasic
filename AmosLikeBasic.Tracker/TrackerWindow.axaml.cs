@@ -1756,6 +1756,30 @@ public partial class TrackerWindow : Window
     private void MenuEditMode_OnClick(object? sender, RoutedEventArgs e) { SetEditMode(!Pattern.EditMode); KeepTypingFocus(); }
     private void MenuPlayFromRow_OnClick(object? sender, RoutedEventArgs e) => PlayPattern(Pattern.CursorRow);
 
+    private const string ManualFile = "AMOS Like Basic - Manual.pdf";
+    private const string ManualOnline = "https://github.com/MrSkutt/AmosLikeBasic/blob/main/Documentation/Manual/26-sound.md";
+
+    // The manual: next to the programs in a download (the tracker app is in a folder of its own on
+    // Windows, three folders down in a Mac app), or in Documentation when run from the source
+    public static string? FindManual()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (int up = 0; dir != null && up < 8; up++, dir = dir.Parent)
+            foreach (var path in new[] { Path.Combine(dir.FullName, ManualFile), Path.Combine(dir.FullName, "Documentation", ManualFile) })
+                if (File.Exists(path)) return path;
+        return null;
+    }
+
+    private async void MenuManual_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (FindManual() is { } path && await Launcher.LaunchFileInfoAsync(new FileInfo(path))) return;
+        SetStatus("The manual was not found next to the program; the tracker's chapter opens online.");
+        await Launcher.LaunchUriAsync(new Uri(ManualOnline));
+    }
+
+    private async void MenuManualOnline_OnClick(object? sender, RoutedEventArgs e) =>
+        await Launcher.LaunchUriAsync(new Uri(ManualOnline));
+
     private void MenuKeys_OnClick(object? sender, RoutedEventArgs e)
     {
         string c = OperatingSystem.IsMacOS() ? "Cmd" : "Ctrl";

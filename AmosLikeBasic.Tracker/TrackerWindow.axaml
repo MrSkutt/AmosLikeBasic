@@ -58,6 +58,9 @@
                 <MenuItem Header="_Theme" Name="ThemeMenu"/>
             </MenuItem>
             <MenuItem Header="_Help">
+                <MenuItem Header="The _manual (PDF)" Click="MenuManual_OnClick"/>
+                <MenuItem Header="The tracker's _chapter, online" Click="MenuManualOnline_OnClick"/>
+                <Separator/>
                 <MenuItem Header="_Keys..." Click="MenuKeys_OnClick"/>
                 <MenuItem Header="_About AMOS Tracker..." Click="MenuAbout_OnClick"/>
             </MenuItem>

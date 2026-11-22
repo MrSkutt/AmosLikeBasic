@@ -29,6 +29,7 @@ public class XmExportTests
         p[0, 1] = TrackerCell.Parse("A-4 02 .. J47");
         p[2, 1] = TrackerCell.Parse("E-5 .. .. G80");
         p[4, 2] = TrackerCell.Parse("--- .. .. V20");
+        p[5, 1] = TrackerCell.Parse("--- .. .. G20");   // the filter closes under the E-5
         p[8, 1] = TrackerCell.Parse("=== .. .. ...");
         song.Patterns[1][0, 0] = TrackerCell.Parse("G-4 01 .. ...");
         song.SetPatternAt(1, 1, 0);   // channel 2 plays pattern 0's column at place 1
@@ -52,7 +53,11 @@ public class XmExportTests
         Assert.Equal(('0', 0x47), (p[0, 1].Effect, p[0, 1].Param));   // Jxy as the arpeggio
         // The filter set with the note is in an instrument of its own, played with it
         Assert.Equal('\0', p[2, 1].Effect);
+        // and the one that changes under it is played as it sounds, into an instrument of its own
         Assert.Contains("G80", back.Instruments[p[2, 1].Instrument - 1].Name);
+        Assert.Contains("as played", back.Instruments[p[2, 1].Instrument - 1].Name);
+        Assert.Equal('\0', p[5, 1].Effect);
+        Assert.DoesNotContain(r.Notes, n => n.Contains("Gxx"));
         Assert.Equal(('V', 0x20), (p[4, 2].Effect, p[4, 2].Param));
         Assert.Equal(TrackerCell.NoteOff, p[8, 1].Note);
         // The channel's own pattern is written out: place 1 has pattern 0's A-4 in channel 2
@@ -78,10 +83,7 @@ public class XmExportTests
         // The synth's A-4 and E-5, each a sample of its own that sounds at its note
         var synth = back.Instruments.Where(i => i.Name.StartsWith("Synth")).ToList();
         Assert.True(synth.Count >= 2);
-        foreach (var inst in synth)
-        {
-            var s = SampleBank.Get(inst.Sample)!;
-            Assert.True(s.Data.Max(Math.Abs) > 0.1, "the note was played into the sample");
-        }
+        // (the filter set under the E-5 stays for the next A-4, as the synth keeps it, which is darker)
+        Assert.True(synth.Count(inst => SampleBank.Get(inst.Sample)!.Data.Max(Math.Abs) > 0.1) >= 2, "the notes were played into samples");
     }
 }

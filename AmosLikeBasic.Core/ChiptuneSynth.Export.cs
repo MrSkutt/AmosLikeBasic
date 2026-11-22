@@ -54,11 +54,15 @@ namespace AmosLikeBasic
             return all.GetRange(0, end).ToArray();
         }
 
+        // A note to play into a sample: the instrument, the note, how many ticks it is held, and the
+        // effects the song gives it while it plays (the tick from its start, the effect, its parameter)
+        public sealed record NoteJob(TrackerInstrument Instrument, int Note, int Ticks,
+                                     IReadOnlyList<(int Tick, char Effect, int Param)>? Changes = null);
+
         // Single notes of instruments, each held for its ticks at the tempo and cut there (mono, from the
         // middle; the instrument's pan, echo send and all else as it is). For turning the synth's
         // instruments into samples. While it renders the synth belongs to it, as for RenderSong.
-        public static List<float[]> RenderNotes(IReadOnlyList<(TrackerInstrument Instrument, int Note, int Ticks)> notes,
-                                                int tempo, Action<double>? progress = null)
+        public static List<float[]> RenderNotes(IReadOnlyList<NoteJob> notes, int tempo, Action<double>? progress = null)
         {
             bool was = ManualRendering;
             ManualRendering = true;
@@ -69,7 +73,7 @@ namespace AmosLikeBasic
             {
                 for (int i = 0; i < notes.Count; i++)
                 {
-                    var (inst, note, ticks) = notes[i];
+                    var (inst, note, ticks, changes) = notes[i];
                     ticks = Math.Max(1, ticks);
                     // A song of one channel: the note on the first row, a tick a row, long enough to hold it
                     var song = new TrackerSong { Speed = 1, Tempo = tempo, Channels = TrackerSong.MinChannels };
@@ -82,6 +86,12 @@ namespace AmosLikeBasic
                         song.Patterns.Add(new TrackerPattern(Math.Min(rows, TrackerSong.MaxRows)));
                     }
                     song.Patterns[0][0, 0] = new TrackerCell(note, 1, '\0', 0);
+                    foreach (var (tick, effect, param) in changes ?? Array.Empty<(int, char, int)>())
+                    {
+                        if (tick > ticks) continue;
+                        var cell = song.Patterns[tick / TrackerSong.MaxRows][tick % TrackerSong.MaxRows, 0];
+                        song.Patterns[tick / TrackerSong.MaxRows][tick % TrackerSong.MaxRows, 0] = new TrackerCell(cell.Note, cell.Instrument, effect, param);
+                    }
                     Reset();
                     Render(new float[64]);
                     TrackPlay(song, loop: false);

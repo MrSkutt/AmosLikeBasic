@@ -48,7 +48,7 @@ public static class XmExport
     // render: plays notes of instruments into sound (ChiptuneSynth.RenderNotes), for the instruments
     // that are not samples; without it they are left out
     public static Result Write(TrackerSong song,
-        Func<IReadOnlyList<(TrackerInstrument Instrument, int Note, int Ticks)>, int, List<float[]>>? render = null)
+        Func<IReadOnlyList<ChiptuneSynth.NoteJob>, int, List<float[]>>? render = null)
     {
         var notes = new List<string>();
         int channels = Math.Min(32, song.Channels + song.Channels % 2);
@@ -57,7 +57,7 @@ public static class XmExport
         var places = Enumerable.Range(0, Math.Min(song.Order.Count, 256)).Select(pos => Copy(song.Composed(pos), song.Channels)).ToList();
         if (song.Order.Count > 256) notes.Add("The order list is longer than XM's 256 places; the rest is left out.");
         var lost = new SortedDictionary<string, int>();
-        var variants = Variants(song, places, lost);
+        var (variants, asPlayed) = Variants(song, places, lost);
 
         // The same places once
         var patterns = new List<TrackerPattern>();
@@ -87,7 +87,7 @@ public static class XmExport
         // The instruments: samples as they are, the rest played by the synth
         int count = Math.Min(variants.Count, MaxInstruments);
         var xm = new XmInstrument[count];
-        var jobs = new List<(TrackerInstrument, int, int)>();
+        var jobs = new List<ChiptuneSynth.NoteJob>();
         var jobOf = new List<(int instrument, int note, bool loop)>();
         int rendered = 0;
         for (int i = 0; i < count; i++)
@@ -115,7 +115,7 @@ public static class XmExport
             {
                 // As long as the longest of the notes it plays for
                 int longest = played.Where(p => Nearest(p) == j).Max(p => use.Holds[p] > 0 ? use.Holds[p] : use.Hold);
-                jobs.Add((copy, chosen[j], Math.Clamp(longest, 1, maxTicks)));
+                jobs.Add(new ChiptuneSynth.NoteJob(copy, chosen[j], Math.Clamp(longest, 1, maxTicks), asPlayed.GetValueOrDefault(i + 1)));
                 jobOf.Add((i, chosen[j], longest > maxTicks));
             }
             SetEnvelopes(x, inst, ticksPerSecond, baked: true);
@@ -131,7 +131,7 @@ public static class XmExport
             // How loud the synth plays a plain square at full volume, so that its notes and the
             // samples keep their sizes
             var reference = new TrackerInstrument { Wave = "Square", Volume = 0.5, Attack = 0, Decay = 0, Sustain = 100, Release = 0 };
-            var all = render!(jobs.Prepend((reference, 60, (int)ticksPerSecond)).ToList(), song.Tempo);
+            var all = render!(jobs.Prepend(new ChiptuneSynth.NoteJob(reference, 60, (int)ticksPerSecond)).ToList(), song.Tempo);
             float gain = all[0].Skip(all[0].Length / 2).Select(Math.Abs).DefaultIfEmpty(0.5f).Max() / 0.5f;
             if (gain <= 0) gain = 1;
             for (int j = 0; j < jobOf.Count; j++)
@@ -177,11 +177,15 @@ public static class XmExport
     // The instruments as XM gets them: the song's own (in their numbers), and after them one for each
     // instrument played with a filter frequency (Gxx), resonance (Hxx) or pulse width (Ixx) a channel
     // has set, as the synth keeps them for its notes until it gets another instrument. The cells get
-    // these numbers, and the G, H and I effects go; one under a note already playing has no XM
-    // counterpart and is counted as left out.
-    private static List<TrackerInstrument> Variants(TrackerSong song, List<TrackerPattern> places, SortedDictionary<string, int> lost)
+    // these numbers, and the G, H and I effects go. A note that they change while it plays is played
+    // into an instrument of its own as it sounds, the changes on their ticks ("as played"; the same
+    // note with the same changes once); with XM's 128 instruments taken, they are left out.
+    private static (List<TrackerInstrument>, Dictionary<int, List<(int, char, int)>>) Variants(TrackerSong song,
+        List<TrackerPattern> places, SortedDictionary<string, int> lost)
     {
         var list = song.Instruments.Select(i => i).ToList();
+        var played = new Dictionary<int, List<(int, char, int)>>();
+        var playedIndex = new Dictionary<string, int>();
         var index = new Dictionary<(int, int, int, int), int>();
         int n = song.Channels;
         var last = new int[n];
@@ -205,10 +209,40 @@ public static class XmExport
             list.Add(copy);
             return index[(inst, o.g, o.h, o.i)] = list.Count;
         }
+        // The note each channel plays: where it was struck, its instrument there, and the changes since
+        var events = new (TrackerPattern p, int row, int inst, int note, long start, List<(int, char, int)> changes)?[n];
+        int speed = song.Speed;
+        long tick = 0;
+        void Finish(int c)
+        {
+            if (events[c] is not { } ev) return;
+            events[c] = null;
+            if (ev.changes.Count == 0) return;
+            string key = $"{ev.inst}:{ev.note}:" + string.Join(",", ev.changes);
+            if (!playedIndex.TryGetValue(key, out int v))
+            {
+                if (list.Count >= MaxInstruments)
+                {
+                    foreach (var (_, e, _) in ev.changes) lost[$"{e}xx under a note that plays on"] = lost.GetValueOrDefault($"{e}xx under a note that plays on") + 1;
+                    return;
+                }
+                var copy = TrackerSong.FromJson(new TrackerSong { Instruments = { list[ev.inst - 1] } }.ToJson()).Instruments[0];
+                copy.Name += " (as played)";
+                list.Add(copy);
+                playedIndex[key] = v = list.Count;
+                played[v] = ev.changes;
+            }
+            var cell = ev.p[ev.row, c];
+            ev.p[ev.row, c] = new TrackerCell(cell.Note, v, cell.Effect, cell.Param, cell.Volume);
+            if (written[c] == ev.inst) written[c] = v;
+        }
         foreach (var p in places)
-            for (int r = 0; r < p.Rows; r++)
+            for (int r = 0; r < p.Rows; r++, tick += speed)
                 for (int c = 0; c < n; c++)
                 {
+                    if (c == 0)
+                        for (int k = 0; k < n; k++)
+                            if (p[r, k].Effect == 'F' && p[r, k].Param is > 0 and < 0x20) speed = p[r, k].Param;
                     var cell = p[r, c];
                     char e = cell.Effect;
                     int param = cell.Param;
@@ -218,21 +252,26 @@ public static class XmExport
                         last[c] = cell.Instrument;
                     }
                     bool glide = e is '3' or '5';
+                    bool struck = cell.Note >= 0 && !glide && last[c] > 0;
+                    if (struck || cell.Note == TrackerCell.NoteOff || cell.Volume == 0 || (e == 'C' && param == 0)) Finish(c);
                     if (e is 'G' or 'H' or 'I')
                     {
                         set[c] = e == 'G' ? (param, set[c].h, set[c].i) : e == 'H' ? (set[c].g, param, set[c].i) : (set[c].g, set[c].h, param);
-                        if (cell.Note < 0 || glide) lost[$"{e}xx under a note that plays on"] = lost.GetValueOrDefault($"{e}xx under a note that plays on") + 1;
+                        if (!struck && events[c] is { } ev) ev.changes.Add(((int)(tick - ev.start), e, param));
                         (e, param) = ('\0', 0);
                     }
                     int inst = cell.Instrument;
+                    int sounds = 0;
                     if (last[c] > 0 && ((cell.Note >= 0 && !glide) || cell.Instrument > 0))
                     {
-                        int v = Variant(last[c], set[c]);
+                        int v = sounds = Variant(last[c], set[c]);
                         if (cell.Instrument > 0 || (cell.Note >= 0 && v != written[c])) { inst = v; written[c] = v; }
                     }
                     p[r, c] = new TrackerCell(cell.Note, inst, e, param, cell.Volume);
+                    if (struck) events[c] = (p, r, sounds, cell.Note, tick, new List<(int, char, int)>());
                 }
-        return list;
+        for (int c = 0; c < n; c++) Finish(c);
+        return (list, played);
     }
 
     // ── The song's use of its instruments ─────────────────────────────
