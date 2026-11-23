@@ -1,37 +1,27 @@
-using Avalonia.Controls;
-using Avalonia.Headless.XUnit;
-using Avalonia.Interactivity;
-using Avalonia.Threading;
 using S = AmosLikeBasic.ChiptuneSynth;
 
 namespace AmosLikeBasic.Tests;
 
-// YM mode: channels 1 – 3 played by the Atari ST's sound chip, each instrument by its YM part
+// A maxYMiser song in the tracker as maxYMiser has it (YM mode): opened, played by the sound chip as its
+// replay plays it, edited, and saved in its own file again
 public class YmModeTests
 {
-    private static TrackerSong Song(TrackerYmInstrument ym, string cell = "A-4 01 .. ...")
+    private static (byte[] file, TrackerSong song) Open()
     {
-        var song = new TrackerSong { Channels = 3, Speed = 6, Ym = new TrackerYmSong() };
-        song.Instruments.Add(new TrackerInstrument { Name = "YM", Wave = "Sine", Volume = 0.3, Attack = 0, Sustain = 100, Ym = ym });
-        song.Patterns[0][0, 0] = TrackerCell.Parse(cell);
-        return song;
+        var file = MaxYMiserTests.Song();
+        return (file, YmImport.OpenMaxYMiser(file, MaxYMiserSong.Find(file)!, "Test"));
     }
 
-    private static TrackerYmInstrument Square(params int[] volumes) => new()
-    {
-        VolumeSeq = new TrackerYmSequence { Steps = volumes.ToList(), Repeat = volumes.Length - 1 },
-        MixerSeq = new TrackerYmSequence { Steps = { 0x100 } }
-    };
-
-    private static float[] Play(TrackerSong song, int samples = 22050)
+    private static float[] Play(TrackerSong song, int samples, params int[] mute)
     {
         S.ManualRendering = true;
         S.Reset();
+        foreach (int c in mute) S.SetTrackMute(c, true);
         S.TrackPlay(TrackerSong.FromJson(song.ToJson()), loop: false);
         var b = new float[samples];
         S.Render(b);
         S.TrackStop();
-        S.Render(new float[2205]);
+        for (int c = 1; c <= 4; c++) S.SetTrackMute(c, false);
         S.Reset();
         return b;
     }
@@ -44,82 +34,85 @@ public class YmModeTests
     }
 
     [Fact]
-    public void The_chip_plays_a_YM_instrument_at_the_note()
+    public void A_maxYMiser_song_opens_as_maxYMiser_has_it()
     {
-        var b = Play(Song(Square(15)));
-        // A-4: 440 crossings a second, a square from the chip (not the instrument's sine)
-        Assert.InRange(Crossings(b, 4410, 4410 + 11025), 107, 113);   // 440 a second, a quarter of one
-        double rms = Math.Sqrt(b.Skip(4410).Take(11025).Select(v => (double)v * v).Average());
-        Assert.True(rms > 0.05, $"it sounds ({rms})");
-    }
-
-    [Fact]
-    public void The_volume_column_and_the_volume_sequence_are_the_chips_steps()
-    {
-        double Rms(TrackerSong s) { var b = Play(s); return Math.Sqrt(b.Skip(4410).Take(11025).Select(v => (double)v * v).Average()); }
-        double full = Rms(Song(Square(15)));
-        double column = Rms(Song(Square(15), "A-4 01 20 ..."));   // 32 of 64: two steps of 3 dB down
-        double quiet = Rms(Song(Square(13)));                     // the volume sequence two steps down
-        Assert.InRange(column / full, 0.4, 0.6);
-        Assert.InRange(quiet / full, 0.4, 0.6);
-    }
-
-    [Fact]
-    public void A_SID_on_the_tone_is_the_chips_own()
-    {
-        var sid = Square(15);
-        sid.MixerSeq = new TrackerYmSequence { Steps = { 0x105 } };
-        sid.TimerSeq = new TrackerYmSequence { Steps = { 0xF, 0 } };
-        var b = Play(Song(sid));
-        Assert.True(b.Skip(4410).Max(Math.Abs) > 0.05, "the tone and the SID together sound");
-    }
-
-    [Fact]
-    public void Sequences_are_written_in_hex_with_a_bar_before_where_they_go_round()
-    {
-        var q = TrackerWindow.ParseYmSequence("F E | D C")!;
-        Assert.Equal(new[] { 15, 14, 13, 12 }, q.Steps);
-        Assert.Equal(2, q.Repeat);
-        Assert.Equal("F E | D C", TrackerWindow.YmSequenceText(q, false));
-        var stays = TrackerWindow.ParseYmSequence("F A 0")!;
-        Assert.Equal(2, stays.Repeat);                                  // no bar: it stays on its last step
-        Assert.Equal("F A 0", TrackerWindow.YmSequenceText(stays, false));
-        Assert.Equal("0105 1000", TrackerWindow.YmSequenceText(new TrackerYmSequence { Steps = { 0x105, 0x1000 }, Repeat = 1 }, true));
-        Assert.Equal(new[] { -12, 3 }, TrackerWindow.ParseYmSequence("-C 3")!.Steps);
-        Assert.Null(TrackerWindow.ParseYmSequence("  "));
-        Assert.Throws<FormatException>(() => TrackerWindow.ParseYmSequence("G"));
-    }
-
-    [Fact]
-    public void A_maxYMiser_song_is_read_in_YM_mode_and_keeps_it_when_saved()
-    {
-        var song = YmImport.ImportMaxYMiser(MaxYMiserSong.Find(MaxYMiserTests.Song())!, "ym")!.Song;
+        var (_, song) = Open();
         Assert.NotNull(song.Ym);
-        var bass = song.Instruments.First(i => i.Name == "Bass");
-        Assert.Equal(new[] { 0x105 }, bass.Ym!.MixerSeq!.Steps);
-        Assert.Equal(new[] { 0xF, 0 }, bass.Ym.TimerSeq!.Steps);
-        var back = TrackerSong.FromJson(song.ToJson());
-        Assert.NotNull(back.Ym);
-        Assert.Equal(new[] { 0x105 }, back.Instruments.First(i => i.Name == "Bass").Ym!.MixerSeq!.Steps);
-        // A song without it is saved as before
-        Assert.DoesNotContain("\"Ym\"", new TrackerSong().ToJson());
+        Assert.Equal(3, song.Channels);
+        Assert.Equal(32, song.Instruments.Count);
+        Assert.Equal(("Lead", "Bass"), (song.Instruments[0].Name, song.Instruments[1].Name));
+        Assert.Equal(1, song.Instruments[0].Ym!.VolumeSeq);
+        Assert.Equal(new[] { 0xF, 0xC }, song.Ym!.Sequences[1].Steps);
+        // Each track plays its own pattern at the place: the lead pattern 0, the bass pattern 1
+        Assert.Equal((0, 1), (song.PatternAt(0, 0), song.PatternAt(0, 1)));
+        var lead = song.Composed(0)[0, 0];
+        Assert.Equal((69, 1, 'S', 3), (lead.Note, lead.Instrument, lead.Effect, lead.Param));
+        Assert.Equal(TrackerCell.NoteOff, song.Composed(0)[4, 0].Note);
+        Assert.Equal(45, song.Composed(0)[0, 1].Note);
     }
 
-    [AvaloniaFact]
-    public void The_menu_turns_YM_mode_on_and_off_and_the_instrument_page_follows()
+    [Fact]
+    public void It_is_saved_as_it_was_and_with_what_was_changed()
     {
-        var w = new TrackerWindow { Width = 1280, Height = 820 };
-        w.Show();
-        Dispatcher.UIThread.RunJobs();
-        var song = (TrackerSong)typeof(TrackerWindow).GetField("_song", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(w)!;
-        Assert.Null(song.Ym);
-        w.FindControl<MenuItem>("MenuYmMode")!.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        Dispatcher.UIThread.RunJobs();
-        song = (TrackerSong)typeof(TrackerWindow).GetField("_song", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(w)!;
-        Assert.NotNull(song.Ym);
-        Assert.Contains("(YM)", w.Title);
-        Assert.True(w.FindControl<MenuItem>("MenuYmMode")!.IsChecked);
-        typeof(TrackerWindow).GetField("_dirty", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.SetValue(w, false);
-        w.Close();
+        var (file, song) = Open();
+        Assert.Equal(file, YmImport.SaveMaxYMiser(TrackerSong.FromJson(song.ToJson())));
+
+        // A note in the bass's track, a second effect, a sequence changed
+        var bass = song.Patterns[song.PatternAt(0, 1)];
+        bass[8, 1] = new TrackerCell(48, 2, '\0', 0, TrackerCell.NoVolume, 'X', 0x37);
+        song.Ym!.Sequences[1] = new TrackerYmSequence { Steps = { 0xF, 0xE, 0xD }, Repeat = 2 };
+        var back = MaxYMiserSong.Find(YmImport.SaveMaxYMiser(TrackerSong.FromJson(song.ToJson())))!;
+        var line = back.Patterns[back.Order[0, 1]][8];
+        Assert.Equal((48, 2, 'X', 0x37), (line.Note, line.Instrument, line.Effect2, line.Param2));
+        Assert.Equal(69, back.Patterns[back.Order[0, 0]][0].Note);   // the lead as it was
+        Assert.Equal(new[] { 0xF, 0xE, 0xD }, back.Sequences[1].Steps);
+    }
+
+    [Fact]
+    public void A_pattern_one_track_changes_gets_a_number_of_its_own()
+    {
+        var (_, song) = Open();
+        // Both tracks play pattern 0 at a second place; the bass's copy is changed there
+        song.Order.Add(0);
+        song.ChannelOrder.Add(new[] { 0, 0, song.Ym!.EmptyPattern, song.Ym.EmptyPattern });
+        song.Patterns[0][2, 1] = new TrackerCell(40, 2, '\0', 0);
+        var back = MaxYMiserSong.Find(YmImport.SaveMaxYMiser(song))!;
+        Assert.Equal(2, back.Length);
+        Assert.Equal(0, back.Order[1, 0]);                             // the lead's pattern keeps its number
+        Assert.NotEqual(0, back.Order[1, 1]);                          // the changed one is new
+        Assert.Equal(40, back.Patterns[back.Order[1, 1]][2].Note);
+        Assert.Equal(0, back.Patterns[0][2].Note);
+    }
+
+    [Fact]
+    public void The_chip_plays_the_tracks_as_the_replay_does()
+    {
+        var (_, song) = Open();
+        // The bass alone: A-2 (110 Hz), the tone with a SID on it
+        var bass = Play(song, 22050, 1);
+        Assert.InRange(Crossings(bass, 4410, 4410 + 11025), 24, 31);
+        // The lead alone: A-4 and its octave arpeggio, then silent after its note off (line 4, speed 3)
+        var lead = Play(song, 22050, 2);
+        Assert.True(lead.Skip(441).Take(2205).Max(Math.Abs) > 0.05, "the lead sounds");
+        Assert.True(lead.Skip(13230).Take(4410).Max(Math.Abs) < 0.02, "and stops at its note off");
+    }
+
+    [Fact]
+    public void Converted_it_is_the_trackers_own()
+    {
+        var (_, song) = Open();
+        var r = YmImport.ImportMaxYMiser(YmImport.ToMaxYMiser(song), "Test")!;
+        Assert.Null(r.Song.Ym);
+        Assert.Contains(r.Song.Instruments, i => i.Name == "Bass" && i.Ym == null);
+    }
+
+    [Fact]
+    public void A_cell_with_two_effects_is_kept_in_the_trackers_file()
+    {
+        var cell = TrackerCell.Parse("C-4 01 05 S03 X37");
+        Assert.Equal(('S', 3, 'X', 0x37, 5), (cell.Effect, cell.Param, cell.Effect2, cell.Param2, cell.Volume));
+        Assert.Equal("C-4 01 05 S03 X37", cell.ToString());
+        Assert.Equal("C-4 01 .. ...", TrackerCell.Parse("C-4 01 .. ...").ToString());
+        Assert.Equal(cell, TrackerCell.Parse(cell.ToString()));
     }
 }

@@ -25,6 +25,8 @@
                 <Separator/>
                 <MenuItem Header="Save as _WAV..." Click="ExportWav_OnClick"/>
                 <MenuItem Header="Save as _XM (FastTracker 2)..." Click="ExportXm_OnClick"/>
+                <MenuItem Header="Save as S_NDH for maxYMiser..." Name="MenuSaveSndh" Click="ExportSndh_OnClick"
+                          ToolTip.Tip="A song read from maxYMiser, saved in its own file with the changes made, to open in maxYMiser again"/>
                 <Separator/>
                 <MenuItem Header="_Close" Name="MenuClose" Click="MenuClose_OnClick"/>
             </MenuItem>
@@ -42,13 +44,12 @@
                 <MenuItem Header="S_top" InputGesture="Escape" Click="Stop_OnClick"/>
                 <MenuItem Header="P_anic (all sound off)" Click="Panic_OnClick"/>
                 <Separator/>
-                <MenuItem Header="_YM mode (the Atari ST's sound chip)" Name="MenuYmMode" ToggleType="CheckBox" Click="MenuYmMode_OnClick"
-                          ToolTip.Tip="Channels 1 – 3 played by the sound chip, each instrument by its YM part (as read from maxYMiser)"/>
+                <MenuItem Header="_Convert to tracker format" Name="MenuConvert" Click="MenuConvert_OnClick"
+                          ToolTip.Tip="A maxYMiser song as the tracker's own: all the tracker can do, but no longer saved for maxYMiser"/>
             </MenuItem>
             <MenuItem Header="_Instrument">
                 <MenuItem Header="_Edit instrument" InputGesture="F4" Click="InstrumentTab_OnClick"/>
                 <MenuItem Header="_Add" Click="InstAdd_OnClick"/>
-                <MenuItem Header="Add a _YM instrument" Click="InstAddYm_OnClick" ToolTip.Tip="An instrument for the sound chip, a square to start from"/>
                 <MenuItem Header="_Clone" Click="InstClone_OnClick"/>
                 <MenuItem Header="_Delete" Click="InstDelete_OnClick"/>
                 <Separator/>

@@ -12,14 +12,19 @@ namespace AmosLikeBasic;
 // The cursor row stays still in the middle of the view and the pattern scrolls past, as in ProTracker.
 public class PatternView : Control
 {
-    // Columns in a channel: note, instrument (two digits), volume (two digits), effect, parameter (two digits)
+    // Columns in a channel: note, instrument (two digits), volume (two digits), effect, parameter (two
+    // digits), and in a maxYMiser song a second effect and its parameter
     private const int ColNote = 0, ColInstHi = 1, ColInstLo = 2, ColVolHi = 3, ColVolLo = 4, ColEffect = 5, ColParamHi = 6, ColParamLo = 7;
-    private const int ColumnsPerChannel = 8;
+    private const int ColEffect2 = 8, ColParam2Hi = 9, ColParam2Lo = 10;
 
-    // Character position of each column within the cell "C-4 01 40 A04"
-    private static readonly int[] ColumnChar = { 0, 4, 5, 7, 8, 10, 11, 12 };
-    private static readonly int[] ColumnWidth = { 3, 1, 1, 1, 1, 1, 1, 1 };
-    private const int CellChars = 13;
+    // Two effects a line in a song in YM mode, as maxYMiser has them
+    private bool TwoEffects => Song?.Ym != null;
+    private int ColumnsPerChannel => TwoEffects ? 11 : 8;
+
+    // Character position of each column within the cell "C-4 01 40 A04" ("C-4 01 40 A04 X37")
+    private static readonly int[] ColumnChar = { 0, 4, 5, 7, 8, 10, 11, 12, 14, 15, 16 };
+    private static readonly int[] ColumnWidth = { 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+    private int CellChars => TwoEffects ? 17 : 13;
     private const int ChannelGapChars = 2;
     private const int RowNumberChars = 4;
 
@@ -320,6 +325,11 @@ public class PatternView : Control
                 ctx.DrawText(Text(inst, muted || cell.Instrument == 0 ? dim : instBrush), new Point(x + 4 * _charW, y + 1));
                 ctx.DrawText(Text(cell.VolumeText, muted || cell.Volume < 0 ? dim : volBrush), new Point(x + 7 * _charW, y + 1));
                 ctx.DrawText(Text(eff, muted || cell.Effect == '\0' ? dim : effBrush), new Point(x + 10 * _charW, y + 1));
+                if (TwoEffects)
+                {
+                    string eff2 = cell.Effect2 == '\0' ? "..." : cell.Effect2 + cell.Param2.ToString("X2", CultureInfo.InvariantCulture);
+                    ctx.DrawText(Text(eff2, muted || cell.Effect2 == '\0' ? dim : effBrush), new Point(x + 14 * _charW, y + 1));
+                }
             }
         }
 
@@ -616,7 +626,7 @@ public class PatternView : Control
         }
         else if (EditMode)
         {
-            if (CursorColumn == ColEffect)
+            if (CursorColumn is ColEffect or ColEffect2)
             {
                 char ch = EffectChar(e.Key);
                 if (ch != '\0') { SetEffectChar(ch); Advance(); return; }
@@ -667,7 +677,7 @@ public class PatternView : Control
     {
         var c = Cell;
         int inst = note >= 0 ? Instrument : c.Instrument;
-        Cell = new TrackerCell(note, inst, c.Effect, c.Param, c.Volume);
+        Cell = c.WithNote(note, inst);
     });
 
     private void SetHexDigit(int digit) => Change(() =>
@@ -675,20 +685,22 @@ public class PatternView : Control
         var c = Cell;
         switch (CursorColumn)
         {
-            case ColInstHi: Cell = new TrackerCell(c.Note, digit * 16 + c.Instrument % 16, c.Effect, c.Param, c.Volume); break;
-            case ColInstLo: Cell = new TrackerCell(c.Note, c.Instrument / 16 * 16 + digit, c.Effect, c.Param, c.Volume); break;
+            case ColInstHi: Cell = c.WithNote(c.Note, digit * 16 + c.Instrument % 16); break;
+            case ColInstLo: Cell = c.WithNote(c.Note, c.Instrument / 16 * 16 + digit); break;
             // The volume goes up to 40 (hex): a first digit above 4 is taken as 4
             case ColVolHi: Cell = c.WithVolume(Math.Min(64, Math.Min(digit, 4) * 16 + (c.Volume < 0 || digit >= 4 ? 0 : c.Volume % 16))); break;
             case ColVolLo: Cell = c.WithVolume(Math.Min(64, (c.Volume < 0 ? 0 : c.Volume / 16 * 16) + digit)); break;
-            case ColParamHi: Cell = new TrackerCell(c.Note, c.Instrument, c.Effect == '\0' ? '0' : c.Effect, digit * 16 + c.Param % 16, c.Volume); break;
-            case ColParamLo: Cell = new TrackerCell(c.Note, c.Instrument, c.Effect == '\0' ? '0' : c.Effect, c.Param / 16 * 16 + digit, c.Volume); break;
+            case ColParamHi: Cell = c.WithEffect(c.Effect == '\0' ? '0' : c.Effect, digit * 16 + c.Param % 16); break;
+            case ColParamLo: Cell = c.WithEffect(c.Effect == '\0' ? '0' : c.Effect, c.Param / 16 * 16 + digit); break;
+            case ColParam2Hi: Cell = c.WithEffect2(c.Effect2 == '\0' ? '0' : c.Effect2, digit * 16 + c.Param2 % 16); break;
+            case ColParam2Lo: Cell = c.WithEffect2(c.Effect2 == '\0' ? '0' : c.Effect2, c.Param2 / 16 * 16 + digit); break;
         }
     });
 
     private void SetEffectChar(char ch) => Change(() =>
     {
         var c = Cell;
-        Cell = new TrackerCell(c.Note, c.Instrument, ch, c.Param, c.Volume);
+        Cell = CursorColumn == ColEffect2 ? c.WithEffect2(ch, c.Param2) : c.WithEffect(ch, c.Param);
     });
 
     private void ClearField() => Change(() =>
@@ -696,10 +708,11 @@ public class PatternView : Control
         var c = Cell;
         Cell = CursorColumn switch
         {
-            ColNote => new TrackerCell(TrackerCell.NoNote, 0, c.Effect, c.Param, c.Volume),
-            ColInstHi or ColInstLo => new TrackerCell(c.Note, 0, c.Effect, c.Param, c.Volume),
+            ColNote => c.WithNote(TrackerCell.NoNote, 0),
+            ColInstHi or ColInstLo => c.WithNote(c.Note, 0),
             ColVolHi or ColVolLo => c.WithVolume(TrackerCell.NoVolume),
-            _ => new TrackerCell(c.Note, c.Instrument, '\0', 0, c.Volume)
+            ColEffect2 or ColParam2Hi or ColParam2Lo => c.WithEffect2('\0', 0),
+            _ => c.WithEffect('\0', 0)
         };
     });
 
@@ -759,7 +772,7 @@ public class PatternView : Control
                 var cell = CellAt(r, c);
                 if (cell.Note < 0) continue;
                 int n = Math.Clamp(cell.Note + semis, 0, 119);
-                SetCellAt(r, c, new TrackerCell(n, cell.Instrument, cell.Effect, cell.Param, cell.Volume));
+                SetCellAt(r, c, cell.WithNote(n, cell.Instrument));
             }
         });
     }

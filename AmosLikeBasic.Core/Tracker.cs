@@ -434,20 +434,33 @@ namespace AmosLikeBasic
         public TrackerYmInstrument? Ym { get; set; }
     }
 
-    // A song in YM mode: how the chip's channels are played
+    // A song in YM mode: a maxYMiser song as maxYMiser has it. Channels 1 – 3 are its tracks A – C, played
+    // by the Atari ST's sound chip as its replay plays them; each line has maxYMiser's two effects, and
+    // instrument n is its instrument n. The sequences are the song's, numbered as in maxYMiser, and the
+    // file it was read from is kept, so that it can be saved as it was with only what has been changed.
     public sealed class TrackerYmSong
     {
-        // The timer effects each channel may use: bit 2 channel 1, bit 1 channel 2, bit 0 channel 3
-        public int Timers { get; set; } = 7;
-        // The replay's calls in each tick of the tracker (more than 1 for a replay faster than ~100 Hz)
-        public double CallsPerTick { get; set; } = 1;
-        // The buzzer's shape from the mixer sequence (maxYMiser's newer songs), or always the instrument's
-        public bool ShapeFromMixer { get; set; } = true;
+        public int Version { get; set; } = 1;            // maxYMiser's format: 0 or 1
+        public int Rate { get; set; } = 50;               // how often the replay is called, Hz
+        public int Speed { get; set; } = 6;               // its speed (the tracker shows up to 31; maxYMiser has more)
+        public int Timers { get; set; } = 7;              // the timer effects each channel may use: bit 2 channel 1, 1 channel 2, 0 channel 3
+        public int Repeat { get; set; }                   // the place in the order list the song goes back to at its end
+        public int StartPlace { get; set; }               // the place it starts at (where maxYMiser was left; kept in the file)
+        public List<TrackerYmSequence> Sequences { get; set; } = new();   // [n]: sequence n (0 is none)
+        // The SNDH file the song was read from (base64): its replay, and what the song does not show
+        public string Original { get; set; } = "";
+        // The patterns that stand for maxYMiser's "nothing here" ($FF) and "note off" ($FE) in its order
+        public int EmptyPattern { get; set; } = -1;
+        public int NoteOffPattern { get; set; } = -1;
+        public int LoopMarkPattern { get; set; } = -1;    // and the editor's loop mark ($FD), played as nothing
+        // An older replay (in maxYMiser's files from before about 2013): its buzzer is the mixer's bit 4
+        // alone, sounds whatever the volume, and has the instrument's shape; a volume column of F is silence
+        public bool OldReplay { get; set; }
+        public bool ShapeFromMixer => Version != 0 && !OldReplay;   // the newer format's mixer says the buzzer's shape
     }
 
-    // An instrument for the sound chip, as maxYMiser has them: sequences stepped every Speed ticks
-    // from the note's start, each going round from its Repeat (or staying on its last step when that
-    // is the repeat). What they hold:
+    // maxYMiser's instrument: sequences stepped every Speed ticks from the note's start, by their numbers
+    // in the song (0: none):
     //   Volume   the chip's volume 0 – 15
     //   Arpeggio semitones; Vibrato and Fixed tone periods (Fixed: the period itself, $FFFF none)
     //   Mixer    a word: $0100 the tone, $1000 noise, $00x0 the buzzer (x its shape; 1 the instrument's),
@@ -467,22 +480,19 @@ namespace AmosLikeBasic
         public int DetuneCoarse { get; set; }            // semitones
         public int DetuneFine { get; set; }              // tone periods
         public int PulseWidth { get; set; }              // the PWM timer's width, 0 – 255
-        public int PwmSlide { get; set; }                // added to it each tick
-        public bool PwmFixed { get; set; }               // the width as set, without the slide
-        // The slide's sum goes on from note to note in a channel; this note starts it from 0 again
-        public bool PwmReset { get; set; }
         public int BuzzerWave { get; set; } = 8;         // the envelope's shape, 0 – 15
-        public int NoiseTranspose { get; set; }
-        public string DigiSample { get; set; } = "";     // a WAV file (8-bit levels), for the digidrum timer
+        public int StartSync { get; set; }               // the buzzer started again at each note
+        public int DigiSample { get; set; }              // the digidrum, 1 – 8 (0: none)
         public int DigiRate { get; set; } = 0x20;        // its MFP timer data: 614400 / rate Hz
-        public TrackerYmSequence? VolumeSeq { get; set; }
-        public TrackerYmSequence? ArpeggioSeq { get; set; }
-        public TrackerYmSequence? VibratoSeq { get; set; }
-        public TrackerYmSequence? MixerSeq { get; set; }
-        public TrackerYmSequence? NoiseSeq { get; set; }
-        public TrackerYmSequence? FixedSeq { get; set; }
-        public TrackerYmSequence? TimerSeq { get; set; }
-        public TrackerYmSequence? PwmSeq { get; set; }
+        public int FrequencyResolution { get; set; }
+        public int VolumeSeq { get; set; }
+        public int ArpeggioSeq { get; set; }
+        public int VibratoSeq { get; set; }
+        public int MixerSeq { get; set; }
+        public int NoiseSeq { get; set; }
+        public int FixedSeq { get; set; }
+        public int TimerSeq { get; set; }
+        public int PwmSeq { get; set; }
     }
 
     public sealed class TrackerYmSequence
@@ -578,6 +588,9 @@ namespace AmosLikeBasic
         public readonly int Instrument;  // 1 – 255, 0 = none
         public readonly char Effect;     // '0' – '9', 'A' – 'Z', '\0' = none
         public readonly int Param;       // 0 – 255
+        // A second effect (a maxYMiser song has two on a line), '\0' = none
+        public readonly char Effect2;
+        public readonly int Param2;
         // The volume column: the volume the channel gets on the row, 0 – 64 (0x40), or NoVolume.
         // Kept as one more, so that a cell that is all zeros (default) has none.
         private readonly int _volume;
@@ -585,18 +598,24 @@ namespace AmosLikeBasic
 
         public static readonly TrackerCell Empty = new(NoNote, 0, '\0', 0);
 
-        public TrackerCell(int note, int instrument, char effect, int param, int volume = NoVolume)
+        public TrackerCell(int note, int instrument, char effect, int param, int volume = NoVolume, char effect2 = '\0', int param2 = 0)
         {
             Note = note;
             Instrument = instrument;
             Effect = effect;
             Param = param;
             _volume = volume < 0 ? 0 : Math.Min(volume, 64) + 1;
+            Effect2 = effect2;
+            Param2 = effect2 == '\0' ? 0 : param2;
         }
 
-        public TrackerCell WithVolume(int volume) => new(Note, Instrument, Effect, Param, volume);
+        // The cell with one part changed, the rest as it is
+        public TrackerCell WithVolume(int volume) => new(Note, Instrument, Effect, Param, volume, Effect2, Param2);
+        public TrackerCell WithNote(int note, int instrument) => new(note, instrument, Effect, Param, Volume, Effect2, Param2);
+        public TrackerCell WithEffect(char effect, int param) => new(Note, Instrument, effect, param, Volume, Effect2, Param2);
+        public TrackerCell WithEffect2(char effect, int param) => new(Note, Instrument, Effect, Param, Volume, effect, param);
 
-        public bool IsEmpty => Note == NoNote && Instrument == 0 && Effect == '\0' && Volume == NoVolume;
+        public bool IsEmpty => Note == NoNote && Instrument == 0 && Effect == '\0' && Volume == NoVolume && Effect2 == '\0';
 
         private static readonly string[] NoteNames = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" };
 
@@ -621,11 +640,12 @@ namespace AmosLikeBasic
         }
 
         // "C-4 01 40 A04": note, instrument, volume and effect. Songs from before the volume column
-        // have three parts, "C-4 01 A04".
+        // have three parts, "C-4 01 A04". A second effect is a fifth part, "C-4 01 40 A04 X37".
         public static TrackerCell Parse(string text)
         {
             var parts = text.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             int note = parts.Length > 0 ? ParseNote(parts[0]) : NoNote;
+            var (effect2, param2) = parts.Length > 4 ? ParseEffect(parts[4]) : ('\0', 0);
 
             int volume = NoVolume;
             if (parts.Length > 3)
@@ -643,18 +663,19 @@ namespace AmosLikeBasic
                 !int.TryParse(parts[1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out inst))
                 throw new FormatException($"'{parts[1]}' is not an instrument number (two hex digits)");
 
-            char effect = '\0';
-            int param = 0;
-            if (parts.Length > 2 && parts[2].Trim('.', '-').Length > 0)
-            {
-                string e = parts[2].ToUpperInvariant();
-                if (e.Length != 3 || !char.IsLetterOrDigit(e[0]) ||
-                    !int.TryParse(e[1..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out param))
-                    throw new FormatException($"'{parts[2]}' is not an effect (a letter or digit and two hex digits)");
-                effect = e[0];
-                if (effect == '0' && param == 0) effect = '\0';
-            }
-            return new TrackerCell(note, Math.Clamp(inst, 0, 255), effect, param, volume);
+            var (effect, param) = parts.Length > 2 ? ParseEffect(parts[2]) : ('\0', 0);
+            if (effect == '0' && param == 0) effect = '\0';
+            return new TrackerCell(note, Math.Clamp(inst, 0, 255), effect, param, volume, effect2, param2);
+        }
+
+        private static (char, int) ParseEffect(string text)
+        {
+            if (text.Trim('.', '-').Length == 0) return ('\0', 0);
+            string e = text.ToUpperInvariant();
+            if (e.Length != 3 || !char.IsLetterOrDigit(e[0]) ||
+                !int.TryParse(e[1..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int param))
+                throw new FormatException($"'{text}' is not an effect (a letter or digit and two hex digits)");
+            return (e[0], param);
         }
 
         public string VolumeText => Volume == NoVolume ? ".." : Volume.ToString("X2", CultureInfo.InvariantCulture);
@@ -663,11 +684,13 @@ namespace AmosLikeBasic
         {
             string inst = Instrument == 0 ? ".." : Instrument.ToString("X2", CultureInfo.InvariantCulture);
             string eff = Effect == '\0' ? "..." : Effect + Param.ToString("X2", CultureInfo.InvariantCulture);
-            return $"{NoteName(Note)} {inst} {VolumeText} {eff}";
+            return Effect2 == '\0' ? $"{NoteName(Note)} {inst} {VolumeText} {eff}"
+                : $"{NoteName(Note)} {inst} {VolumeText} {eff} {Effect2}{Param2.ToString("X2", CultureInfo.InvariantCulture)}";
         }
 
-        public bool Equals(TrackerCell o) => Note == o.Note && Instrument == o.Instrument && Effect == o.Effect && Param == o.Param && _volume == o._volume;
+        public bool Equals(TrackerCell o) => Note == o.Note && Instrument == o.Instrument && Effect == o.Effect && Param == o.Param && _volume == o._volume
+            && Effect2 == o.Effect2 && Param2 == o.Param2;
         public override bool Equals(object? obj) => obj is TrackerCell o && Equals(o);
-        public override int GetHashCode() => HashCode.Combine(Note, Instrument, Effect, Param, _volume);
+        public override int GetHashCode() => HashCode.Combine(Note, Instrument, Effect, Param, _volume, Effect2, Param2);
     }
 }

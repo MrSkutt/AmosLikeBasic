@@ -228,8 +228,6 @@ public static partial class YmImport
                 if (free >= 0) last[free] = new TrackerCell(last[free].Note, last[free].Instrument, 'B', _m.Repeat, last[free].Volume);
             }
             song.Instruments = _instruments;
-            // Played by the sound chip as maxYMiser does (the tables and envelopes are for the synth)
-            song.Ym = new TrackerYmSong { Timers = _m.TimerEnables, CallsPerTick = Math.Round(_rho, 4), ShapeFromMixer = _m.Version != 0 };
 
             // The STe's DMA sound, as the recording heard it
             var grid = new TrackerCell[rows.Count, Columns];
@@ -501,7 +499,6 @@ public static partial class YmImport
             string key = r.Absolute && _byNote ? keyed : plain;
             _rendered[key] = r;
             var inst = MakeMymInstrument(v, r, note);
-            inst.Ym = YmPart(v, noiseTranspose);
             // Sounds that come out the same (the effects changed what is not heard) are one instrument
             string name = inst.Name;
             inst.Name = "";
@@ -745,30 +742,6 @@ public static partial class YmImport
 
         private readonly Dictionary<int, int> _digiRates = new();
 
-        // The instrument as maxYMiser has it, for the sound chip
-        private TrackerYmInstrument YmPart(Voice v, int noiseTranspose)
-        {
-            TrackerYmSequence? Seq(int i)
-            {
-                int n = v.Seq[i];
-                if (n <= 0 || n >= _m.Sequences.Count) return null;
-                var q = _m.Sequences[n];
-                return new TrackerYmSequence { Steps = q.Steps.Select(x => i is 1 or 2 ? x : x & 0xFFFF).ToList(), Repeat = q.Repeat };
-            }
-            return new TrackerYmInstrument
-            {
-                Speed = Math.Max(1, v.Speed), Volume = v.Volume,
-                Portamento = v.Flags[0], Arpeggio = v.Flags[1], Vibrato = v.Flags[2], Transpose = v.Flags[3],
-                FixedFrequency = v.Flags[4], FixedDetune = v.Flags[5],
-                DetuneCoarse = v.Coarse, DetuneFine = v.Fine, PulseWidth = v.Width, PwmSlide = v.PwmSlide, PwmFixed = v.PwmFixed,
-                PwmReset = v.PwmReset,
-                BuzzerWave = v.BuzzerWave & 15, NoiseTranspose = noiseTranspose,
-                DigiSample = v.Digi is >= 1 and <= 8 && v.Digi <= _m.Digidrums.Count && _m.Digidrums[v.Digi - 1].Length > 0 && _folder != null ? DigiFile(v.Digi) : "",
-                DigiRate = v.DigiRate is >= 0x18 and <= 0xCD ? v.DigiRate : 0x20,
-                VolumeSeq = Seq(0), ArpeggioSeq = Seq(1), VibratoSeq = Seq(2), MixerSeq = Seq(3),
-                NoiseSeq = Seq(4), FixedSeq = Seq(5), TimerSeq = Seq(6), PwmSeq = Seq(7)
-            };
-        }
         private readonly string?[] _gated = new string?[2];
 
         // The buzzer's sawtooth (256 frames, a round of the envelope) or triangle (512), as the plain

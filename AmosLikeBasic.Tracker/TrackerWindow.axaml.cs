@@ -110,6 +110,14 @@ public partial class TrackerWindow : Window
             if (_loading || ChannelsBox.Value == null) return;
             int channels = (int)ChannelsBox.Value;
             if (channels == _song.Channels) return;
+            // maxYMiser has its three tracks and the DMA track: more is the tracker's own song
+            if (_song.Ym != null && channels > 4 && !await LeaveYmModeAsync("more than four tracks"))
+            {
+                _loading = true;
+                ChannelsBox.Value = _song.Channels;
+                _loading = false;
+                return;
+            }
             if (channels < _song.Channels && !await ConfirmFewerChannelsAsync(channels))
             {
                 _loading = true;
@@ -863,24 +871,24 @@ public partial class TrackerWindow : Window
         ("PWM", "the PWM timer's width added, 0 – FF")
     };
 
-    private static TrackerYmSequence? GetYmSeq(TrackerYmInstrument y, int i) => i switch
+    private static int GetYmSeq(TrackerYmInstrument y, int i) => i switch
     {
         0 => y.VolumeSeq, 1 => y.ArpeggioSeq, 2 => y.VibratoSeq, 3 => y.MixerSeq,
         4 => y.NoiseSeq, 5 => y.FixedSeq, 6 => y.TimerSeq, _ => y.PwmSeq
     };
 
-    private static void SetYmSeq(TrackerYmInstrument y, int i, TrackerYmSequence? q)
+    private static void SetYmSeq(TrackerYmInstrument y, int i, int n)
     {
         switch (i)
         {
-            case 0: y.VolumeSeq = q; break;
-            case 1: y.ArpeggioSeq = q; break;
-            case 2: y.VibratoSeq = q; break;
-            case 3: y.MixerSeq = q; break;
-            case 4: y.NoiseSeq = q; break;
-            case 5: y.FixedSeq = q; break;
-            case 6: y.TimerSeq = q; break;
-            default: y.PwmSeq = q; break;
+            case 0: y.VolumeSeq = n; break;
+            case 1: y.ArpeggioSeq = n; break;
+            case 2: y.VibratoSeq = n; break;
+            case 3: y.MixerSeq = n; break;
+            case 4: y.NoiseSeq = n; break;
+            case 5: y.FixedSeq = n; break;
+            case 6: y.TimerSeq = n; break;
+            default: y.PwmSeq = n; break;
         }
     }
 
@@ -913,12 +921,13 @@ public partial class TrackerWindow : Window
     private StackPanel BuildYmPanel()
     {
         var panel = new StackPanel { Spacing = 6, Margin = new Thickness(0, 10, 0, 0), MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Left };
-        AddHeading(panel, "YM INSTRUMENT: THE SOUND CHIP");
+        AddHeading(panel, "MAXYMISER INSTRUMENT");
         panel.Children.Add(new TextBlock
         {
-            Text = "The song is in YM mode: channels 1 – 3 are played by the Atari ST's sound chip, as maxYMiser does. " +
-                   "The sequences are stepped every Speed ticks from the note's start; each is written in hex, with | before " +
-                   "the step it goes round from (without it, it stays on its last step).",
+            Text = "The song is maxYMiser's (YM mode): channels 1 – 3 are played by the Atari ST's sound chip as maxYMiser plays " +
+                   "them. An instrument's sequences are the song's, by their numbers, shared by the instruments that use them. " +
+                   "They are stepped every Speed ticks from the note's start; each is written in hex, with | before the step " +
+                   "it goes round from (without it, it stays on its last step).",
             Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap
         });
 
@@ -942,9 +951,9 @@ public partial class TrackerWindow : Window
         Number("Detune coarse", -96, 96, y => y.DetuneCoarse, (y, v) => y.DetuneCoarse = v);
         Number("Detune fine", -128, 127, y => y.DetuneFine, (y, v) => y.DetuneFine = v);
         Number("Pulse width", 0, 255, y => y.PulseWidth, (y, v) => y.PulseWidth = v);
-        Number("PWM slide", -128, 127, y => y.PwmSlide, (y, v) => y.PwmSlide = v);
         Number("Buzzer shape", 0, 15, y => y.BuzzerWave, (y, v) => y.BuzzerWave = v);
-        Number("Noise transpose", -31, 31, y => y.NoiseTranspose, (y, v) => y.NoiseTranspose = v);
+        Number("Start sync", 0, 255, y => y.StartSync, (y, v) => y.StartSync = v);
+        Number("Digidrum", 0, 8, y => y.DigiSample, (y, v) => y.DigiSample = v);
         Number("Digi rate", 0x18, 0xCD, y => y.DigiRate, (y, v) => y.DigiRate = v);
 
         // What the pitch effects act on: the tone, the buzzer, the timer
@@ -986,33 +995,61 @@ public partial class TrackerWindow : Window
         }
         panel.Children.Add(flags);
 
-        // The sequences
+        // The sequences: each slot's number, and the song's sequence of that number
         AddHeading(panel, "SEQUENCES");
         for (int i = 0; i < YmSequenceNames.Length; i++)
         {
             int index = i;
-            var box = new TextBox { FontFamily = new FontFamily("Menlo, Consolas, Courier New, monospace"), Watermark = YmSequenceNames[i].Help };
+            var number = new NumericUpDown { Minimum = 0, Maximum = 255, Increment = 1, FormatString = "0", Width = 120 };
+            var box = new TextBox { FontFamily = new FontFamily("Menlo, Consolas, Courier New, monospace"), Watermark = YmSequenceNames[i].Help, Margin = new Thickness(8, 0, 0, 0) };
             ToolTip.SetTip(box, YmSequenceNames[i].Help);
+            NumberBox(number, () => CurrentInstrument?.Ym is { } y ? GetYmSeq(y, index) : 0);
+            number.ValueChanged += (_, _) =>
+            {
+                if (number.Value is decimal d) EditInstrument("ym:seqno" + index, inst => { if (inst.Ym != null) SetYmSeq(inst.Ym, index, (int)d); });
+                if (!_loading) RefreshInstrumentPanel();
+            };
             void Commit()
             {
-                if (_loading) return;
+                if (_loading || _song.Ym is not { } song) return;
                 try
                 {
                     var q = ParseYmSequence(box.Text ?? "");
                     box.BorderBrush = null;
-                    EditInstrument("ym:seq" + index, inst => { if (inst.Ym != null) SetYmSeq(inst.Ym, index, q); });
+                    EditInstrument("ym:seq" + index, inst =>
+                    {
+                        if (inst.Ym == null) return;
+                        int n = GetYmSeq(inst.Ym, index);
+                        if (q == null && n == 0) return;
+                        if (n == 0)
+                        {
+                            // A sequence of its own, the next number
+                            n = Math.Max(1, song.Sequences.Count);
+                            SetYmSeq(inst.Ym, index, n);
+                        }
+                        while (song.Sequences.Count <= n) song.Sequences.Add(new TrackerYmSequence());
+                        song.Sequences[n] = q ?? new TrackerYmSequence();
+                    });
+                    RefreshInstrumentPanel();
                 }
                 catch (FormatException e) { box.BorderBrush = Brushes.Red; SetStatus($"{YmSequenceNames[index].Label}: {e.Message}"); }
             }
             box.LostFocus += (_, _) => Commit();
             box.KeyDown += (_, e) => { if (e.Key == Key.Enter) Commit(); };
-            AddRow(panel, YmSequenceNames[i].Label, box);
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+            row.Children.Add(number);
+            Grid.SetColumn(box, 1);
+            row.Children.Add(box);
+            AddRow(panel, YmSequenceNames[i].Label, row);
             _instrumentRefresh.Add(() =>
             {
                 var y = CurrentInstrument?.Ym;
-                box.IsEnabled = y != null;
+                number.IsEnabled = box.IsEnabled = y != null;
                 box.BorderBrush = null;
-                box.Text = y == null ? "" : YmSequenceText(GetYmSeq(y, index), index is 3 or 5);
+                int n = y == null ? 0 : GetYmSeq(y, index);
+                number.Value = n;
+                var seqs = _song.Ym?.Sequences;
+                box.Text = y == null || seqs == null || n <= 0 || n >= seqs.Count ? "" : YmSequenceText(seqs[n], index is 3 or 5);
             });
         }
         return panel;
@@ -1485,52 +1522,89 @@ public partial class TrackerWindow : Window
     //  Instrument
     // ════════════════════════════════════════════════════════════════
 
-    private void InstAdd_OnClick(object? sender, RoutedEventArgs e) =>
-        AddInstrument(new TrackerInstrument { Name = "Instrument " + (_song.Instruments.Count + 1) });
-
-    // An instrument for the chip: the tone at full volume (and the synth's square for it, heard when
-    // the song is not in YM mode). The song goes into YM mode with it.
-    private void InstAddYm_OnClick(object? sender, RoutedEventArgs e)
+    private async void InstAdd_OnClick(object? sender, RoutedEventArgs e)
     {
-        var inst = new TrackerInstrument
-        {
-            Name = "YM " + (_song.Instruments.Count + 1), Wave = "Square", Volume = 0.21, Attack = 0, Decay = 0, Sustain = 100, Release = 2,
-            Ym = new TrackerYmInstrument
-            {
-                VolumeSeq = new TrackerYmSequence { Steps = { 15 } },
-                MixerSeq = new TrackerYmSequence { Steps = { 0x100 } }
-            }
-        };
-        if (_song.Ym == null)
-        {
-            PushUndo("ym mode");
-            _song.Ym = new TrackerYmSong();
-            UpdateYmMode();
-        }
-        AddInstrument(inst);
+        if (!await LeaveYmModeAsync("more than its 32 instruments, nor the synth's")) return;
+        AddInstrument(new TrackerInstrument { Name = "Instrument " + (_song.Instruments.Count + 1) });
     }
 
-    // YM mode on and off. The instruments keep both parts, so nothing is lost either way.
-    private void MenuYmMode_OnClick(object? sender, RoutedEventArgs e)
+    // A maxYMiser song as the tracker's own: its instruments become the synth's (each sound they make
+    // one), its effects the tracker's, as when a maxYMiser song was read in before. After it, the song
+    // cannot be saved for maxYMiser any more.
+    private async void MenuConvert_OnClick(object? sender, RoutedEventArgs e) => await ConvertFromYmAsync(null);
+
+    private async Task<bool> ConvertFromYmAsync(string? why)
     {
-        PushUndo("ym mode");
-        _song.Ym = _song.Ym == null ? new TrackerYmSong() : null;
-        UpdateYmMode();
-        SongChanged();
-        RefreshInstrumentPanel();
-        SetStatus(_song.Ym != null
-            ? "YM mode: channels 1 – 3 are the sound chip's, for the instruments with a YM part."
-            : "The synth plays all the channels again (the YM parts are kept).");
+        if (_song.Ym == null) return true;
+        string text = (why != null ? why + "\n\n" : "") +
+                      "Turned into the tracker's own song, it can use all the tracker can do, but can no longer be saved " +
+                      "as an SNDH file for maxYMiser. (Undo takes it back.)";
+        if (!await AskAsync("Convert to the tracker's format?", text, "Convert", "Cancel")) return false;
+        Stop();
+        try
+        {
+            var m = YmImport.ToMaxYMiser(_song);
+            string safe = new string((_song.Title.Length > 0 ? _song.Title : "song").Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
+            string folder = Path.Combine(Workspace.Sound, "Samples", safe);
+            string inSong = Path.GetRelativePath(Workspace.Root, folder).Replace('\\', '/');
+            if (inSong.StartsWith("..")) inSong = folder;
+            var bytes = m.Write();
+            var recording = m.DmaUsed ? await Task.Run(() => SndhPlayer.Record(SndhFile.Read(bytes), 0)) : null;
+            var result = await Task.Run(() => YmImport.ImportMaxYMiser(MaxYMiserSong.Find(bytes)!, _song.Title, folder, inSong, recording));
+            if (result == null) { SetStatus("The song has more sounds than the tracker's 255 instruments."); return false; }
+            PushUndo("convert");
+            _song = result.Song;
+            LoadSongIntoUi(keepPositions: true);
+            SongChanged();
+            _ = ShowReportAsync("Converted", result.Report ?? "");
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            SetStatus("Could not convert: " + ex.Message);
+            return false;
+        }
+    }
+
+    // In a maxYMiser song, something it does not have: the song is converted first, or nothing is done
+    private async Task<bool> LeaveYmModeAsync(string what) =>
+        _song.Ym == null || await ConvertFromYmAsync($"maxYMiser has no {what}.");
+
+    // The song as maxYMiser's SNDH file again: its own file, with the song as it is now
+    private async void ExportSndh_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_song.Ym == null) { SetStatus("Only a song read from maxYMiser can be saved for it."); return; }
+        string name = string.IsNullOrWhiteSpace(_song.Title) ? "song" : _song.Title;
+        if (_path != null) name = Path.GetFileNameWithoutExtension(_path);
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save the song for maxYMiser (SNDH)",
+            SuggestedFileName = name + ".sndh",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound),
+            FileTypeChoices = new[] { new FilePickerFileType("SNDH (maxYMiser)") { Patterns = new[] { "*.sndh", "*.snd" } } }
+        });
+        if (file?.TryGetLocalPath() is not { } path) return;
+        try
+        {
+            var bytes = YmImport.SaveMaxYMiser(_song);
+            await File.WriteAllBytesAsync(path, bytes);
+            SetStatus($"Saved {Path.GetFileName(path)} for maxYMiser ({bytes.Length / 1024} KB)");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or FormatException)
+        {
+            SetStatus("Could not save the SNDH file: " + ex.Message);
+        }
     }
 
     private void UpdateYmMode()
     {
-        MenuYmMode.IsChecked = _song.Ym != null;
+        MenuConvert.IsEnabled = MenuSaveSndh.IsEnabled = _song.Ym != null;
         UpdateTitle();
     }
 
-    private void InstClone_OnClick(object? sender, RoutedEventArgs e)
+    private async void InstClone_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (!await LeaveYmModeAsync("more than its 32 instruments")) return;
         var inst = CurrentInstrument;
         if (inst == null) return;
         // A copy via JSON, so that lists are not shared
@@ -1570,8 +1644,9 @@ public partial class TrackerWindow : Window
         _ymBrowser.Show(this);
     }
 
-    private void InstLibrary_OnClick(object? sender, RoutedEventArgs e)
+    private async void InstLibrary_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (!await LeaveYmModeAsync("instruments of the synth")) return;
         if (_library != null) { _library.Activate(); return; }
         _library = new InstrumentLibraryWindow(() => CurrentInstrument, AddInstrument, ReplaceInstrument, PreviewInstrument);
         _library.Closed += (_, _) => { _library = null; ChiptuneSynth.TrackPreviewStop(); };
@@ -1610,8 +1685,9 @@ public partial class TrackerWindow : Window
         _previewRelease.Start();
     }
 
-    private void InstDelete_OnClick(object? sender, RoutedEventArgs e)
+    private async void InstDelete_OnClick(object? sender, RoutedEventArgs e)
     {
+        if (!await LeaveYmModeAsync("fewer than its 32 instruments")) return;
         int n = Pattern.Instrument;
         if (n < 1 || n > _song.Instruments.Count) return;
         PushUndo();
@@ -1755,7 +1831,7 @@ public partial class TrackerWindow : Window
                 var bytes = File.ReadAllBytes(path);
                 return XmImport.IsXm(bytes) ? XmImport.Import(bytes, name, folder, inSong)
                     : SidFile.IsSid(bytes) ? YmImport.ImportSid(SidFile.Load(path), name, tune, progress: Progress)
-                    : YmFile.IsChipMusic(bytes) ? YmImport.ImportChipMusic(bytes, name, tune, folder, inSong, Progress)
+                    : YmFile.IsChipMusic(bytes) ? YmImport.OpenChipMusic(bytes, name, tune, folder, inSong, Progress)
                     : ModImport.Import(bytes, name, folder, inSong);
             });
             // Only a read that takes a while shows the window
@@ -2061,7 +2137,8 @@ public partial class TrackerWindow : Window
             "the old machines:",
             "  MOD and XM modules (ProTracker, FastTracker 2), read and saved as XM",
             "  YM and SNDH from the Atari ST, played on an emulated 68000 and STe",
-            "  maxYMiser songs in SNDH files, read from the song itself",
+            "  maxYMiser songs in SNDH files, opened as maxYMiser has them, played by the sound",
+            "  chip as its replay plays them, and saved for maxYMiser again",
             "  SID files from the Commodore 64, played on an emulated 6510 and SID",
             "",
             "Songs are played in BASIC with TRACK LOAD and TRACK PLAY.",
@@ -2143,7 +2220,11 @@ public partial class TrackerWindow : Window
     }
 
     // SIMPLIFY: fewer instruments, with their arpeggios and vibratos as effects
-    private void InstSimplify_OnClick(object? sender, RoutedEventArgs e) => Simplify();
+    private async void InstSimplify_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (!await LeaveYmModeAsync("instruments of the synth to simplify")) return;
+        Simplify();
+    }
 
     private void Simplify()
     {

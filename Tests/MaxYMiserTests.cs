@@ -85,6 +85,25 @@ public class MaxYMiserTests
     }
 
     [Fact]
+    public void A_song_is_written_back_as_it_was_with_only_its_changes()
+    {
+        var file = Song();
+        var m = MaxYMiserSong.Find(file)!;
+        Assert.Equal(file, m.Write());
+
+        // A note more in pattern 1 and a sequence more: read back as they were made
+        m.Patterns[1][10] = new MaxYMiserSong.Line(57, 2, 0, 'S', 4, '\0', 0);
+        m.Sequences.Add(new MaxYMiserSong.Sequence { Steps = new[] { 0xF, 0xA, 5 }, Repeat = 2 });
+        m.Instruments[1].Name = "Bass 2";
+        var back = MaxYMiserSong.Find(m.Write())!;
+        Assert.Equal((57, 2, 'S', 4), (back.Patterns[1][10].Note, back.Patterns[1][10].Instrument, back.Patterns[1][10].Effect1, back.Patterns[1][10].Param1));
+        Assert.Equal(45, back.Patterns[1][0].Note);                  // what was there before is still there
+        Assert.Equal(new[] { 0xF, 0xA, 5 }, back.Sequences[^1].Steps);
+        Assert.Equal("Bass 2", back.Instruments[1].Name);
+        Assert.Equal(69, back.Patterns[0][0].Note);
+    }
+
+    [Fact]
     public void The_notes_and_instruments_become_the_trackers_as_written()
     {
         var r = YmImport.ImportMaxYMiser(MaxYMiserSong.Find(Song())!, "test")!;

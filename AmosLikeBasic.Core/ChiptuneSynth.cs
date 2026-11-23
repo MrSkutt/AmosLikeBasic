@@ -366,6 +366,7 @@ namespace AmosLikeBasic
         {
             StopMusic();
             _ym = null;
+            _ymData = null;
             foreach (var v in _voices) v.ResetSettings();
             _bpm = 120;
             _trackVolume = 1.0;
