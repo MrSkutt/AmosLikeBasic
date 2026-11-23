@@ -30,6 +30,7 @@ public static partial class YmImport
                 Version = m.Version, Rate = m.Rate, Speed = m.Speed, Timers = m.TimerEnables, Repeat = m.Repeat, StartPlace = m.StartPlace,
                 Sequences = m.Sequences.Select(q => new TrackerYmSequence { Steps = q.Steps.ToList(), Repeat = q.Repeat }).ToList(),
                 Original = Convert.ToBase64String(sndhData),
+                OpenedTitle = title,
                 OldReplay = IsOldReplay(sndhData)
             }
         };
@@ -235,6 +236,75 @@ public static partial class YmImport
         return ImportChipMusic(bytes, name, tune, sampleFolder, sampleFolderInSong, progress);
     }
 
-    // The song as an SNDH file maxYMiser opens: its own file with the song as it is now
-    public static byte[] SaveMaxYMiser(TrackerSong song) => ToMaxYMiser(song).Write();
+    // The song as an SNDH file maxYMiser opens: its own file with the song as it is now, and its title
+    // in the file's header when it has been changed
+    public static byte[] SaveMaxYMiser(TrackerSong song)
+    {
+        var bytes = ToMaxYMiser(song).Write();
+        if (song.Ym != null && song.Title != song.Ym.OpenedTitle) SetSndhTag(bytes, "TITL", song.Title);
+        return bytes;
+    }
+
+    // A tag's text in an SNDH header, written over it and the zeros after it (up to the next tag, one
+    // zero kept); a text longer than that room is cut
+    internal static void SetSndhTag(byte[] d, string tag, string text)
+    {
+        var t = System.Text.Encoding.ASCII.GetBytes(tag);
+        int end = Math.Min(d.Length, 1024);
+        for (int i = 16; i + 4 <= end; i++)
+        {
+            if (d[i] != t[0] || d[i + 1] != t[1] || d[i + 2] != t[2] || d[i + 3] != t[3]) continue;
+            if (i > 0 && d[i - 1] != 0 && !(d[i - 4] == 'S' && d[i - 1] == 'H')) continue;
+            int at = i + 4, room = at;
+            while (room < end && d[room] != 0) room++;
+            while (room < end && d[room] == 0) room++;
+            int size = room - at - 1;
+            if (size <= 0) return;
+            var b = System.Text.Encoding.Latin1.GetBytes(text);
+            Array.Clear(d, at, size);
+            Array.Copy(b, 0, d, at, Math.Min(b.Length, size));
+            return;
+        }
+    }
+
+    // A new maxYMiser song from a file maxYMiser saved (an empty song, or any song: its instruments and
+    // sequences are kept, its notes are not). Its replay is that file's. With no instrument in use, it
+    // gets three to start with: a square, a bass with a SID on it, and a noise drum.
+    public static TrackerSong NewMaxYMiser(byte[] file, string title)
+    {
+        var data = SndhFile.IsSndh(file) ? SndhFile.Read(file).Data : file;
+        var m = MaxYMiserSong.Find(data) ?? throw new FormatException("It is not a song saved by maxYMiser");
+        m.Patterns.Clear();
+        m.Patterns.Add(new MaxYMiserSong.Line[MaxYMiserSong.Lines]);
+        m.Order = new int[,] { { 0, 0, 0, 0xFF } };
+        m.Length = 1;
+        m.Repeat = 0;
+        m.StartPlace = 0;
+        m.DmaUsed = false;
+        if (m.Instruments.All(i => i.Name.Trim().Length == 0 && i.VolumeSeq == 0))
+        {
+            if (m.Sequences.Count == 0) m.Sequences.Add(new MaxYMiserSong.Sequence { Steps = new[] { 0 } });
+            int Seq(int repeat, params int[] steps)
+            {
+                m.Sequences.Add(new MaxYMiserSong.Sequence { Steps = steps, Repeat = repeat });
+                return m.Sequences.Count - 1;
+            }
+            void Make(int i, string name, int volume, int mixer, int noise = 0, int timer = 0)
+            {
+                var x = m.Instruments[i];
+                x.Name = name;
+                x.SequenceSpeed = 1;
+                x.VolumeSeq = volume; x.MixerSeq = mixer; x.NoiseSeq = noise; x.TimerSeq = timer;
+                x.ArpeggioSeq = x.VibratoSeq = x.FixedSeq = x.PwmSeq = 0;
+            }
+            Make(0, "Square", Seq(3, 0xF, 0xE, 0xD, 0xC), Seq(0, 0x100));
+            Make(1, "SID bass", Seq(0, 0xF), Seq(0, 0x105), timer: Seq(0, 0xF, 0));
+            Make(2, "Noise drum", Seq(7, 0xF, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x0), Seq(0, 0x1000), noise: Seq(0, 8));
+            m.TimerEnables |= 7;
+        }
+        var bytes = m.Write();
+        var song = OpenMaxYMiser(bytes, MaxYMiserSong.Find(bytes)!, title);
+        song.Ym!.OpenedTitle = "";
+        return song;
+    }
 }

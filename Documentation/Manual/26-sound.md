@@ -350,6 +350,16 @@ The **TRACKER** button opens a window where you write the songs. In the middle i
 
 **The menu.** Above the buttons the menu has what they do and a little more, also when the tracker runs as a program of its own: **File** opens songs, modules and chip music (and the ones opened or saved last, under *Open recent*) and saves as a tracker song, WAV or XM; **Edit** has undo and redo; **Song** plays and stops; **Instrument** adds, clones, deletes and simplifies instruments; **View** switches between the pages and chooses the **theme** (the same as AMOS Like Basic's, in both); **Help** opens the manual (the PDF next to the program, or the tracker's chapter online), lists the keys and tells about the tracker. Cmd+N, Cmd+O, Cmd+Shift+S and Cmd+W (Ctrl on Windows) are new, open, save as and close.
 
+**A new song.** **NEW** asks what kind of song to make, and keeps the song within what that kind can hold:
+
+- **FULL** is the tracker's own song: all it can do, the synth's instruments, samples, 3 – 32 channels and every effect.
+- **MOD** is ProTracker's: four channels and up to 31 instruments.
+- **XM** is FastTracker 2's: up to 32 channels and 128 instruments, saved with **XM** as a module, the instruments as samples.
+- **SNDH (maxYMiser)** is a song for gwEm's tracker on the Atari ST, played by its sound chip and saved for maxYMiser (see *maxYMiser songs* below). It starts from a file maxYMiser saved, for its player: an empty song saved in maxYMiser, or any of its songs (its instruments and sequences are kept, its notes are not). The first time, the tracker asks for one and keeps it in `Sound/Tracker/Templates`. An empty one gets three instruments to start with: a square, a bass with a SID on it and a noise drum.
+- **SID**, a song for the Commodore 64, is to come.
+
+What a MOD or XM cannot hold (a fifth channel in a MOD, a 32nd instrument) makes the tracker ask first: **Song → Convert to FULL** makes it the tracker's own song. The title bar shows what kind the song is.
+
 **Entering notes.** The keyboard works like a piano, as in ProTracker. The bottom row of letters (`Z S X D C V G B H N J M`) is one octave and the top row (`Q 2 W 3 E R 5 T 6 Y 7 U I`) the next. The note gets the instrument selected in the list, and you hear it while you hold the key. `1` lets go of the note (`===`). After each note the cursor moves down as many rows as **Step** says. **Octave** chooses which octave the piano starts on, and `F1` and `F2` change the octave.
 
 **Instruments, volume and effects.** With the arrow keys the cursor goes to the instrument, volume and effect columns. There you type digits and letters directly: `0`–`9` and `A`–`F` for hex digits, and in the first column of the effect also `G`, `H` and `I`. `Delete` or `Backspace` clears whatever the cursor is on.

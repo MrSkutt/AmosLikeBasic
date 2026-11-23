@@ -38,6 +38,11 @@ namespace AmosLikeBasic
             set => _channels = Math.Clamp(value, MinChannels, MaxChannels);
         }
 
+        // What the song is made for, and so what it is kept within: null the tracker's own (FULL), "MOD"
+        // (ProTracker's four channels and 31 instruments) or "XM" (FastTracker 2's 128 instruments).
+        // A maxYMiser song has its Ym part instead.
+        public string? Mode { get; set; }
+
         public List<TrackerInstrument> Instruments { get; set; } = new();
         public List<int> Order { get; set; } = new() { 0 };
         public List<TrackerPattern> Patterns { get; set; } = new() { new TrackerPattern() };
@@ -235,6 +240,8 @@ namespace AmosLikeBasic
             public int Speed { get; set; } = 6;
             public int Tempo { get; set; } = 125;
             public int Channels { get; set; } = DefaultChannels;
+            [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            public string? Mode { get; set; }
             public List<TrackerInstrument> Instruments { get; set; } = new();
             public List<int> Order { get; set; } = new();
             [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -298,6 +305,7 @@ namespace AmosLikeBasic
                     throw new FormatException("A channel's order points to a pattern that does not exist");
             song.TrimChannelOrder();
             song.Ym = file.Ym;
+            song.Mode = file.Mode is "MOD" or "XM" ? file.Mode : null;
             foreach (var inst in song.Instruments) inst.Table ??= new();
             return song;
         }
@@ -310,6 +318,7 @@ namespace AmosLikeBasic
                 Speed = Speed,
                 Tempo = Tempo,
                 Channels = Channels,
+                Mode = Mode,
                 Instruments = Instruments,
                 Order = Order,
                 ChannelOrder = HasChannelOrder ? ChannelOrder.Select(o => o?.Take(Channels).ToArray()).ToList() : null,
@@ -449,6 +458,8 @@ namespace AmosLikeBasic
         public List<TrackerYmSequence> Sequences { get; set; } = new();   // [n]: sequence n (0 is none)
         // The SNDH file the song was read from (base64): its replay, and what the song does not show
         public string Original { get; set; } = "";
+        // The title it had when it was opened: a title changed since is written into the file's header
+        public string OpenedTitle { get; set; } = "";
         // The patterns that stand for maxYMiser's "nothing here" ($FF) and "note off" ($FE) in its order
         public int EmptyPattern { get; set; } = -1;
         public int NoteOffPattern { get; set; } = -1;

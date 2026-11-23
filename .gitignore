@@ -76,3 +76,7 @@ Sound/Tracker/YM/
 Sound/Tracker/SNDH/
 Sound/SID/
 Sound/Tracker/SID/
+
+# The template a new maxYMiser song starts from: an empty song saved by maxYMiser, with gwEm's replay
+# (not ours to hand out until he says so)
+Sound/Tracker/Templates/

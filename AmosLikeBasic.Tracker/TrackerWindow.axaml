@@ -15,7 +15,7 @@
         <!-- The menu: what the buttons do, and more -->
         <Menu DockPanel.Dock="Top" Name="MainMenu" Background="{DynamicResource AmosPanelBg}" Foreground="{DynamicResource AmosTitleFg}">
             <MenuItem Header="_File">
-                <MenuItem Header="_New" Name="MenuNew" Click="New_OnClick"/>
+                <MenuItem Header="_New..." Name="MenuNew" Click="New_OnClick" ToolTip.Tip="A new song: the tracker's own, a MOD, an XM or a maxYMiser song"/>
                 <MenuItem Header="_Open..." Name="MenuOpen" Click="Load_OnClick" ToolTip.Tip="Tracker songs, MOD and XM modules, YM, SNDH and SID chip music"/>
                 <MenuItem Header="Open _chip music..." Click="YmBrowser_OnClick"/>
                 <MenuItem Header="Open _recent" Name="RecentMenu"/>
@@ -44,8 +44,8 @@
                 <MenuItem Header="S_top" InputGesture="Escape" Click="Stop_OnClick"/>
                 <MenuItem Header="P_anic (all sound off)" Click="Panic_OnClick"/>
                 <Separator/>
-                <MenuItem Header="_Convert to tracker format" Name="MenuConvert" Click="MenuConvert_OnClick"
-                          ToolTip.Tip="A maxYMiser song as the tracker's own: all the tracker can do, but no longer saved for maxYMiser"/>
+                <MenuItem Header="_Convert to FULL (the tracker's own)" Name="MenuConvert" Click="MenuConvert_OnClick"
+                          ToolTip.Tip="A MOD, XM or maxYMiser song as the tracker's own: all the tracker can do, but no longer kept within its format"/>
             </MenuItem>
             <MenuItem Header="_Instrument">
                 <MenuItem Header="_Edit instrument" InputGesture="F4" Click="InstrumentTab_OnClick"/>

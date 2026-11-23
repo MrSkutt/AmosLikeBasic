@@ -111,7 +111,8 @@ public partial class TrackerWindow : Window
             int channels = (int)ChannelsBox.Value;
             if (channels == _song.Channels) return;
             // maxYMiser has its three tracks and the DMA track: more is the tracker's own song
-            if (_song.Ym != null && channels > 4 && !await LeaveYmModeAsync("more than four tracks"))
+            if ((_song.Ym != null && channels > 4 && !await LeaveYmModeAsync("more than four tracks"))
+                || !await KeepModeAsync(channels, _song.Instruments.Count))
             {
                 _loading = true;
                 ChannelsBox.Value = _song.Channels;
@@ -1531,7 +1532,39 @@ public partial class TrackerWindow : Window
     // A maxYMiser song as the tracker's own: its instruments become the synth's (each sound they make
     // one), its effects the tracker's, as when a maxYMiser song was read in before. After it, the song
     // cannot be saved for maxYMiser any more.
-    private async void MenuConvert_OnClick(object? sender, RoutedEventArgs e) => await ConvertFromYmAsync(null);
+    private async void MenuConvert_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (_song.Ym != null) await ConvertFromYmAsync(null);
+        else await ConvertToFullAsync(null);
+    }
+
+    // A MOD or XM song as the tracker's own: nothing changes but what it is kept within
+    private async Task<bool> ConvertToFullAsync(string? why)
+    {
+        if (_song.Mode == null) return true;
+        string text = (why != null ? why + "\n\n" : "") +
+                      $"As the tracker's own song (FULL) it can use all the tracker can do, but is no longer kept within what a {_song.Mode} " +
+                      "can hold. It can still be saved as XM, the instruments as samples. (Undo takes it back.)";
+        if (!await AskAsync("Change to FULL?", text, "Change", "Cancel")) return false;
+        PushUndo("full");
+        _song.Mode = null;
+        UpdateYmMode();
+        SongChanged();
+        return true;
+    }
+
+    // In a MOD or XM song, more than it can hold: the song becomes the tracker's own first, or nothing is done
+    private async Task<bool> KeepModeAsync(int channels, int instruments)
+    {
+        string? what = _song.Mode switch
+        {
+            "MOD" when channels > 4 => "more than four channels",
+            "MOD" when instruments > 31 => "more than 31 instruments",
+            "XM" when instruments > 128 => "more than 128 instruments",
+            _ => null
+        };
+        return what == null || await ConvertToFullAsync($"A {_song.Mode} has no {what}.");
+    }
 
     private async Task<bool> ConvertFromYmAsync(string? why)
     {
@@ -1598,7 +1631,8 @@ public partial class TrackerWindow : Window
 
     private void UpdateYmMode()
     {
-        MenuConvert.IsEnabled = MenuSaveSndh.IsEnabled = _song.Ym != null;
+        MenuSaveSndh.IsEnabled = _song.Ym != null;
+        MenuConvert.IsEnabled = _song.Ym != null || _song.Mode != null;
         UpdateTitle();
     }
 
@@ -1614,9 +1648,10 @@ public partial class TrackerWindow : Window
         AddInstrument(copy);
     }
 
-    private void AddInstrument(TrackerInstrument inst)
+    private async void AddInstrument(TrackerInstrument inst)
     {
         if (_song.Instruments.Count >= 255) return;
+        if (!await KeepModeAsync(_song.Channels, _song.Instruments.Count + 1)) return;
         PushUndo();
         _song.Instruments.Add(inst);
         Pattern.Instrument = _song.Instruments.Count;
@@ -1723,9 +1758,29 @@ public partial class TrackerWindow : Window
 
     private async void New_OnClick(object? sender, RoutedEventArgs e)
     {
+        string? kind = await AskNewSongAsync();
+        if (kind == null) { KeepTypingFocus(); return; }
         if (!await ConfirmDiscardAsync()) return;
+        TrackerSong song;
+        if (kind == "maxYMiser")
+        {
+            var template = await MaxYMiserTemplateAsync();
+            if (template == null) { KeepTypingFocus(); return; }
+            try { song = YmImport.NewMaxYMiser(template, "New song"); }
+            catch (Exception ex) when (ex is FormatException or InvalidOperationException or IndexOutOfRangeException)
+            {
+                SetStatus("Could not start a maxYMiser song from the template: " + ex.Message);
+                return;
+            }
+        }
+        else
+        {
+            song = CreateNewSong();
+            if (kind == "MOD") { song.Mode = "MOD"; song.Channels = 4; }
+            if (kind == "XM") { song.Mode = "XM"; song.Channels = 8; }
+        }
         Stop();
-        _song = CreateNewSong();
+        _song = song;
         _path = null;
         _undo.Clear();
         _redo.Clear();
@@ -1733,6 +1788,113 @@ public partial class TrackerWindow : Window
         _dirty = false;
         UpdateTitle();
         KeepTypingFocus();
+    }
+
+    // What kinds of song NEW makes, and what each is
+    private static readonly (string kind, string title, string text, bool ready)[] NewSongKinds =
+    {
+        ("FULL", "FULL – the tracker's own",
+         "All the tracker can do: the synth's instruments, samples, 3 – 32 channels and every effect. " +
+         "Saved as a tracker song, and as WAV or XM.", true),
+        ("MOD", "MOD – ProTracker",
+         "Four channels and up to 31 instruments, as on the Amiga. The synth's instruments become samples when it is saved " +
+         "as a module. (Saving as .mod comes next; until then it is saved as a tracker song or XM.)", true),
+        ("XM", "XM – FastTracker 2",
+         "Up to 32 channels and 128 instruments. Saved as an XM module with the instruments as samples, for other trackers and players.", true),
+        ("maxYMiser", "SNDH – maxYMiser on the Atari ST",
+         "The Atari ST's sound chip, as in gwEm's maxYMiser: three tracks, 32 instruments made of sequences, two effects on a line. " +
+         "Saved as an SNDH file that maxYMiser opens and SNDH players play.", true),
+        ("SID", "SID – the Commodore 64",
+         "The C64's SID chip, saved to play on a C64. Not yet.", false),
+    };
+
+    // The window NEW opens: which kind of song. Null: none (cancelled)
+    private async Task<string?> AskNewSongAsync()
+    {
+        var dialog = new Window
+        {
+            Title = "New song",
+            Width = 560,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        string? chosen = null;
+        var list = new StackPanel { Margin = new Thickness(14), Spacing = 8 };
+        list.Children.Add(new TextBlock { Text = "What kind of song?", FontWeight = FontWeight.Bold, Margin = new Thickness(0, 0, 0, 4) });
+        foreach (var k in NewSongKinds)
+        {
+            var button = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                IsEnabled = k.ready,
+                Padding = new Thickness(10, 6),
+                Content = new StackPanel
+                {
+                    Spacing = 2,
+                    Children =
+                    {
+                        new TextBlock { Text = k.title, FontWeight = FontWeight.Bold },
+                        new TextBlock { Text = k.text, TextWrapping = TextWrapping.Wrap, FontSize = 12 }
+                    }
+                }
+            };
+            string kind = k.kind;
+            button.Click += (_, _) => { chosen = kind; dialog.Close(); };
+            list.Children.Add(button);
+        }
+        list.Children.Add(new TextBlock
+        {
+            Text = "A MOD, XM or maxYMiser song can be made the tracker's own later: Song → Convert to FULL.",
+            TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 4, 0, 0)
+        });
+        var cancel = new Button { Content = "Cancel", Width = 80, HorizontalAlignment = HorizontalAlignment.Right };
+        cancel.Click += (_, _) => dialog.Close();
+        list.Children.Add(cancel);
+        dialog.Content = list;
+        await dialog.ShowDialog(this);
+        return chosen;
+    }
+
+    // A new maxYMiser song starts from a file maxYMiser saved, for its replay (gwEm's, which is not ours
+    // to hand out): the template in Sound/Tracker/Templates, or one chosen and kept there
+    private static string MaxYMiserTemplatePath => Path.Combine(Workspace.Sound, "Tracker", "Templates", "maxYMiser.sndh");
+
+    private async Task<byte[]?> MaxYMiserTemplateAsync()
+    {
+        string path = MaxYMiserTemplatePath;
+        if (File.Exists(path)) return await File.ReadAllBytesAsync(path);
+        if (!await AskAsync("A song from maxYMiser",
+                "A new maxYMiser song starts from a file maxYMiser has saved, and plays with its replay. Choose one: an empty song " +
+                "saved in maxYMiser, or one of its songs (its instruments and sequences are kept, its notes are not). " +
+                "It is kept in Sound/Tracker/Templates for the next time.", "Choose...", "Cancel"))
+            return null;
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "A song saved by maxYMiser",
+            FileTypeFilter = new[] { new FilePickerFileType("SNDH (maxYMiser)") { Patterns = new[] { "*.sndh", "*.snd" } } },
+            SuggestedStartLocation = await StartFolderAsync()
+        });
+        if (files.Count == 0 || files[0].TryGetLocalPath() is not { } chosen) return null;
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(chosen);
+            var data = SndhFile.IsSndh(bytes) ? SndhFile.Read(bytes).Data : bytes;
+            if (MaxYMiserSong.Count(data) != 1 || MaxYMiserSong.Find(data) == null)
+            {
+                SetStatus($"{Path.GetFileName(chosen)} is not one song saved by maxYMiser.");
+                return null;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, bytes);
+            return bytes;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+        {
+            SetStatus("Could not read the file: " + ex.Message);
+            return null;
+        }
     }
 
     private async void Load_OnClick(object? sender, RoutedEventArgs e)
@@ -2321,7 +2483,8 @@ public partial class TrackerWindow : Window
     private void UpdateTitle()
     {
         string name = _path != null ? Path.GetFileName(_path) : "untitled";
-        Title = $"Tracker - {name}{(_song.Ym != null ? " (YM)" : "")}{(_dirty ? " *" : "")}";
+        string mode = _song.Ym != null ? " (maxYMiser)" : _song.Mode != null ? $" ({_song.Mode})" : "";
+        Title = $"Tracker - {name}{mode}{(_dirty ? " *" : "")}";
     }
 
     private string? _message;

@@ -68,7 +68,7 @@ public sealed class MaxYMiserSong
     private int _instTag, _trakTag, _digiTag = -1, _sequenceSize, _patternsEnd;
     private readonly List<(int start, int length, Line[] lines)> _readPatterns = new();
     private readonly List<int[]> _readSteps = new();
-    private int _readSpeed, _readRate;
+    private int _readSpeed, _readRate, _readStart;
 
     // The song's data in an SNDH file's code, or null when it is not a maxYMiser song. A file with
     // several tunes has a song for each, one after another (tune counts from 0).
@@ -176,6 +176,7 @@ public sealed class MaxYMiserSong
         var state = d.AsSpan(_trakTag, 8 + 64).ToArray();
         if (Speed != _readSpeed) state[8 + 13] = (byte)Speed;
         if (Rate != _readRate) state[8 + 14] = (byte)Rate;
+        if (StartPlace != _readStart) state[8] = (byte)StartPlace;
         state[8 + 36] = (byte)TimerEnables;
         state[8 + 37] = (byte)Muted;
         o.AddRange(state);
@@ -281,6 +282,7 @@ public sealed class MaxYMiserSong
         song.StartPlace = d[state];
         song._readSpeed = song.Speed;
         song._readRate = song.Rate;
+        song._readStart = song.StartPlace;
         song.Muted = d[state + 37];
         int order = state + 64;
         song.Length = Math.Max(1, (int)d[order + 1024]);

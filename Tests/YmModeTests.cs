@@ -107,6 +107,61 @@ public class YmModeTests
     }
 
     [Fact]
+    public void A_new_song_starts_from_a_file_maxYMiser_saved_without_its_notes()
+    {
+        var song = YmImport.NewMaxYMiser(MaxYMiserTests.Song(), "New song");
+        Assert.Equal(("Lead", "Bass"), (song.Instruments[0].Name, song.Instruments[1].Name));   // kept
+        Assert.Single(song.Order);
+        var notes = song.Composed(0);
+        var heard = Enumerable.Range(0, notes.Rows).SelectMany(r => Enumerable.Range(0, 3).Select(c => notes[r, c])).Where(x => !x.Equals(TrackerCell.Empty)).ToList();
+        Assert.True(heard.Count == 0, string.Join(", ", heard.Take(5)));
+        var m = MaxYMiserSong.Find(YmImport.SaveMaxYMiser(song))!;
+        Assert.Equal((1, 0), (m.Length, m.StartPlace));
+        Assert.Equal(new[] { 0, 0, 0, 0xFF }, Enumerable.Range(0, 4).Select(t => m.Order[0, t]));
+    }
+
+    [Fact]
+    public void An_empty_song_gets_three_instruments_to_start_with_that_sound()
+    {
+        var empty = MaxYMiserSong.Find(MaxYMiserTests.Song())!;
+        foreach (var i in empty.Instruments) { i.Name = ""; i.VolumeSeq = 0; }
+        var song = YmImport.NewMaxYMiser(empty.Write(), "New song");
+        Assert.Equal(new[] { "Square", "SID bass", "Noise drum" }, song.Instruments.Take(3).Select(i => i.Name));
+        Assert.Equal(32, song.Instruments.Count);
+        // A-4 with the square on the first line: heard
+        song.Patterns[song.PatternAt(0, 0)][0, 0] = new TrackerCell(69, 1, '\0', 0);
+        var b = Play(song, 11025);
+        Assert.True(b.Skip(441).Max(Math.Abs) > 0.05);
+        Assert.InRange(Crossings(b, 2205, 2205 + 4410), 40, 48);   // 440 Hz for 0.1 s
+    }
+
+    [Fact]
+    public void A_changed_title_is_written_into_the_files_header()
+    {
+        // A header as maxYMiser writes it: each tag with room after it
+        var d = new byte[0x60];
+        System.Text.Encoding.ASCII.GetBytes("SNDH").CopyTo(d, 12);
+        System.Text.Encoding.ASCII.GetBytes("COMM").CopyTo(d, 0x10);
+        System.Text.Encoding.ASCII.GetBytes("TITL").CopyTo(d, 0x30);
+        System.Text.Encoding.ASCII.GetBytes("RIPP").CopyTo(d, 0x50);
+        YmImport.SetSndhTag(d, "TITL", "My tune");
+        Assert.Equal("My tune", System.Text.Encoding.ASCII.GetString(d, 0x34, 7));
+        Assert.Equal(0, d[0x34 + 7]);
+        YmImport.SetSndhTag(d, "TITL", new string('x', 40));        // cut to its room, a zero kept
+        Assert.Equal(0, d[0x4F]);
+        Assert.Equal((byte)'R', d[0x50]);
+    }
+
+    [Fact]
+    public void A_MOD_or_XM_song_remembers_what_it_is_made_for()
+    {
+        var song = new TrackerSong { Mode = "MOD", Channels = 4 };
+        Assert.Equal("MOD", TrackerSong.FromJson(song.ToJson()).Mode);
+        Assert.DoesNotContain("\"Mode\"", new TrackerSong().ToJson());
+        Assert.Null(TrackerSong.FromJson(new TrackerSong { Mode = "IT" }.ToJson()).Mode);
+    }
+
+    [Fact]
     public void A_cell_with_two_effects_is_kept_in_the_trackers_file()
     {
         var cell = TrackerCell.Parse("C-4 01 05 S03 X37");
