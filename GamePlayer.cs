@@ -67,6 +67,8 @@ public sealed class GamePlayer
         _window = window;
         _window.AddHandler(InputElement.KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
         _window.AddHandler(InputElement.KeyUpEvent, OnKeyUp, RoutingStrategies.Tunnel);
+        // Keys let go of in another window are never heard here: none is held when it is left
+        _window.Deactivated += (_, _) => { lock (_pressedKeys) _pressedKeys.Clear(); };
         _window.Closed += (_, _) => _cts.Cancel();
         _gfx.OnError = msg => Dispatcher.UIThread.Post(() => ShowMessage(msg));
     }
@@ -143,9 +145,7 @@ public sealed class GamePlayer
         // F12 toggles full screen, Escape leaves full screen
         if (e.Key == Key.F12 || (e.Key == Key.Escape && _window.WindowState == WindowState.FullScreen))
         {
-            _window.WindowState = _window.WindowState == WindowState.FullScreen
-                ? WindowState.Normal
-                : WindowState.FullScreen;
+            FullScreen.Toggle(_window, () => { lock (_pressedKeys) _pressedKeys.Clear(); });
             e.Handled = true;
             return;
         }

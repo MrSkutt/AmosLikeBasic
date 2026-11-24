@@ -264,8 +264,9 @@ public partial class MainWindow : Window
     
     private void HandleGlobalKeyDown(object? sender, KeyEventArgs e)
     {
-        // 1) Always register the key first (so KEYSTATE works even if we "eat" the event later)
-        _pressedKeys.Add(e.Key.ToString());
+        // 1) Always register the key first (so KEYSTATE works even if we "eat" the event later),
+        //    but F12, which switches to full screen, is the IDE's
+        if (e.Key != Key.F12) _pressedKeys.Add(e.Key.ToString());
         
         // If the ScreenWindow is active and waiting for INPUT
         if (_screenWindow?.IsActive == true && _screenWindow != null)
@@ -397,8 +398,8 @@ public partial class MainWindow : Window
         // F12 - FULLSCREEN
         if (e.Key == Key.F12)
         {
-            var win = (Window?)sender ?? this;
-            win.WindowState = win.WindowState == WindowState.FullScreen ? WindowState.Normal : WindowState.FullScreen;
+            var win = sender as Window ?? this;
+            FullScreen.Toggle(win, () => _pressedKeys.Clear());
             e.Handled = true;
             return;
         }
@@ -727,6 +728,8 @@ public partial class MainWindow : Window
             };
             _screenWindow.AddHandler(KeyDownEvent, HandleGlobalKeyDown, RoutingStrategies.Tunnel);
             _screenWindow.AddHandler(KeyUpEvent, HandleGlobalKeyUp, RoutingStrategies.Tunnel);
+            // Keys let go of in another window are never heard here: none is held when it is left
+            _screenWindow.Deactivated += (_, _) => _pressedKeys.Clear();
             _screenWindow.Show();
         }
         _screenWindow.Activate();
