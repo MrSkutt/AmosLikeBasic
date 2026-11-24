@@ -109,6 +109,14 @@ public class LanguageTests
     }
 
     [AvaloniaFact]
+    public void SCREEN_WIDTH_and_SCREEN_HEIGHT_give_the_resolution()
+    {
+        var r = BasicRunner.Run("SCREEN 320,200\nW=SCREEN WIDTH\nPRINT W\nPRINT SCREEN HEIGHT\nIF SCREEN WIDTH > 300 THEN PRINT SCREEN HEIGHT / 2\nSCREEN=5\nPRINT SCREEN+1", 2);
+        Assert.True(r.Errors.Count == 0, r.Describe());
+        Assert.Equal(new[] { "320", "200", "100", "6" }, r.Prints);
+    }
+
+    [AvaloniaFact]
     public void A_variable_as_the_first_value_is_still_fine()
     {
         var r = BasicRunner.Run("SCREEN 640,480\nP=1\nSPRITE P, 10, 10\nPRINT \"ok\"", 2);

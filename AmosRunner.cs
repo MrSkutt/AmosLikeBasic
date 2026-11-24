@@ -4721,6 +4721,15 @@ public static partial class AmosRunner
         if (t.TryReadIdentifier(out var id)) {
             t.SkipWs();
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return gk();
+            // SCREEN WIDTH and SCREEN HEIGHT: the game's resolution
+            if (id.Equals("SCREEN", StringComparison.OrdinalIgnoreCase))
+            {
+                int after = t.Pos;
+                if (t.TryReadIdentifier(out var which) && (which.Equals("WIDTH", StringComparison.OrdinalIgnoreCase)
+                                                          || which.Equals("HEIGHT", StringComparison.OrdinalIgnoreCase)))
+                    return (double)(which.Equals("HEIGHT", StringComparison.OrdinalIgnoreCase) ? g.Height : g.Width);
+                t.Pos = after;
+            }
             // TICKS, MILLIS and MICROS work with or without ()
             if (id.Equals("TICKS", StringComparison.OrdinalIgnoreCase) || id.Equals("MILLIS", StringComparison.OrdinalIgnoreCase)
                 || id.Equals("MICROS", StringComparison.OrdinalIgnoreCase))

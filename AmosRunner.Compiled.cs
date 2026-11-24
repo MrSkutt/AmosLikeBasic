@@ -201,6 +201,15 @@ public static partial class AmosRunner
         {
             t.SkipWs();
             if (id.Equals("INKEY$", StringComparison.OrdinalIgnoreCase)) return new InkeyNode();
+            // SCREEN WIDTH and SCREEN HEIGHT: the game's resolution
+            if (id.Equals("SCREEN", StringComparison.OrdinalIgnoreCase))
+            {
+                int after = t.Pos;
+                if (t.TryReadIdentifier(out var which) && (which.Equals("WIDTH", StringComparison.OrdinalIgnoreCase)
+                                                          || which.Equals("HEIGHT", StringComparison.OrdinalIgnoreCase)))
+                    return new ScreenSizeNode(which.Equals("HEIGHT", StringComparison.OrdinalIgnoreCase));
+                t.Pos = after;
+            }
             // TICKS, MILLIS and MICROS work with or without ()
             if (id.Equals("TICKS", StringComparison.OrdinalIgnoreCase) || id.Equals("MILLIS", StringComparison.OrdinalIgnoreCase))
             {
@@ -283,6 +292,13 @@ public static partial class AmosRunner
     private sealed class InkeyNode : ExprNode
     {
         public override object Eval(in EvalContext c) => c.GetInkey();
+    }
+
+    private sealed class ScreenSizeNode : ExprNode
+    {
+        private readonly bool _height;
+        public ScreenSizeNode(bool height) => _height = height;
+        public override object Eval(in EvalContext c) => (double)(_height ? c.Graphics.Height : c.Graphics.Width);
     }
 
     private sealed class TicksNode : ExprNode
@@ -780,7 +796,7 @@ public static partial class AmosRunner
         ["SPRITE"] = Words("ADD ADDFRAME ALPHA AMPLITUDEX AMPLITUDEY BLUR BRIGHTNESS CLEAR CLEARGROUP COLOR CONTRAST EFFECT FADE FRAME FREQUENCYX FREQUENCYY GROUP HANDLE IMAGE LAYER LOAD MOVE OFF ON PHASEX PHASEY POS RADIUS ROTATE SATURATION TIME UNGROUP UPDATE WAVE ZOOM"),
         ["RASTER"] = Words("CLEAR COLOR COLOUR DEL GFXMODE INFO MOVE SPACE STR WRAP"),
         ["PLAY"] = Words("ADSR ARP BEND BLIP BPM COIN ECHO EXPLOSION FILTER FILTERENV GATE GLIDE HIT JUMP LASER LFO LOOP MUSIC OSC2 PAN POWERUP PULSE RING STOP SYNC VIBRATO VOLUME WAVE"),
-        ["SCREEN"] = Words("ALPHA CRT FADE OFF ON SELECT"),
+        ["SCREEN"] = Words("ALPHA CRT FADE HEIGHT OFF ON SELECT WIDTH"),
         ["FONT"] = Words("ADD AMPLITUDEX AMPLITUDEY BLUR BRIGHTNESS CHAR CLEAR COLOR CONTRAST EFFECT FREQUENCYX FREQUENCYY LOAD MAP PHASEX PHASEY PRINT RADIUS ROTATE SATURATION SET STYLE TIME UPDATE WAVE ZOOM"),
         ["TILE"] = Words("DRAW LOAD MAP SET"),
         ["MAP"] = Words("LOAD MAP OBJECTS"),

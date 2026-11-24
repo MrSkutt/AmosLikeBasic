@@ -663,6 +663,8 @@ SCREEN OFF layer
 SCREEN ALPHA layer, value
 SCREEN FADE layer, target, frames
 SCREEN CRT on [, lines [, curve [, mask [, vignette [, brightness [, softness]]]]]]
+w = SCREEN WIDTH
+h = SCREEN HEIGHT
 ```
 
 | Command | Does |
@@ -673,6 +675,7 @@ SCREEN CRT on [, lines [, curve [, mask [, vignette [, brightness [, softness]]]
 | `SCREEN ALPHA` | the layer's transparency, 0 (invisible) – 255 |
 | `SCREEN FADE` | fades smoothly to the target value over that many frames |
 | `SCREEN CRT` | 1 = CRT effect, 0 = off; lines, curve, mask, vignette and softness 0 – 100, brightness in percent (122 is the standard) |
+| `SCREEN WIDTH` / `HEIGHT` | functions: the game's resolution, as `SCREEN width, height` set it (640 and 480 if it has not been set). It is the same whatever the size of the window or full screen |
 
 ### SCROLL
 
