@@ -1,3 +1,4 @@
+using System.Linq;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -51,6 +52,10 @@ public static class SampleBank
         w.Write("data"u8); w.Write(bytes);
         foreach (var s in sample.Data) w.Write((short)Math.Round(Math.Clamp(s, -1f, 1f) * 32767));
     }
+
+    // Raw 8-bit samples, as the STe's DMA plays them (signed, mono) at a rate given
+    public static SampleData ReadRaw(byte[] bytes, int rate) =>
+        new(bytes.Select(b => (sbyte)b / 128f).ToArray(), rate);
 
     // Forgets a file, so that a changed one is read again
     public static void Forget(string file) => Cache.TryRemove(file, out _);

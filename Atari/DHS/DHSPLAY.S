@@ -33,8 +33,10 @@
 ; A frame: W mask - bits 0-13 the YM registers written, bit 14 a DMA event,
 ; bit 15 an LMC command; $FFFF ends the song. Then the LMC command (W) if
 ; bit 15, a byte for each register in the mask from 0 up (register 7: bits
-; 0-5, the port bits are kept), the DMA event (B: sample number, 0 stops)
-; if bit 14, and a pad byte if needed so the next frame is on an even address.
+; 0-5, the port bits are kept), the DMA event (B: 0 stops, n starts sample
+; n, $80+n queues sample n to follow the one playing without a gap; $80 alone
+; in a frame waits until the queued sample has begun) if bit 14,
+; and a pad byte if needed so the next frame is on an even address.
 ; A sample (16 bytes): L start, L end, L loop start (0: played once; the loop
 ; goes from there to the end), W DMA mode ($FF8920), W reserved.
 ;-----------------------------------------------------------------------------
@@ -45,7 +47,9 @@ DHS_SAMPLES	equ	8	; L the sample table
 DHS_BASE	equ	12	; L the song
 DHS_FLAGS	equ	16	; W the header's flags
 DHS_ON		equ	18	; B playing
-DHS_SIZE	equ	20
+DHS_WAIT	equ	19	; B VBLs waited for the DMA at a sync
+DHS_QADR	equ	20	; L the start of the sample queued last
+DHS_SIZE	equ	24
 
 YM_SELECT	equ	$ffff8800
 DMA_CONTROL	equ	$ffff8901
@@ -55,6 +59,9 @@ DMA_SL		equ	$ffff8907
 DMA_EH		equ	$ffff890f	; the end address (the byte after the last)
 DMA_EM		equ	$ffff8911
 DMA_EL		equ	$ffff8913
+DMA_CH		equ	$ffff8909	; where the DMA is: high, middle, low byte
+DMA_CM		equ	$ffff890b
+DMA_CL		equ	$ffff890d
 DMA_MODE	equ	$ffff8921
 MW_DATA		equ	$ffff8922
 MW_MASK		equ	$ffff8924
@@ -66,6 +73,7 @@ dhs_init:
 	movem.l	d1/a1,-(sp)
 	lea	dhs_vars(pc),a1
 	clr.b	DHS_ON(a1)
+	clr.b	DHS_WAIT(a1)
 	cmp.l	#'DHS1',(a0)
 	bne.s	.bad
 	move.l	a0,DHS_BASE(a1)
@@ -98,17 +106,39 @@ dhs_play:
 	tst.b	DHS_ON(a2)
 	beq	.out
 	move.l	DHS_POS(a2),a0
-	move.w	(a0)+,d0
+.next	move.w	(a0)+,d0
 	cmp.w	#$ffff,d0
-	bne.s	.frame
+	bne.s	.sync
 	move.l	DHS_LOOP(a2),d1		; the end: back to the loop, or stop
 	beq.s	.end
 	move.l	d1,a0
-	move.w	(a0)+,d0
-	bra.s	.frame
+	bra.s	.next
 .end	clr.b	DHS_ON(a2)
 	bsr	dhs_quiet
 	bra	.out
+
+	; A sync: a frame of only the DMA event $80. The song goes on when the
+	; sample queued last has begun, so the YM keeps time with the DMA
+	; whatever its clock. Not yet: the same frame next VBL (2 VBLs at most).
+.sync	cmp.w	#$4000,d0
+	bne.s	.frame
+	cmp.b	#$80,(a0)
+	bne.s	.frame
+	moveq	#0,d1
+	move.b	DMA_CH.w,d1
+	lsl.l	#8,d1
+	move.b	DMA_CM.w,d1
+	lsl.l	#8,d1
+	move.b	DMA_CL.w,d1
+	sub.l	DHS_QADR(a2),d1		; just past the queued sample's start?
+	cmp.l	#16384,d1
+	blo.s	.synced
+	addq.b	#1,DHS_WAIT(a2)
+	cmp.b	#3,DHS_WAIT(a2)
+	blo	.out
+.synced	clr.b	DHS_WAIT(a2)
+	addq.l	#2,a0			; past $80 and its pad byte
+	bra.s	.next
 
 .frame	move.w	d0,d2			; bits 14-15 kept for later
 	bpl.s	.nolmc
@@ -189,22 +219,50 @@ dhs_play:
 	rts
 
 ;-----------------------------------------------------------------------------
-; dhs_dma: d1.w = sample (0: stop), a2 = the variables. Uses d0-d2/a1.
-; The DMA takes its start and end when a frame starts; for a loop, the loop
-; start is written straight after, and the DMA goes on with it at the end.
+; dhs_dma: d1.w = the DMA event, a2 = the variables. Uses d0-d2/a1.
+;   0        stop
+;   n        start sample n now (the one playing is cut)
+;   $80+n    queue sample n: it follows the one playing without a gap
+;   $80      (a frame of its own) sync: wait for the queued sample, above
+; The DMA takes its start and end registers when a frame starts. So for a
+; loop, the loop start is written straight after the start, and the DMA goes
+; on with it at the end; and a queued sample is written into the registers
+; while the one before plays (repeat on), and the DMA goes on with it at the
+; end, to the sample. Queued samples have the mode of the one playing.
 ;-----------------------------------------------------------------------------
 dhs_dma:
 	moveq	#0,d0
+	tst.b	d1
+	bmi.s	.queue
 	move.b	d0,DMA_CONTROL.w
 	tst.w	d1
 	beq.s	.done
-	subq.w	#1,d1
+	bsr.s	.regs
+	move.b	5(a1),DMA_MODE.w	; the mode (the low byte of its word)
+	move.l	(a1),d0			; loop start
+	bne.s	.loop
+	move.b	#1,DMA_CONTROL.w	; played once
+.done	rts
+.loop	move.b	#3,DMA_CONTROL.w	; played round and round...
+	add.l	d2,d0			; ...from the loop start after the first time
+	bra.s	dhs_setstart
+.queue	and.w	#$7f,d1
+	bsr.s	.regs
+	btst	#0,DMA_CONTROL.w
+	bne.s	.on
+	move.b	5(a1),DMA_MODE.w	; nothing playing: it starts now
+.on	move.b	#3,DMA_CONTROL.w	; repeat on, so that the DMA goes on to it
+	rts
+; the sample's start and end into the registers; a1 then points at its loop
+; start, d2 is the song's address
+.regs	subq.w	#1,d1
 	lsl.w	#4,d1
 	move.l	DHS_SAMPLES(a2),a1
 	add.w	d1,a1
 	move.l	DHS_BASE(a2),d2
 	move.l	(a1)+,d0		; start
 	add.l	d2,d0
+	move.l	d0,DHS_QADR(a2)
 	bsr.s	dhs_setstart
 	move.l	(a1)+,d0		; end
 	add.l	d2,d0
@@ -215,14 +273,7 @@ dhs_dma:
 	lsr.w	#8,d1
 	move.b	d1,DMA_EM.w
 	move.b	d0,DMA_EL.w
-	move.b	5(a1),DMA_MODE.w	; the mode (the low byte of its word)
-	move.l	(a1),d0			; loop start
-	bne.s	.loop
-	move.b	#1,DMA_CONTROL.w	; played once
-.done	rts
-.loop	move.b	#3,DMA_CONTROL.w	; played round and round...
-	add.l	d2,d0			; ...from the loop start after the first time
-					; (on into dhs_setstart)
+	rts
 
 ; dhs_setstart: d0.l = the DMA's start address. Uses d1.
 dhs_setstart:

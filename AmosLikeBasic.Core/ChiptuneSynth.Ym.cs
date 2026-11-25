@@ -34,6 +34,7 @@ namespace AmosLikeBasic
             public int Speed, Width, Buzzer, StartSync, Digi, DigiRate, Volume, Coarse, Fine;
             public readonly int[] SeqNo = new int[8];   // volume, arpeggio, vibrato, mixer, noise, fixed, timer, PWM
             public int InstNumber;                      // the instrument it has (0: changed since, so given again it is read anew)
+            public int Heard;                           // the instrument last given to it (for the instrument page's scope)
             public int Note;                            // 0: none
             // What a note's instrument starts afresh
             public int Transpose, NoiseTranspose, VolumeColumn, ArpX, ArpY, ArpStep;
@@ -142,6 +143,7 @@ namespace AmosLikeBasic
             bool porta = fx[0] == 'P' || fx[1] == 'P';
             if (cell.Instrument > 0)
             {
+                s.Heard = cell.Instrument;
                 if (cell.Instrument != s.InstNumber)
                 {
                     LoadYmInstrument(s, YmInstrumentOf(cell.Instrument, instruments));

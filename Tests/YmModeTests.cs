@@ -170,4 +170,34 @@ public class YmModeTests
         Assert.Equal("C-4 01 .. ...", TrackerCell.Parse("C-4 01 .. ...").ToString());
         Assert.Equal(cell, TrackerCell.Parse(cell.ToString()));
     }
+
+    // The oscilloscopes of channels 1 – 3 show the sound chip's channels, and the instrument page's finds the one
+    // playing its instrument
+    [Fact]
+    public void The_scopes_show_the_sound_chips_channels()
+    {
+        var (_, song) = Open();
+        S.ManualRendering = true;
+        S.Reset();
+        S.TrackPlay(TrackerSong.FromJson(song.ToJson()), loop: false);
+        var b = new float[S.SampleRate / 2];
+        var found = new HashSet<int>();
+        var chunk = new float[S.SampleRate / 50];
+        for (int i = 0; i < 25; i++)
+        {
+            S.Render(chunk);
+            for (int inst = 1; inst <= 2; inst++) if (S.ChannelWithInstrument(inst) is > 0 and <= 3) found.Add(inst);
+        }
+        var scope = new float[1024];
+        double loudest = 0;
+        for (int c = 1; c <= 3; c++)
+        {
+            S.ReadScope(c, scope);
+            loudest = Math.Max(loudest, scope.Max(Math.Abs));
+        }
+        S.TrackStop();
+        S.Reset();
+        Assert.True(loudest > 0.01, $"the scopes of channels 1 – 3 are silent ({loudest})");
+        Assert.NotEmpty(found);
+    }
 }

@@ -230,6 +230,7 @@ namespace AmosLikeBasic
                 }
                 if (_ymData != null && c < 3)
                 {
+                    _ymState[c].Heard = instrument;
                     YmPreview(c, inst.Ym, note);
                     return;
                 }
@@ -428,8 +429,9 @@ namespace AmosLikeBasic
         // the given one; 0 when none does. Read while the audio thread plays: fine for a picture.
         public static int ChannelWithInstrument(int instrument, int preferred = 0)
         {
-            bool Sounds(int c) => _trackChannels[c].Active && _trackChannels[c].InstNumber == instrument
-                                  && _voices[c].Stage != EnvStage.Idle;
+            bool Sounds(int c) => c < 3 && _ymData != null && !_trackChannels[c].Sfx
+                ? _ymState[c].Sounds && _ymState[c].Heard == instrument   // the sound chip's channel
+                : _trackChannels[c].Active && _trackChannels[c].InstNumber == instrument && _voices[c].Stage != EnvStage.Idle;
             if (preferred >= 1 && preferred <= TrackerSong.MaxChannels && Sounds(preferred - 1)) return preferred;
             for (int c = 0; c < TrackerSong.MaxChannels; c++)
                 if (Sounds(c)) return c + 1;
@@ -735,6 +737,7 @@ namespace AmosLikeBasic
             _trackJump = false;
             _trackRowDelay = 0;
             _trackRepeatingRow = false;
+            _dhsHold = 0;
             Volatile.Write(ref _track, req.Data);
         }
 
@@ -793,6 +796,17 @@ namespace AmosLikeBasic
                     else if (!_trackChannels[c].Sfx) UpdateTrackVoice(c);
                 YmFrame();
                 return;
+            }
+            // A DHS song waits at a queued sample's row (a VBL or two at most) until channel 4 has gone on to it
+            if (_trackTick == 0 && !_trackRepeatingRow && _ymData is { Dhs: true } && d.Channels >= 4 && !_trackChannels[3].Sfx)
+            {
+                var v = _voices[3];
+                if (DhsQueued(d.Patterns[d.Order[_trackOrder]][_trackRow][3]) && v.NextSample != null && !v.ChainSwitched && _dhsHold < 2)
+                {
+                    _dhsHold++;
+                    return;
+                }
+                _dhsHold = 0;
             }
             // A row repeated by EE plays its effects again, but not its notes
             if (_trackTick == 0 && !_trackRepeatingRow) ReadRow(d);
@@ -857,8 +871,28 @@ namespace AmosLikeBasic
                         ch.InstNumber = cell.Instrument;
                         ch.Vol = 64;
                     }
-                    if (cell.Note == TrackerCell.NoteOff) ReleaseTrackVoice(c);
-                    else if (cell.Note >= 0 && ch.Inst != null) TriggerTrackNote(c, (int)Math.Round(69 + 12 * Math.Log2(ch.Inst.SampleBaseFreq / 440)));
+                    // Sxx sets the speed, as on the YM's channels
+                    if (cell.Effect == 'S' && cell.Param >= 2) _trackSpeed = cell.Param;
+                    if (cell.Effect2 == 'S' && cell.Param2 >= 2) _trackSpeed = cell.Param2;
+                    // A note with Q follows the sample before without a gap: the voice has gone on to it already
+                    // (the song waited here for it, as DHS's player waits for the DMA)
+                    var v = _voices[c];
+                    if (cell.Note == TrackerCell.NoteOff)
+                    {
+                        v.NextSample = null;
+                        ReleaseTrackVoice(c);
+                    }
+                    else if (cell.Note >= 0 && ch.Inst != null)
+                    {
+                        if (DhsQueued(cell) && v.ChainSwitched) v.ChainSwitched = false;
+                        else
+                        {
+                            v.NextSample = null;
+                            v.ChainSwitched = false;
+                            TriggerTrackNote(c, (int)Math.Round(69 + 12 * Math.Log2(ch.Inst.SampleBaseFreq / 440)));
+                        }
+                        QueueDhsSample(d, c);
+                    }
                     continue;
                 }
                 char eff = cell.Effect;
@@ -1080,6 +1114,46 @@ namespace AmosLikeBasic
 
         private static void VolumeSlide(TrackChannel ch, int up, int down) =>
             ch.Vol = Math.Clamp(up > 0 ? ch.Vol + up : ch.Vol - down, 0, 64);
+
+        // ── DHS: samples in a chain on channel 4 ─────────────────────────────
+
+        private static int _dhsHold;
+
+        private static bool DhsQueued(TrackerCell cell) => cell.Note >= 0 && (cell.Effect == 'Q' || cell.Effect2 == 'Q');
+
+        // The sample of the next note on the channel, queued on its voice if that note is a Q (as DHS's player
+        // queues it on the DMA the frame after this one began). Looked for in the order the song plays.
+        private static void QueueDhsSample(TrackData d, int c)
+        {
+            var ch = _trackChannels[c];
+            var v = _voices[c];
+            v.NextSample = null;
+            int order = _trackOrder, row = _trackRow, inst = ch.InstNumber;
+            for (int guard = 0; guard < 4096; guard++)
+            {
+                if (++row >= d.Patterns[d.Order[order]].Length)
+                {
+                    row = 0;
+                    order++;
+                    while (d.Ym != null && order < d.Ym.Skip.Length && d.Ym.Skip[order]) order++;
+                    if (order >= d.Order.Length)
+                    {
+                        if (!_trackLoop) return;
+                        order = d.Ym != null ? Math.Clamp(d.Ym.Song.Repeat, 0, d.Order.Length - 1) : 0;
+                    }
+                }
+                var cell = d.Patterns[d.Order[order]][row][c];
+                if (cell.Instrument > 0) inst = cell.Instrument;
+                if (cell.Note == TrackerCell.NoNote) continue;
+                if (!DhsQueued(cell) || inst < 1 || inst > d.Instruments.Length) return;
+                var next = d.Instruments[inst - 1];
+                if (next.Sample == null) return;
+                v.NextSample = next.Sample;
+                v.NextLoopStart = next.LoopStart;
+                v.NextLoopEnd = next.LoopEnd;
+                return;
+            }
+        }
 
         private static void TriggerTrackNote(int c, int note)
         {

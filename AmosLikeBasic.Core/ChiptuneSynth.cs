@@ -106,6 +106,11 @@ namespace AmosLikeBasic
             public double Led1, Led2, LedIn1, LedIn2;
             public double SampleBaseFreq = 261.63;
             public int LoopStart, LoopEnd;
+            // A sample queued to follow this one without a gap, as the STe's DMA does (a DHS song's Q): taken
+            // up where this one ends (or its loop does); ChainSwitched says it has been
+            public SampleData? NextSample;
+            public int NextLoopStart, NextLoopEnd;
+            public bool ChainSwitched;
 
             // Slides from {SWEEP} and {FADE}: change per sample and number of samples left
             public double CutoffSlide, VolumeSlide;
@@ -888,25 +893,25 @@ namespace AmosLikeBasic
             TrackSample();
             left = right = 0;
             int pos = _scopePos;
+            // A song in YM mode: the sound chip plays its first three channels, and their scopes show it
+            var ym = _ym;
+            if (ym != null)
+            {
+                double y = ym.Next() * _trackVolume;
+                left += y;
+                right += y;
+            }
             for (int c = 0; c < Voices; c++)
             {
                 var v = _voices[c];
                 double s = RenderVoice(v);
-                _scope[c][pos] = (float)s;
+                _scope[c][pos] = (float)(ym != null && c < 3 ? s + ym.ChannelOut[c] * _trackVolume : s);
                 // In the middle a voice is as loud on both sides as in mono; to the side it fades out on the other one
                 double pan = v.PanNow;
                 left += pan > 0 ? s * (1 - pan) : s;
                 right += pan < 0 ? s * (1 + pan) : s;
             }
             _scopePos = (pos + 1) & (ScopeSize - 1);
-
-            // A song in YM mode: the sound chip plays its first three channels
-            if (_ym is { } ym)
-            {
-                double y = ym.Next() * _trackVolume;
-                left += y;
-                right += y;
-            }
 
             // A YM file played next to the synth (the tracker's YM browser)
             var chip = Volatile.Read(ref _chipMusic);
@@ -1148,6 +1153,18 @@ namespace AmosLikeBasic
             double a = d[i];
             double b = i + 1 < d.Length && !(loops && i + 1 >= v.LoopEnd) ? d[i + 1] : loops ? d[v.LoopStart] : 0;
             pos += v.Sample.Rate / (double)SampleRate * freq / v.SampleBaseFreq;
+            double end = loops ? v.LoopEnd : d.Length;
+            if (v.NextSample != null && pos >= end)
+            {
+                // The queued sample from where this one ended, at the same speed through it
+                v.Sample = v.NextSample;
+                v.LoopStart = v.NextLoopStart;
+                v.LoopEnd = v.NextLoopEnd;
+                v.NextSample = null;
+                v.ChainSwitched = true;
+                v.SamplePos = pos - end;
+                return a + (b - a) * frac;
+            }
             if (loops && pos >= v.LoopEnd)
                 pos = v.LoopStart + (pos - v.LoopEnd) % (v.LoopEnd - v.LoopStart);
             v.SamplePos = pos;

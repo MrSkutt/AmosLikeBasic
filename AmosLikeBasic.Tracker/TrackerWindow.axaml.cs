@@ -373,13 +373,18 @@ public partial class TrackerWindow : Window
         var cards = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         // In a song in YM mode, an instrument with a YM part is edited as the chip plays it
         var ymPanel = BuildYmPanel();
+        // A DHS song's channel 4 with no sample yet: how to get one, instead of a YM instrument it cannot play
+        var dhsEmpty = BuildDhsChannel4Panel();
+        panel.Children.Add(dhsEmpty);
         panel.Children.Add(ymPanel);
         panel.Children.Add(cards);
         _instrumentRefresh.Add(() =>
         {
-            bool ym = _song.Ym != null && CurrentInstrument?.Ym != null;
+            bool empty = DhsChannel4WithoutSample;
+            bool ym = !empty && _song.Ym != null && CurrentInstrument?.Ym != null;
+            dhsEmpty.IsVisible = empty;
             ymPanel.IsVisible = ym;
-            cards.IsVisible = !ym;
+            cards.IsVisible = !ym && !empty;
         });
 
         // Enter in a box (Esc in the table, where Enter makes a new line) goes back to playing notes.
@@ -1342,12 +1347,47 @@ public partial class TrackerWindow : Window
         SongChanged();
     }
 
+    // The cursor on a DHS song's channel 4 with no sample instrument chosen (the song has none yet)
+    private bool DhsChannel4WithoutSample =>
+        DhsMode.Is(_song) && Pattern.CursorChannel == 3 && Pattern.Instrument <= DhsMode.YmInstruments;
+
+    private StackPanel BuildDhsChannel4Panel()
+    {
+        var panel = new StackPanel { Spacing = 8, Margin = new Thickness(0, 10, 0, 0), MaxWidth = 700, HorizontalAlignment = HorizontalAlignment.Left };
+        AddHeading(panel, "CHANNEL 4: THE STE'S DMA");
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Channel 4 of a DHS song plays samples (instruments from 21), and the song has none yet. Add one and " +
+                   "choose its WAV file, or load a long sound in parts as a sample sequence, chained on channel 4.",
+            Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap
+        });
+        var add = new Button { Content = "Add a sample...", Focusable = false };
+        add.Click += async (_, _) => await AddDhsSampleAsync();
+        var sequence = new Button { Content = "Load a sample sequence...", Focusable = false };
+        sequence.Click += (_, _) => InstSampleSequence_OnClick(null, new RoutedEventArgs());
+        panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { add, sequence } });
+        return panel;
+    }
+
+    // A new sample instrument for channel 4, its WAV file asked for straight away
+    private async Task AddDhsSampleAsync()
+    {
+        while (_song.Instruments.Count < DhsMode.YmInstruments) _song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+        PushUndo();
+        _song.Instruments.Add(new TrackerInstrument { Name = "Sample " + (_song.Instruments.Count + 1).ToString("X2"), Wave = "Sample" });
+        Pattern.Instrument = _song.Instruments.Count;
+        RefreshInstrumentList();
+        RefreshInstrumentPanel();
+        SongChanged();
+        await LoadSampleAsync();
+    }
+
     // In a DHS song channel 4 takes the samples (instruments from 33) and channels 1 – 3 the YM's (1 – 32)
     private bool DhsAllows(int channel, int instrument) =>
         !DhsMode.Is(_song) || instrument < 1 || (channel == 3) == (instrument > DhsMode.YmInstruments);
 
     // The instrument each side had last, taken up again when the cursor goes over
-    private int _dhsYmInstrument = 1, _dhsSampleInstrument;
+    private int _dhsYmInstrument = 1, _dhsSampleInstrument, _dhsLastChannel;
 
     private void FollowDhsChannel()
     {
@@ -1356,8 +1396,11 @@ public partial class TrackerWindow : Window
         if (DhsAllows(c, now))
         {
             if (now > DhsMode.YmInstruments) _dhsSampleInstrument = now; else if (now >= 1) _dhsYmInstrument = now;
+            if (c != _dhsLastChannel && (c == 3 || _dhsLastChannel == 3)) RefreshInstrumentPanel();
+            _dhsLastChannel = c;
             return;
         }
+        _dhsLastChannel = c;
         int next;
         if (c == 3)
         {
@@ -1368,6 +1411,7 @@ public partial class TrackerWindow : Window
             if (next == 0)
             {
                 SetStatus("Channel 4 is the DMA: it plays samples. Make one with Instrument → Add.");
+                RefreshInstrumentPanel();
                 return;
             }
         }
@@ -1860,8 +1904,170 @@ public partial class TrackerWindow : Window
         MenuSaveSndh.IsEnabled = _song.Ym != null;
         MenuSaveDhs.IsEnabled = DhsMode.Is(_song);
         MenuToDhs.IsEnabled = _song.Ym != null && !DhsMode.Is(_song);
+        MenuSampleSequence.IsEnabled = DhsMode.Is(_song);
         MenuConvert.IsEnabled = _song.Ym != null || _song.Mode != null;
         UpdateTitle();
+    }
+
+    // A long sound in parts for a DHS song's channel 4: the files as instruments from 33 (raw ones made WAV
+    // files next to them first), and, if asked, chained on channel 4 with rows that fit each part
+    private async void InstSampleSequence_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (!DhsMode.Is(_song)) { SetStatus("A sample sequence is for a DHS song: New → DHS, or Song → Make it a DHS song."); return; }
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Load a sample sequence (the parts in name order)",
+            AllowMultiple = true,
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound, "Samples"),
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("Samples (WAV, raw 8-bit)") { Patterns = new[] { "*.wav", "*.raw", "*.smp", "*.sam" } },
+                new FilePickerFileType("All files") { Patterns = new[] { "*" } }
+            }
+        });
+        var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>()
+            .OrderBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase).ToList();
+        if (paths.Count == 0) { KeepTypingFocus(); return; }
+        bool anyRaw = paths.Any(p => !Path.GetExtension(p).Equals(".wav", StringComparison.OrdinalIgnoreCase));
+        // The tempo, to suggest the rows a part: how many beats a part is (raw files taken at 12517 Hz;
+        // the beats do not change with the rate, only the BPM)
+        SampleTempo.Result? tempo = null;
+        try
+        {
+            var sounds = new List<SampleData>();
+            foreach (var path in paths.Take(8))
+            {
+                var bytes = await File.ReadAllBytesAsync(path);
+                sounds.Add(Path.GetExtension(path).Equals(".wav", StringComparison.OrdinalIgnoreCase)
+                    ? SampleBank.ReadWav(bytes) : SampleBank.ReadRaw(bytes, ChiptuneSynth.DmaRates[1]));
+            }
+            tempo = await Task.Run(() => SampleTempo.Detect(sounds));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or InvalidDataException) { }
+        var options = await AskSequenceOptionsAsync(paths.Count, anyRaw, tempo);
+        if (options == null) { KeepTypingFocus(); return; }
+        var (rate, rows, chain) = options.Value;
+
+        var parts = new List<(string Name, string Sample)>();
+        string root = Path.GetFullPath(Workspace.Root) + Path.DirectorySeparatorChar;
+        try
+        {
+            foreach (var path in paths)
+            {
+                string wav = path;
+                if (!Path.GetExtension(path).Equals(".wav", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A raw file as a WAV file beside it (one made from it before is used as it is)
+                    var raw = SampleBank.ReadRaw(await File.ReadAllBytesAsync(path), rate);
+                    wav = Path.ChangeExtension(path, ".wav");
+                    var there = File.Exists(wav) ? SampleBank.ReadWav(await File.ReadAllBytesAsync(wav)) : null;
+                    if (there != null && (there.Rate != raw.Rate || there.Data.Length != raw.Data.Length))
+                        wav = Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)} {rate} Hz.wav");
+                    if (there == null || wav != Path.ChangeExtension(path, ".wav")) SampleBank.WriteWav(wav, raw);
+                }
+                string stored = Path.GetFullPath(wav).StartsWith(root, StringComparison.OrdinalIgnoreCase)
+                    ? Path.GetRelativePath(Workspace.Root, wav).Replace('\\', '/') : wav;
+                SampleBank.Forget(stored);
+                parts.Add((Path.GetFileNameWithoutExtension(path), stored));
+            }
+            Stop();
+            var copy = TrackerSong.FromJson(_song.ToJson());
+            var told = DhsMode.AddSampleSequence(copy, parts, rows, chain);
+            if (tempo != null)
+            {
+                double seconds = anyRaw ? tempo.Seconds * ChiptuneSynth.DmaRates[1] / rate : tempo.Seconds;
+                told.Insert(0, $"The tempo heard in the parts: about {tempo.Beats * 60 / seconds:0.#} BPM, {tempo.Beats} beats a part" +
+                               (rows % tempo.Beats == 0 ? $", so a row is 1/{rows / tempo.Beats * 4} note." : "."));
+            }
+            PushUndo("sequence");
+            _song = copy;
+            LoadSongIntoUi(keepPositions: true);
+            SongChanged();
+            _ = ShowReportAsync("Sample sequence", string.Join("\n\n", told));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or FormatException)
+        {
+            SetStatus("Could not load the sequence: " + ex.Message);
+        }
+    }
+
+    // How to take a sample sequence: the rate of raw files, the rows a part, whether to chain them on channel 4
+    private async Task<(int Rate, int Rows, bool Chain)?> AskSequenceOptionsAsync(int count, bool raw, SampleTempo.Result? tempo)
+    {
+        var dialog = new Window
+        {
+            Title = "Sample sequence",
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        var tcs = new TaskCompletionSource<(int, int, bool)?>();
+        var rateBox = new ComboBox
+        {
+            ItemsSource = ChiptuneSynth.DmaRates.Select(r => $"{r} Hz").ToList(),
+            SelectedIndex = 1, IsEnabled = raw, Width = 160
+        };
+        // Rows of sixteenths by the tempo heard (4 a beat), within a pattern's room
+        int suggested = tempo == null ? 32 : Math.Clamp(tempo.Beats * 4, 1, TrackerSong.MaxRows);
+        var rowsBox = new NumericUpDown { Minimum = 1, Maximum = TrackerSong.MaxRows, Value = suggested, Increment = 1, FormatString = "0", Width = 160 };
+        var tempoText = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 0, 0, 8) };
+        void ShowTempo()
+        {
+            if (tempo == null) { tempoText.Text = "No tempo could be heard in the parts: choose the rows a part yourself."; return; }
+            double seconds = raw ? tempo.Seconds * ChiptuneSynth.DmaRates[1] / ChiptuneSynth.DmaRates[Math.Max(0, rateBox.SelectedIndex)] : tempo.Seconds;
+            int rows = (int)(rowsBox.Value ?? suggested);
+            string grid = rows % tempo.Beats == 0 ? $": a row is 1/{rows / tempo.Beats * 4} note" : ": the rows do not fall on the beats";
+            tempoText.Text = $"Tempo heard: about {tempo.Beats * 60 / seconds:0.#} BPM, {tempo.Beats} beats a part " +
+                             $"({seconds:0.00} s). {rows} rows{grid}.";
+        }
+        rateBox.SelectionChanged += (_, _) => ShowTempo();
+        rowsBox.ValueChanged += (_, _) => ShowTempo();
+        ShowTempo();
+        var chainBox = new CheckBox { Content = "Chain them on channel 4, a place each", IsChecked = true };
+        var ok = new Button { Content = "Load", Width = 80, Margin = new Thickness(5) };
+        var cancel = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(5) };
+        ok.Click += (_, _) =>
+        {
+            tcs.TrySetResult((ChiptuneSynth.DmaRates[Math.Max(0, rateBox.SelectedIndex)], (int)(rowsBox.Value ?? 32), chainBox.IsChecked == true));
+            dialog.Close();
+        };
+        cancel.Click += (_, _) => { tcs.TrySetResult(null); dialog.Close(); };
+        dialog.Closed += (_, _) => tcs.TrySetResult(null);
+        Grid Row(string label, Control control)
+        {
+            var g = new Grid { ColumnDefinitions = new ColumnDefinitions("170,*"), Margin = new Thickness(0, 0, 0, 6) };
+            g.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center });
+            Grid.SetColumn(control, 1);
+            g.Children.Add(control);
+            return g;
+        }
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(12),
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = $"{count} parts, in the order of their names. Each becomes an instrument from 21 (hex) for channel 4. " +
+                           "Raw files are 8-bit signed mono, as the STe's DMA plays them; they are saved as WAV files beside them.",
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10)
+                },
+                Row("Rate of raw files", rateBox),
+                Row("Rows a part", rowsBox),
+                tempoText,
+                chainBox,
+                new TextBlock
+                {
+                    Text = "Chained, each part gets a place of its own: the first started, the others queued (Q) to follow " +
+                           "without a gap, and each row's speed (S) set so that a part's rows last as long as the part.",
+                    TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new Thickness(0, 4, 0, 10)
+                },
+                new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { ok, cancel } }
+            }
+        };
+        await dialog.ShowDialog(this);
+        return await tcs.Task;
     }
 
     private async void InstClone_OnClick(object? sender, RoutedEventArgs e)

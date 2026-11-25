@@ -57,6 +57,8 @@
                 <MenuItem Header="_Add" Click="InstAdd_OnClick"/>
                 <MenuItem Header="_Clone" Click="InstClone_OnClick"/>
                 <MenuItem Header="_Delete" Click="InstDelete_OnClick"/>
+                <MenuItem Header="Load sample _sequence..." Name="MenuSampleSequence" Click="InstSampleSequence_OnClick"
+                          ToolTip.Tip="A DHS song: a long sound in parts (WAV or raw 8-bit files), as samples for channel 4, chained one after another without a gap"/>
                 <Separator/>
                 <MenuItem Header="_Library..." Click="InstLibrary_OnClick"/>
                 <MenuItem Header="_Simplify" Click="InstSimplify_OnClick"/>

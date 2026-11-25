@@ -20,6 +20,9 @@ public sealed class Ym2149
     private bool _envHold, _envAlternate, _envHolding;
     private readonly byte[] _r = new byte[16];
     private double _dcIn, _dcOut;   // a gentle high-pass, as the chip's output has a DC level
+    // Each channel's own sound in the last sample, around 0 (for oscilloscopes; the sound is the mix)
+    public readonly double[] ChannelOut = new double[3];
+    private readonly double[] _chSum = new double[3], _chDcIn = new double[3], _chDcOut = new double[3];
     private readonly double _clockTicks;   // chip ticks a second (the clock / 8)
 
     // Timer effects per channel: the timer's step per chip tick and where it is (0 – 1)
@@ -158,6 +161,7 @@ public sealed class Ym2149
         int envPeriod = Math.Max(1, _r[11] | _r[12] << 8);
         int mixer = _r[7];
         double sum = 0;
+        Array.Clear(_chSum);
         for (int t = 0; t < ticks; t++)
         {
             for (int c = 0; c < 3; c++)
@@ -189,6 +193,7 @@ public sealed class Ym2149
                     if (i < drum.Length)
                     {
                         sum += drum[i];
+                        _chSum[c] += drum[i];
                         _drumPos[c] += _drumStep[c];
                         continue;
                     }
@@ -218,8 +223,16 @@ public sealed class Ym2149
                     int v = _r[8 + c];
                     level = (v & 16) != 0 ? Level[envLevel] : VolumeLevel(v);
                 }
-                if (tone && noise) sum += level;
+                if (tone && noise) { sum += level; _chSum[c] += level; }
             }
+        }
+        for (int c = 0; c < 3; c++)
+        {
+            double cx = _chSum[c] / ticks / 3;
+            double cy = cx - _chDcIn[c] + 0.995 * _chDcOut[c];
+            _chDcIn[c] = cx;
+            _chDcOut[c] = cy;
+            ChannelOut[c] = cy * 1.4;
         }
         double x = sum / ticks / 3;
         // Remove the DC level so that the sound sits around 0

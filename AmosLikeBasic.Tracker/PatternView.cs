@@ -293,6 +293,9 @@ public class PatternView : Control
         var instBrush = title;
         var effBrush = label;
         var volBrush = new SolidColorBrush(Color.FromRgb(70, 190, 110));
+        // A DHS song's queued samples (Q on channel 4): they follow the one before, not start at the row
+        var chainBrush = new SolidColorBrush(Color.FromRgb(70, 170, 230));
+        bool dhs = Song != null && DhsMode.Is(Song);
 
         var (s0, s1, sc0, sc1) = HasSelection ? SelectionOrCursor() : (-1, -1, -1, -1);
 
@@ -321,8 +324,15 @@ public class PatternView : Control
                 string note = TrackerCell.NoteName(cell.Note);
                 string inst = cell.Instrument == 0 ? ".." : cell.Instrument.ToString("X2", CultureInfo.InvariantCulture);
                 string eff = cell.Effect == '\0' ? "..." : cell.Effect + cell.Param.ToString("X2", CultureInfo.InvariantCulture);
-                ctx.DrawText(Text(note, muted || cell.Note == TrackerCell.NoNote ? dim : fg), new Point(x, y + 1));
-                ctx.DrawText(Text(inst, muted || cell.Instrument == 0 ? dim : instBrush), new Point(x + 4 * _charW, y + 1));
+                bool chained = dhs && c == 3 && cell.Note >= 0 && (cell.Effect == 'Q' || cell.Effect2 == 'Q');
+                if (chained)
+                {
+                    // A line down the note's side: the sound goes on into it without a new start
+                    var line = new Pen(chainBrush, 2);
+                    ctx.DrawLine(line, new Point(x - _charW * 0.35, y - _rowH * 0.5), new Point(x - _charW * 0.35, y + _rowH));
+                }
+                ctx.DrawText(Text(note, muted || cell.Note == TrackerCell.NoNote ? dim : chained ? chainBrush : fg), new Point(x, y + 1));
+                ctx.DrawText(Text(inst, muted || cell.Instrument == 0 ? dim : chained ? chainBrush : instBrush), new Point(x + 4 * _charW, y + 1));
                 ctx.DrawText(Text(cell.VolumeText, muted || cell.Volume < 0 ? dim : volBrush), new Point(x + 7 * _charW, y + 1));
                 ctx.DrawText(Text(eff, muted || cell.Effect == '\0' ? dim : effBrush), new Point(x + 10 * _charW, y + 1));
                 if (TwoEffects)

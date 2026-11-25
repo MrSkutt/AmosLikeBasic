@@ -191,7 +191,7 @@ public class DhsTests
         song.SetPatternAt(0, 3, own);
         song.Patterns[own][0, 3] = new TrackerCell(60, 33, 'M', 0x28, effect2: 'X', param2: 1);
         Assert.Empty(DhsMode.Problems(song));            // a sample on channel 4 with LMC effects: fine
-        song.Patterns[own][1, 3] = new TrackerCell(TrackerCell.NoNote, 0, 'Q', 1);
+        song.Patterns[own][1, 3] = new TrackerCell(TrackerCell.NoNote, 0, 'A', 1);
         Assert.Contains(DhsMode.Problems(song), x => x.Contains("on channel 4"));
         song.Patterns[own][1, 3] = new TrackerCell(60, 1, '\0', 0);
         Assert.Contains(DhsMode.Problems(song), x => x.Contains("maxYMiser instrument on channel 4"));
@@ -254,6 +254,162 @@ public class DhsTests
         Assert.Contains("dhs_play:", test);
         Assert.Contains("incbin\t\"MYSONG.DHS\"", test);
         Assert.DoesNotContain("\n", test.Replace("\r\n", ""));
+    }
+
+    // The tracker plays queued samples (Q on channel 4) as the Atari does: each part goes on from where the one
+    // before ends, not at its row, and the song waits for it at that row, so it keeps time with the parts
+    [Fact]
+    public void The_tracker_plays_queued_samples_in_a_chain_and_waits_for_them()
+    {
+        var song = Open();
+        DhsMode.Convert(song);
+        const int rows = 16, speed = 6, parts = 8;
+        song.Speed = speed;
+        song.Ym!.Speed = speed;
+        int frames = (int)Math.Round((rows * speed + 0.3) * 250.4) & ~1;   // each part 0.3 VBL longer than its rows
+        float[] levels = { 0.2f, 0.5f, 0.8f };
+        var wavs = new List<string>();
+        try
+        {
+            while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+            for (int k = 0; k < 3; k++)
+            {
+                string wav = Path.Combine(Path.GetTempPath(), $"dhs-chain{k}-{Guid.NewGuid():N}.wav");
+                SampleBank.WriteWav(wav, new SampleData(Enumerable.Range(0, frames).Select(i => (float)Math.Sin(i * 0.3) * levels[k]).ToArray(), 12517));
+                wavs.Add(wav);
+                song.Instruments.Add(new TrackerInstrument { Name = "Part " + k, Wave = "Sample", Sample = wav, SampleNote = 60, Attack = 0, Release = 0 });
+            }
+            song.Patterns.Add(new TrackerPattern(rows));
+            int empty = song.Patterns.Count - 1;
+            song.Order = Enumerable.Repeat(empty, parts).ToList();
+            song.ChannelOrder = new();
+            for (int place = 0; place < parts; place++)
+            {
+                song.Patterns.Add(new TrackerPattern(rows));
+                int own = song.Patterns.Count - 1;
+                song.SetPatternAt(place, 3, own);
+                song.Patterns[own][0, 3] = new TrackerCell(60, 33 + place % 3, place == 0 ? '\0' : 'Q', 0);
+            }
+
+            S.ManualRendering = true;
+            S.Reset();
+            for (int c = 1; c <= 3; c++) S.SetTrackMute(c, true);
+            S.TrackPlay(TrackerSong.FromJson(song.ToJson()), loop: false);
+            int perTick = S.SampleRate / 50, ticks = parts * rows * speed + 10;
+            var audio = new float[ticks * perTick];
+            var placeAt = new Dictionary<int, double>();   // place → when the song got to it, s
+            var chunk = new float[perTick / 4];
+            for (int i = 0; i < audio.Length / chunk.Length; i++)
+            {
+                S.Render(chunk);
+                chunk.CopyTo(audio, i * chunk.Length);
+                placeAt.TryAdd(S.TrackPosition, (i + 1) * chunk.Length / (double)S.SampleRate);
+            }
+            S.TrackStop();
+            for (int c = 1; c <= 4; c++) S.SetTrackMute(c, false);
+            S.Reset();
+
+            // When each part is heard: its level in 2 ms windows
+            int win = S.SampleRate / 500;
+            double Rms(int at) => Math.Sqrt(Enumerable.Range(at, win).Average(j => (double)audio[j] * audio[j]));
+            double length = frames / 12517.0;
+            for (int k = 1; k < parts; k++)
+            {
+                double expected = k * length;   // the parts end to end
+                // (the levels as heard: each part's middle)
+                double want = Rms((int)((expected + length / 2) * S.SampleRate)), before = Rms((int)((expected - length / 2) * S.SampleRate));
+                int from = (int)((expected - 0.03) * S.SampleRate);
+                int at = Enumerable.Range(0, (int)(0.06 * S.SampleRate / win)).Select(w => from + w * win)
+                    .First(x => Math.Abs(Rms(x) - want) < Math.Abs(Rms(x) - before));
+                double heard = at / (double)S.SampleRate;
+                Assert.InRange(heard - expected, -0.004, 0.004);
+                // The song's row for the part: in the tick after it begins, not at its own time (k × 96 ticks)
+                Assert.InRange(placeAt[k] - heard, -0.006, 0.026);
+            }
+        }
+        finally { foreach (var w in wavs) { File.Delete(w); SampleBank.Forget(w); } }
+    }
+
+    // A drum loop: a kick on each beat and a hat between, beats of a part at a tempo, at 12517 Hz
+    private static SampleData Loop(double bpm, int beats, int seed)
+    {
+        const int rate = 12517;
+        var rnd = new Random(seed);
+        double beat = 60 / bpm;
+        var data = new float[(int)Math.Round(beats * beat * rate)];
+        for (int b = 0; b < beats * 2; b++)
+        {
+            int at = (int)(b * beat / 2 * rate);
+            bool kick = b % 2 == 0;
+            for (int i = 0; i < rate / 8 && at + i < data.Length; i++)
+            {
+                double t = i / (double)rate;
+                data[at + i] += kick ? (float)(Math.Sin(2 * Math.PI * 60 * t) * Math.Exp(-t * 20) * 0.7)
+                                     : (float)((rnd.NextDouble() * 2 - 1) * Math.Exp(-t * 60) * 0.3);
+            }
+        }
+        // a pad under it all, so that it is not silence between the hits
+        for (int i = 0; i < data.Length; i++) data[i] += (float)(Math.Sin(i * 0.05) * 0.1);
+        return new SampleData(data, rate);
+    }
+
+    [Theory]
+    [InlineData(128, 8)]
+    [InlineData(100, 4)]
+    [InlineData(140, 16)]
+    public void The_tempo_of_a_sample_sequence_is_heard(double bpm, int beats)
+    {
+        var parts = Enumerable.Range(0, 4).Select(k => Loop(bpm, beats, k)).ToList();
+        var tempo = SampleTempo.Detect(parts)!;
+        Assert.Equal(beats, tempo.Beats);
+        Assert.InRange(tempo.Bpm, bpm - 0.5, bpm + 0.5);
+    }
+
+    [Fact]
+    public void A_sample_sequence_becomes_samples_chained_on_channel_4_with_rows_that_fit_them()
+    {
+        var song = Open();
+        DhsMode.Convert(song);
+        // A song with nothing in it yet: one empty place
+        song.Patterns.Add(new TrackerPattern(64));
+        song.Order = new List<int> { song.Patterns.Count - 1 };
+        song.ChannelOrder = new();
+        var wavs = new List<string>();
+        try
+        {
+            for (int k = 0; k < 3; k++)
+            {
+                string wav = Path.Combine(Path.GetTempPath(), $"dhs-seq{k}-{Guid.NewGuid():N}.wav");
+                SampleBank.WriteWav(wav, new SampleData(Enumerable.Range(0, 46939).Select(i => (float)Math.Sin(i * 0.1) * 0.5f).ToArray(), 12517));
+                wavs.Add(wav);
+            }
+            var told = DhsMode.AddSampleSequence(song, wavs.Select((w, k) => ($"part{k}", w)).ToList(), 32, chain: true);
+            Assert.NotEmpty(told);
+            Assert.Equal(new[] { "part0", "part1", "part2" }, song.Instruments.Skip(32).Select(i => i.Name));
+            Assert.Equal(3, song.Order.Count);   // from the start of a song that had nothing
+            for (int place = 0; place < 3; place++)
+            {
+                var p = song.Patterns[song.PatternAt(place, 3)];
+                Assert.Equal(32, p.Rows);
+                Assert.Equal(33 + place, p[0, 3].Instrument);
+                Assert.Equal(place == 0 ? '\0' : 'Q', p[0, 3].Effect);
+                // The rows' speeds: 187 VBL, as long as the part (46 940 bytes / 250.4) or a little less
+                int speed = 0, total = 0;
+                for (int r = 0; r < 32; r++)
+                {
+                    var c = p[r, 3];
+                    if (c.Effect == 'S') speed = c.Param;
+                    if (c.Effect2 == 'S') speed = c.Param2;
+                    total += speed;
+                }
+                Assert.Equal(187, total);
+            }
+            Assert.Empty(DhsMode.Problems(song));
+            var export = S.ExportDhs(TrackerSong.FromJson(song.ToJson()));
+            Assert.DoesNotContain(export.Warnings, w => w.Contains("gap") || w.Contains("VBL"));
+            Assert.Equal(3 * 187, export.Frames);
+        }
+        finally { foreach (var w in wavs) { File.Delete(w); SampleBank.Forget(w); } }
     }
 
     [Fact]

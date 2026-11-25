@@ -150,6 +150,96 @@ public class DhsPlayerTests
         return YmImport.OpenMaxYMiser(file, MaxYMiserSong.Find(file)!, "Test");
     }
 
+    // A long sound in parts on channel 4, each queued (Q) after the one before, with an LMC marker (Mxx, xx
+    // the part's number) on each part's row: the DMA goes from part to part without a gap, and the song
+    // waits for it, so each marker comes within a VBL after its part has begun, the last as the first
+    [Fact]
+    public void Queued_samples_follow_without_a_gap_and_the_song_keeps_time_with_them()
+    {
+        var song = Open();
+        DhsMode.Convert(song);
+        const int rows = 16, speed = 6, parts = 12;
+        song.Speed = speed;
+        song.Ym!.Speed = speed;
+        // Each part a little longer than its rows (0.3 VBL), as a real sample will be
+        int bytes = (int)Math.Round((rows * speed + 0.3) * 250.4) & ~1;
+        var wavs = new List<string>();
+        try
+        {
+            while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+            for (int k = 0; k < 3; k++)
+            {
+                string wav = Path.Combine(Path.GetTempPath(), $"dhs-part{k}-{Guid.NewGuid():N}.wav");
+                SampleBank.WriteWav(wav, new SampleData(Enumerable.Range(0, bytes).Select(i => (float)Math.Sin(i * (0.05 + k * 0.03)) * 0.5f).ToArray(), 12517));
+                wavs.Add(wav);
+                song.Instruments.Add(new TrackerInstrument { Name = "Part " + k, Wave = "Sample", Sample = wav, SampleNote = 60 });
+            }
+            song.Patterns.Add(new TrackerPattern(rows));
+            int empty = song.Patterns.Count - 1;
+            song.Order = Enumerable.Repeat(empty, parts).ToList();
+            song.ChannelOrder = new();
+            song.Ym.Repeat = 0;
+            for (int place = 0; place < parts; place++)
+            {
+                song.Patterns.Add(new TrackerPattern(rows));
+                int own = song.Patterns.Count - 1;
+                song.SetPatternAt(place, 3, own);
+                song.Patterns[own][0, 3] = new TrackerCell(60, 33 + place % 3, place == 0 ? '\0' : 'Q', 0, effect2: 'M', param2: place);
+            }
+
+            var export = ChiptuneSynth.ExportDhs(song);
+            Assert.DoesNotContain(export.Warnings, w => w.Contains("gap"));
+            var dhs = export.Data;
+            var bin = Assemble(dhs);
+            if (bin == null) return;   // no vasm here
+            var m = new Machine(bin);
+            m.Call(Load);
+            uint songAt = Load + (uint)bin.AsSpan().LastIndexOf("DHS1"u8);
+            int table = Long(dhs, 12);
+            var partStart = Enumerable.Range(0, 3).Select(k => songAt + (uint)Long(dhs, table + k * 16)).ToArray();
+
+            // VBL by VBL, the DMA run in 16 steps a frame to see when it goes on to the next part
+            var switches = new List<(double At, uint Start, bool Again)>();
+            int vbl = 0, step = 0;
+            m.St.Dma.FrameStarted = (start, _, _, _, again) => switches.Add((vbl + step / 16.0, start, again));
+            var markers = new Dictionary<int, int>();   // part → the VBL its marker came
+            int lastMarker = -1;
+            for (vbl = 0; vbl < parts * rows * speed + 20; vbl++)
+            {
+                m.Cpu.Push32(Return);
+                m.Cpu.PC = Load + 8;
+                long from = m.Cpu.Cycles;
+                for (int i = 0; i < 1_000_000 && m.Cpu.PC != Return; i++) m.Cpu.Step();
+                long used = m.Cpu.Cycles - from;
+                Assert.InRange(used, 1, FrameCycles / 100);
+                for (step = 0; step < 16; step++) m.St.Dma.Run((FrameCycles - used) / 16.0);
+                step = 0;
+                // (the Microwire word read when it has been sent: the emulated one shifts as the DMA runs)
+                int word = m.St.Read16(0xFF8922);
+                if ((word & 0x7C0) == (2 << 9 | 3 << 6) && (word & 63) != lastMarker && vbl > 0)
+                {
+                    lastMarker = word & 63;
+                    markers.TryAdd(lastMarker, vbl);
+                }
+            }
+
+            // The parts in their order, each after the one before without a restart (the DMA going on)
+            var started = switches.Where(x => partStart.Contains(x.Start)).ToList();
+            var firstRound = started.Take(parts).ToList();
+            Assert.Equal(Enumerable.Range(0, parts).Select(k => partStart[k % 3]), firstRound.Select(x => x.Start));
+            Assert.All(firstRound.Skip(1), x => Assert.True(x.Again, "a part was started again, with a gap"));
+            // Each part's marker in the VBL after it begins (the song waited for it), the last as the first
+            for (int k = 1; k < parts; k++)
+            {
+                Assert.True(markers.ContainsKey(k), $"no marker for part {k}");
+                double late = markers[k] - firstRound[k].At;
+                Assert.True(late is >= 0 and <= 1.0, $"part {k}: marker at {markers[k]}, part began at {firstRound[k].At}; " +
+                    string.Join(", ", Enumerable.Range(1, parts - 1).Select(j => $"{j}:{markers.GetValueOrDefault(j)}/{firstRound[j].At}")));
+            }
+        }
+        finally { foreach (var w in wavs) { File.Delete(w); SampleBank.Forget(w); } }
+    }
+
     [Fact]
     public void The_player_writes_the_YM_as_the_file_says_in_under_1_percent()
     {

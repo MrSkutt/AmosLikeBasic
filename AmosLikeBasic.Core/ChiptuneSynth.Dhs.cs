@@ -11,7 +11,8 @@ namespace AmosLikeBasic
     // a VBL (50 Hz), with no other interrupts. Channels 1 – 3 are the YM's registers frame by frame;
     // timer effects (SID, PWM, sync buzzer, digidrums) need interrupts faster than 50 Hz and are played
     // as the plain sound under them. Channel 4 is the STe's DMA sound: a note starts its instrument's
-    // sample (at the sample's own pitch, whatever the note), note off stops it. Effects on channel 4
+    // sample (at the sample's own pitch, whatever the note), note off stops it, and a note with Q follows
+    // the sample playing without a gap (a sequence of samples). Effects on channel 4
     // set the volume chip (LMC1992) through the Microwire:
     //   Mxx master 0 – 28 (0 – 40), Lxx left and Rxx right 0 – 14 (0 – 20), Bxx bass and Txx treble
     //   0 – 0C (0 – 12, 6 flat), Xxx the YM in the mix (0: −12 dB, 1: heard, 2: not heard)
@@ -29,8 +30,10 @@ namespace AmosLikeBasic
     // A frame: W mask, bits 0 – 13 the YM registers written, bit 14 a DMA event, bit 15 an LMC command;
     // $FFFF ends the song. Then the LMC command (W, the Microwire's 11 bits) if bit 15, then a byte for
     // each register in the mask from 0 up (register 7: bits 0 – 5, the player keeps the ports' bits),
-    // then the DMA event (B: the sample number, 0 stops the DMA) if bit 14, and a zero byte if needed so
-    // that the next frame starts on an even address.
+    // then the DMA event if bit 14 (B: 0 stops the DMA, n starts sample n, $80 + n queues sample n to
+    // follow the one playing without a gap), and a zero byte if needed so that the next frame starts on an
+    // even address. A frame of only the DMA event $80 ($4000, $80, 0) is a sync: the player waits there
+    // (a VBL or two at most) until the sample queued last has begun.
     // A sample (16 bytes): L start, L end, L loop start (0: played once; the loop goes to the end),
     // W the DMA mode ($FF8920: bits 0 – 1 the rate, bit 7 mono), W reserved. Samples are 8-bit signed.
     public partial class ChiptuneSynth
@@ -87,17 +90,18 @@ namespace AmosLikeBasic
             int loop = frames.FindIndex(f => f.RowStart && f.Row == 0 && f.Order >= song.Ym.Repeat);
             if (loop < 0) loop = 0;
 
-            // Channel 4: DMA samples and the LMC1992
+            // Channel 4: DMA samples and the LMC1992. First what each row asks for, then the DMA's events.
             var dma = new int?[frames.Count];
+            var sync = new bool[frames.Count];
             var lmc = new List<ushort>[frames.Count];
             for (int i = 0; i < frames.Count; i++) lmc[i] = new List<ushort>();
             var samples = new List<(sbyte[] Data, int LoopStart, int Mode)>();
             var sampleOf = new Dictionary<int, int>();   // instrument → sample number (from 1)
-            bool usesDmaChannel = song.Channels >= 4;
+            var asks = new List<(int Frame, int Sample, bool Queue, int Order, int Row)>();   // Sample 0: note off
             int lastInst = 0;
             var offNote = new HashSet<int>();
             var missing = new HashSet<int>();
-            if (usesDmaChannel)
+            if (song.Channels >= 4)
             {
                 for (int i = 0; i < frames.Count; i++)
                 {
@@ -107,7 +111,8 @@ namespace AmosLikeBasic
                     if (p < 0 || p >= song.Patterns.Count || f.Row >= song.Patterns[p].Rows) continue;
                     var cell = song.Patterns[p][f.Row, 3];
                     if (cell.Instrument > 0) lastInst = cell.Instrument;
-                    if (cell.Note == TrackerCell.NoteOff) dma[i] = 0;
+                    bool queued = cell.Effect == 'Q' || cell.Effect2 == 'Q';
+                    if (cell.Note == TrackerCell.NoteOff) asks.Add((i, 0, false, f.Order, f.Row));
                     else if (cell.Note >= 0 && lastInst > 0)
                     {
                         if (!sampleOf.TryGetValue(lastInst, out int n))
@@ -120,7 +125,7 @@ namespace AmosLikeBasic
                         }
                         if (n > 0)
                         {
-                            dma[i] = n;
+                            asks.Add((i, n, queued, f.Order, f.Row));
                             var inst = song.Instruments[lastInst - 1];
                             if (cell.Note != inst.SampleNote) offNote.Add(lastInst);
                         }
@@ -141,6 +146,78 @@ namespace AmosLikeBasic
                     }
                 }
             }
+            if (samples.Count > 126) throw new InvalidOperationException($"DHS has room for 126 samples; the song has {samples.Count}.");
+
+            // The DMA's events. A note starts its sample at once. A queued note (Q) follows the sample playing
+            // without a gap: the next sample is written into the DMA's registers the frame after the one
+            // playing began, the DMA goes on with it when that one ends, and at the queued note's row the
+            // song waits (a sync) until the DMA has: the YM keeps time with the DMA whatever its clock. The
+            // last sample of a chain is followed by silence, or the DMA would play it again.
+            int silence = 0;
+            int Silence(int mode)
+            {
+                if (silence == 0) { samples.Add((new sbyte[16], -1, mode)); silence = samples.Count; }
+                return silence;
+            }
+            void Put(int at, int value, int limit)
+            {
+                while (at < limit && at < dma.Length && dma[at] != null) at++;
+                if (at < limit && at < dma.Length) dma[at] = value;
+            }
+            int playing = 0, playingFrom = 0;
+            bool chained = false;
+            for (int k = 0; k < asks.Count; k++)
+            {
+                var a = asks[k];
+                int next = k + 1 < asks.Count ? asks[k + 1].Frame : frames.Count;
+                bool nextQueued = k + 1 < asks.Count && asks[k + 1].Queue;
+                if (a.Sample == 0) { dma[a.Frame] = 0; playing = 0; chained = false; continue; }
+                var (data, loopStart, mode) = samples[a.Sample - 1];
+                if (a.Queue && playing > 0 && a.Frame > playingFrom + 1)
+                {
+                    // When the sample before ends: at most at the shortest rate the STe's clocks give, at least at the longest
+                    var (before, _, beforeMode) = samples[playing - 1];
+                    double perVbl = DmaBytesPerVbl(beforeMode);
+                    double shortest = before.Length / perVbl, longest = before.Length / (perVbl * 250.07 / 250.4);
+                    int span = a.Frame - playingFrom;
+                    if (span > shortest + 0.5 || longest - span > 2)
+                        result.Warnings.Add($"Channel 4, place {a.Order}, row {a.Row}: the sample before lasts {shortest:0.0} – {longest:0.0} VBL, " +
+                                            $"the rows from its start {span} VBL. For it to follow without a gap, make the rows " +
+                                            $"{Math.Floor(shortest)} VBL long (or the sample {(int)Math.Round(span * perVbl) & ~1} bytes).");
+                    if ((mode & 3) != (beforeMode & 3) || (mode & 0x80) != (beforeMode & 0x80))
+                        result.Warnings.Add($"Channel 4, place {a.Order}, row {a.Row}: a queued sample plays at the rate of the one before.");
+                    Put(playingFrom + 1, 0x80 | a.Sample, a.Frame);
+                    sync[a.Frame] = true;
+                    chained = true;
+                }
+                else
+                {
+                    dma[a.Frame] = a.Sample;
+                    chained = false;
+                }
+                playing = a.Sample;
+                playingFrom = a.Frame;
+                // The song's last sample, when the song loops back to a queued note: that note's sample follows it
+                var loopAsk = asks.FirstOrDefault(x => x.Frame == loop && x.Queue && x.Sample > 0);
+                if (k == asks.Count - 1 && loopAsk.Sample > 0 && loopAsk.Frame != a.Frame)
+                {
+                    Put(a.Frame + 1, 0x80 | loopAsk.Sample, frames.Count);
+                    double perVbl = DmaBytesPerVbl(mode), shortest = data.Length / perVbl;
+                    int span = frames.Count - a.Frame;
+                    if (span > shortest + 0.5 || data.Length / (perVbl * 250.07 / 250.4) - span > 2)
+                        result.Warnings.Add($"Channel 4: the last sample lasts {shortest:0.0} VBL, the rows from its start to the song's end {span}: " +
+                                            $"for the loop to follow it without a gap, make them {Math.Floor(shortest)} VBL.");
+                }
+                // The end of a chain: silence queued after the last, unless it loops or something comes before it ends
+                else if (chained && !nextQueued && loopStart < 0)
+                {
+                    double ends = a.Frame + data.Length / DmaBytesPerVbl(mode) * 250.07 / 250.4;
+                    if (next > ends - 1) Put(a.Frame + 1, 0x80 | Silence(mode), next);
+                }
+            }
+            if (asks.Any(a => a.Queue) && !sync.Any(x => x))
+                result.Warnings.Add("Channel 4: Q queues a sample after the one playing; with nothing playing before it, it is started.");
+
             foreach (int m in missing) result.Warnings.Add($"Instrument {m} on channel 4 has no sample (a WAV file) and is left out.");
             foreach (int m in offNote) result.Warnings.Add($"Instrument {m} on channel 4 is played at its sample's own pitch: DHS has no other notes.");
             bool usesLmc = lmc.Any(l => l.Count > 0);
@@ -157,6 +234,7 @@ namespace AmosLikeBasic
                 var f = frames[i];
                 bool full = i == 0 || i == loop;
                 if (i == loop) loopAt = o.Count;
+                if (sync[i]) { o.Add(0x40); o.Add(0); o.Add(0x80); o.Add(0); }   // a frame of its own: wait for the DMA
                 int mask = 0;
                 for (int r = 0; r < 13; r++)
                 {
@@ -239,6 +317,10 @@ namespace AmosLikeBasic
             return text.Replace("\n", "\r\n");   // the Atari's line ends
         }
 
+        // The bytes the DMA plays in a VBL of a 50 Hz screen in a mode ($FF8921): a sample each 160, 320, 640
+        // or 1280 cycles of the 160 256 a frame has (if the DMA's clock is the CPU's; else a little less)
+        public static double DmaBytesPerVbl(int mode) => 160256.0 / (160 << (3 - (mode & 3))) * ((mode & 0x80) != 0 ? 1 : 2);
+
         // An LMC1992 command for the Microwire: its address (%10), the function, the value
         private static ushort Lmc(int function, int value) => (ushort)(2 << 9 | function << 6 | value);
 
@@ -249,7 +331,7 @@ namespace AmosLikeBasic
 
         // An instrument's sample at the DMA rate nearest its own, as 8-bit signed mono; a loop goes to the
         // sample's end, so the sample is cut at the loop's end
-        private static (sbyte[] Data, int LoopStart, int Mode)? DmaSample(TrackerInstrument inst)
+        internal static (sbyte[] Data, int LoopStart, int Mode)? DmaSample(TrackerInstrument inst)
         {
             var s = SampleBank.Get(inst.Sample);
             if (s == null || s.Data.Length == 0) return null;
@@ -267,7 +349,7 @@ namespace AmosLikeBasic
                 int a = (int)x;
                 double t = x - a;
                 float v0 = a < srcEnd ? s.Data[a] : 0, v1 = a + 1 < srcEnd ? s.Data[a + 1] : v0;
-                data[i] = (sbyte)Math.Clamp((int)Math.Round((v0 + (v1 - v0) * t) * 127), -128, 127);
+                data[i] = (sbyte)Math.Clamp((int)Math.Round((v0 + (v1 - v0) * t) * 128), -128, 127);
             }
             int loop = inst.LoopEnd > inst.LoopStart ? Math.Min(n - 2, (int)Math.Round(inst.LoopStart * ratio) & ~1) : -1;
             return (data, loop, rateIndex | 0x80);

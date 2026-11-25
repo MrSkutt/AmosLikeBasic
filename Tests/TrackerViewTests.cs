@@ -119,6 +119,38 @@ public class TrackerViewTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void A_DHS_song_without_samples_shows_how_to_get_one_on_channel_4()
+    {
+        var file = MaxYMiserTests.Song();
+        var song = YmImport.OpenMaxYMiser(file, MaxYMiserSong.Find(file)!, "Dhs");
+        DhsMode.Convert(song);
+        while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+        string path = Path.Combine(Path.GetTempPath(), $"amos-dhs-{Guid.NewGuid():N}.amostrk");
+        File.WriteAllText(path, song.ToJson());
+        try
+        {
+            var w = Open();
+            var loading = w.LoadFile(path);
+            for (int i = 0; i < 500 && !loading.IsCompleted; i++) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
+            var pattern = w.FindControl<PatternView>("Pattern")!;
+            Press(w, Key.F4);
+            IEnumerable<string?> Shown() => w.GetVisualDescendants().OfType<TextBlock>()
+                .Where(t => t.IsEffectivelyVisible && t.Text is "MAXYMISER INSTRUMENT" or "CHANNEL 4: THE STE'S DMA" or "SAMPLE" or "OSCILLATORS")
+                .Select(t => t.Text);
+            Assert.Equal(new[] { "MAXYMISER INSTRUMENT" }, Shown());
+            pattern.SetCursor(0, 3, 0);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new[] { "CHANNEL 4: THE STE'S DMA" }, Shown());
+            Assert.Contains(w.GetVisualDescendants().OfType<Button>(), b => b.Content as string == "Add a sample..." && b.IsEffectivelyVisible);
+            pattern.SetCursor(0, 0, 0);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(new[] { "MAXYMISER INSTRUMENT" }, Shown());
+            Close(w);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [AvaloniaFact]
     public void LOAD_reads_a_SID_file_into_the_tracker()
     {
         string file = Path.Combine(Path.GetTempPath(), $"amos-tiny-{Guid.NewGuid():N}.sid");
