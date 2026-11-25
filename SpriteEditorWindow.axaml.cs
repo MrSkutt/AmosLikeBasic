@@ -900,7 +900,7 @@ public partial class SpriteEditorWindow : Window
             ? $"spritesheet_{SpriteId}.png" 
             : $"sprite_{SpriteId}.png";
 
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        var file = await SaveDialog.AskFileAsync(StorageProvider, new FilePickerSaveOptions
         {
             Title = "Save Sprite As",
             SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Graphics),

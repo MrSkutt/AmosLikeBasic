@@ -1162,7 +1162,7 @@ public partial class MainWindow : Window
         IStorageFile? file = _currentProjectFile;
         //if ()
         //{
-        file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+        file = await SaveDialog.AskFileAsync(sp, new FilePickerSaveOptions
         {
             Title = "Save AMOS Project",
             SuggestedFileName = _currentProjectFile?.Name ?? "project.amosproj",
@@ -1193,7 +1193,7 @@ public partial class MainWindow : Window
         IStorageFile? file = _currentProjectFile;
         if (file == null)
         {
-            file = await sp.SaveFilePickerAsync(new FilePickerSaveOptions
+            file = await SaveDialog.AskFileAsync(sp, new FilePickerSaveOptions
             {
                 Title = "Save AMOS Project",
                 SuggestedFileName = "project.amosproj",

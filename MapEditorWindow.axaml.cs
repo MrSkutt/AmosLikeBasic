@@ -467,7 +467,7 @@ public partial class MapEditorWindow : Window
 
     private async void SaveMapAs_OnClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        var file = await SaveDialog.AskFileAsync(StorageProvider, new FilePickerSaveOptions
         {
             Title = "Save AMOS Map",
             SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Graphics),

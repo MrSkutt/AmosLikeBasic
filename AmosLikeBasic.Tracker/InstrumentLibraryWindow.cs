@@ -246,14 +246,14 @@ public class InstrumentLibraryWindow : Window
     {
         var inst = _current();
         if (inst == null) { _info.Text = "The song has no instrument to save."; return; }
-        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        var path = await SaveDialog.AskPathAsync(StorageProvider, new FilePickerSaveOptions
         {
             Title = "Save Instrument",
             SuggestedFileName = (string.IsNullOrWhiteSpace(inst.Name) ? "Instrument" : inst.Name) + InstrumentLibrary.Extension,
             SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound, "Instruments"),
             FileTypeChoices = new[] { InstrumentFiles }
         });
-        if (file?.TryGetLocalPath() is not { } path) return;
+        if (path == null) return;
         try
         {
             InstrumentLibrary.Save(inst, path);
