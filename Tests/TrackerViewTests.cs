@@ -75,6 +75,50 @@ public class TrackerViewTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void In_a_DHS_song_channel_4_takes_only_samples()
+    {
+        var file = MaxYMiserTests.Song();
+        var song = YmImport.OpenMaxYMiser(file, MaxYMiserSong.Find(file)!, "Dhs");
+        DhsMode.Convert(song);
+        while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+        song.Instruments.Add(new TrackerInstrument { Name = "Kick", Wave = "Sample" });
+        string path = Path.Combine(Path.GetTempPath(), $"amos-dhs-{Guid.NewGuid():N}.amostrk");
+        File.WriteAllText(path, song.ToJson());
+        try
+        {
+            var w = Open();
+            var loading = w.LoadFile(path);
+            for (int i = 0; i < 500 && !loading.IsCompleted; i++) { Dispatcher.UIThread.RunJobs(); Thread.Sleep(10); }
+            var pattern = w.FindControl<PatternView>("Pattern")!;
+            var list = w.FindControl<ListBox>("InstrumentList")!;
+            Assert.Equal(1, pattern.Instrument);
+
+            // Onto channel 4: the sample; a YM instrument cannot be chosen there
+            pattern.SetCursor(0, 3, 0);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(33, pattern.Instrument);
+            list.SelectedIndex = 1;
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(33, pattern.Instrument);
+            Assert.Equal(32, list.SelectedIndex);
+
+            // The instrument page shows only the sample's card
+            Press(w, Key.F4);
+            Dispatcher.UIThread.RunJobs();
+            var titles = w.GetVisualDescendants().OfType<TextBlock>()
+                .Where(t => t.Text is "OSCILLATORS" or "SAMPLE" or "FILTER" && t.IsEffectivelyVisible).Select(t => t.Text).ToList();
+            Assert.Equal(new[] { "SAMPLE" }, titles);
+
+            // Back on channel 1: the YM instrument it had
+            pattern.SetCursor(0, 0, 0);
+            Dispatcher.UIThread.RunJobs();
+            Assert.Equal(1, pattern.Instrument);
+            Close(w);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [AvaloniaFact]
     public void LOAD_reads_a_SID_file_into_the_tracker()
     {
         string file = Path.Combine(Path.GetTempPath(), $"amos-tiny-{Guid.NewGuid():N}.sid");

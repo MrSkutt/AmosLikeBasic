@@ -23,6 +23,7 @@ namespace AmosLikeBasic
             public int[] Repeat = Array.Empty<int>();
             public int[]?[] Digi = new int[]?[9];   // [1 – 8]
             public bool[] Skip = Array.Empty<bool>();   // places the replay passes over (a loop mark, $FD, in a track)
+            public bool Dhs;                             // a DHS song: channel 4 is the DMA's samples, at their own pitch
         }
 
         // What a channel keeps, as the replay's instrument buffer
@@ -73,12 +74,13 @@ namespace AmosLikeBasic
         // The digidrums of each original file, read once
         private static readonly ConditionalWeakTable<string, int[]?[]> _ymDigis = new();
 
-        private static YmSongData CompileYm(TrackerYmSong song) => CompileYm(song, null);
+        private static YmSongData CompileYm(TrackerYmSong song, bool dhs = false) => CompileYm(song, null, dhs);
 
-        private static YmSongData CompileYm(TrackerYmSong song, TrackerSong? whole)
+        private static YmSongData CompileYm(TrackerYmSong song, TrackerSong? whole, bool dhs = false)
         {
             var data = new YmSongData
             {
+                Dhs = dhs || (whole != null && DhsMode.Is(whole)),
                 Song = song,
                 Seq = song.Sequences.Select(q => q.Steps.ToArray()).ToArray(),
                 Repeat = song.Sequences.Select(q => q.Repeat).ToArray()
@@ -122,7 +124,8 @@ namespace AmosLikeBasic
         }
 
         // Whether the chip plays a channel (in YM mode, channels 1 – 3; the fourth is not played)
-        private static bool YmChannel(int c) => _ymData != null && c < 4 && !_trackChannels[c].Sfx;
+        // (in a DHS song channel 4 is the DMA's: a sample channel of the tracker's own)
+        private static bool YmChannel(int c) => _ymData != null && c < (_ymData.Dhs ? 3 : 4) && !_trackChannels[c].Sfx;
 
         private static TrackerYmInstrument? YmInstrumentOf(int n, TrackInstrument[] instruments) =>
             n >= 1 && n <= instruments.Length ? instruments[n - 1].Ym : null;
@@ -419,10 +422,23 @@ namespace AmosLikeBasic
 
         // The chip's registers from the three channels, once a tick. The noise and the buzzer are one for
         // the chip: the highest channel that uses them sets them, as maxYMiser's replay does.
+        // While set, each frame's registers are handed to it after they are written (for DHS export):
+        // registers 0 – 13 as written this frame, and whether 13 was written (it starts the envelope again)
+        internal static Action<byte[], bool, bool>? YmRecorder;
+        private static readonly byte[] _ymOut = new byte[14];
+        private static bool _ymEnvWritten, _ymTimerUsed;
+
         private static void YmFrame()
         {
             var ym = _ym;
             if (ym == null) return;
+            _ymEnvWritten = _ymTimerUsed = false;
+            void Put(int r, byte v)
+            {
+                ym.WriteLive(r, v);
+                _ymOut[r] = v;
+                if (r == 13) _ymEnvWritten = true;
+            }
             int mixer = 0x3F;
             int noise = -1, buzzer = -1;
             for (int c = 0; c < 3; c++)
@@ -430,14 +446,14 @@ namespace AmosLikeBasic
                 var s = _ymState[c];
                 if (!s.Sounds || _trackMute[c])
                 {
-                    ym.WriteLive(8 + c, 0);
+                    Put(8 + c, 0);
                     ym.StopSid(c);
                     continue;
                 }
-                if (s.Tone) { mixer &= ~(1 << c); ym.WriteLive(c * 2, (byte)s.Period); ym.WriteLive(c * 2 + 1, (byte)(s.Period >> 8)); }
+                if (s.Tone) { mixer &= ~(1 << c); Put(c * 2, (byte)s.Period); Put(c * 2 + 1, (byte)(s.Period >> 8)); }
                 if (s.Noise) { mixer &= ~(8 << c); noise = c; }
                 if (s.Buzz) buzzer = c;
-                ym.WriteLive(8 + c, (byte)(s.Buzz ? 16 : s.Level));
+                Put(8 + c, (byte)(s.Buzz ? 16 : s.Level));
                 if (s.SidSteps != null && s.TimerHz > 0) ym.StartSidSteps(c, s.TimerHz, s.SidSteps, s.Duty);
                 else ym.StopSid(c);
                 if (s.Timer == 0xD && !s.DigiStarted && s.Digi is >= 1 and <= 8 && _ymData!.Digi[s.Digi] is { } digi)
@@ -446,21 +462,24 @@ namespace AmosLikeBasic
                     s.DigiStarted = true;
                 }
             }
-            ym.WriteLive(7, (byte)mixer);
-            if (noise >= 0) ym.WriteLive(6, (byte)_ymState[noise].NoisePeriod);
+            Put(7, (byte)mixer);
+            if (noise >= 0) Put(6, (byte)_ymState[noise].NoisePeriod);
             if (buzzer >= 0)
             {
                 var s = _ymState[buzzer];
-                ym.WriteLive(11, (byte)s.EnvPeriod);
-                ym.WriteLive(12, (byte)(s.EnvPeriod >> 8));
+                Put(11, (byte)s.EnvPeriod);
+                Put(12, (byte)(s.EnvPeriod >> 8));
                 // The shape written starts the envelope: at a new note (with start sync) or another shape
-                if ((s.Fresh && (s.StartSync != 0 || s.Shape < 0)) || s.BuzzerShape != s.Shape) ym.WriteLive(13, (byte)s.BuzzerShape);
+                if ((s.Fresh && (s.StartSync != 0 || s.Shape < 0)) || s.BuzzerShape != s.Shape) Put(13, (byte)s.BuzzerShape);
                 s.Shape = s.BuzzerShape;
                 if (s.Timer == 0xB && s.TimerHz > 0) ym.StartSyncBuzzer(s.TimerHz, s.SyncShapes ?? new[] { s.BuzzerShape });
                 else ym.StopSyncBuzzer();
             }
             else ym.StopSyncBuzzer();
+            for (int c = 0; c < 3; c++)
+                if (_ymState[c].Sounds && !_trackMute[c] && _ymState[c].Timer != 0) _ymTimerUsed = true;
             foreach (var s in _ymState) s.Fresh = false;
+            YmRecorder?.Invoke(_ymOut, _ymEnvWritten, _ymTimerUsed);
         }
     }
 }

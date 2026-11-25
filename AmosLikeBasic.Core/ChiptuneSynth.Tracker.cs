@@ -210,6 +210,9 @@ namespace AmosLikeBasic
                 ? CompileInstrument(song.Instruments[instrument - 1], instrument) : DefaultInstrument;
             int tempo = Math.Clamp(song.Tempo, 32, 255);
             var ym = song.Ym;
+            bool dhs = DhsMode.Is(song);
+            // (a DHS song's channel 4 plays its samples at their own pitch, as the DMA does)
+            if (dhs && channel == 4 && instrument >= 1 && instrument <= song.Instruments.Count) note = song.Instruments[instrument - 1].SampleNote;
             _trackCommands.Enqueue(() =>
             {
                 int c = channel - 1;
@@ -222,8 +225,8 @@ namespace AmosLikeBasic
                     _trackUsed = used;
                     // A song in YM mode: the chip plays the notes tried on the keys too
                     if (ym == null) { _ym = null; _ymData = null; }
-                    else if (_ym == null || _ymData?.Song != ym) StartYm(CompileYm(ym));
-                    else _ymData = CompileYm(ym);   // the sequences as edited
+                    else if (_ym == null || _ymData?.Song != ym) StartYm(CompileYm(ym, dhs));
+                    else _ymData = CompileYm(ym, dhs);   // the sequences as edited
                 }
                 if (_ymData != null && c < 3)
                 {
@@ -838,6 +841,24 @@ namespace AmosLikeBasic
                     YmLine(c, cell, d.Instruments, ref speed, ref brk);
                     if (speed is { } sp) _trackSpeed = sp;
                     if (brk) breakRow = 0;
+                    continue;
+                }
+                if (_ymData is { Dhs: true } && !ch.Sfx)
+                {
+                    // A DHS song's channel 4, the STe's DMA: a note starts the sample at its own pitch, note off
+                    // stops it; its effects are the volume chip's (LMC1992), not played here
+                    ch.Effect = '\0';
+                    ch.Param = 0;
+                    ch.DelayNote = TrackerCell.NoNote;
+                    if (cell.Instrument > 0)
+                    {
+                        var inst = cell.Instrument <= d.Instruments.Length ? d.Instruments[cell.Instrument - 1] : DefaultInstrument;
+                        ch.Inst = inst;
+                        ch.InstNumber = cell.Instrument;
+                        ch.Vol = 64;
+                    }
+                    if (cell.Note == TrackerCell.NoteOff) ReleaseTrackVoice(c);
+                    else if (cell.Note >= 0 && ch.Inst != null) TriggerTrackNote(c, (int)Math.Round(69 + 12 * Math.Log2(ch.Inst.SampleBaseFreq / 440)));
                     continue;
                 }
                 char eff = cell.Effect;
