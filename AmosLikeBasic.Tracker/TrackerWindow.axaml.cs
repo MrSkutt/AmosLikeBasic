@@ -486,14 +486,51 @@ public partial class TrackerWindow : Window
             Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, FontSize = 11
         };
         sampleCard.Children.Add(dhsHelp);
+        var dhsLength = new TextBlock { Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        sampleCard.Children.Add(dhsLength);
+        var fitRows = new Button { Content = "Fit the rows to it", Focusable = false, HorizontalAlignment = HorizontalAlignment.Left };
+        ToolTip.SetTip(fitRows, "Set the speed (S) of its rows on channel 4 so that they last as long as the sample, by the tempo heard");
+        fitRows.Click += (_, _) =>
+        {
+            var inst = CurrentInstrument;
+            var sample = inst == null ? null : SampleBank.Get(inst.Sample);
+            _tempos.TryGetValue(inst == null || sample == null ? "" : inst.Sample + "|" + sample.Data.Length + "|" + sample.Rate, out var tempo);
+            FitRowsToSample(Math.Max(1, tempo?.Beats * 4 ?? 32));
+        };
+        sampleCard.Children.Add(fitRows);
         var sampleBorder = (Border)sampleCard.Parent!;
         _instrumentRefresh.Add(() =>
         {
             bool dhsSample = DhsMode.Is(_song) && Pattern.Instrument > DhsMode.YmInstruments && CurrentInstrument?.Ym == null;
             foreach (var child in cards.Children) child.IsVisible = !dhsSample || child == sampleBorder;
-            dhsNameRow.IsVisible = dhsHelp.IsVisible = dhsSample;
+            dhsNameRow.IsVisible = dhsHelp.IsVisible = dhsLength.IsVisible = fitRows.IsVisible = dhsSample;
+            fitRows.IsEnabled = dhsSample && !string.IsNullOrEmpty(CurrentInstrument?.Sample);
             sampleHelp.IsVisible = !dhsSample;
             if (dhsSample) dhsName.Text = CurrentInstrument?.Name ?? "";
+            dhsLength.Text = "";
+            if (dhsSample && CurrentInstrument is { } inst && ChiptuneSynth.DmaSample(inst) is { } dma)
+            {
+                // How long the DMA plays it, and the rows that would fit it at the tempo heard
+                double vbls = dma.Data.Length / ChiptuneSynth.DmaBytesPerVbl(dma.Mode);
+                string text = $"The DMA plays it at {ChiptuneSynth.DmaRates[dma.Mode & 3]} Hz: {dma.Data.Length} bytes, {vbls:0.0} VBL.";
+                var sample = SampleBank.Get(inst.Sample);
+                string key = sample == null ? "" : inst.Sample + "|" + sample.Data.Length + "|" + sample.Rate;
+                if (sample != null && _tempos.TryGetValue(key, out var tempo) && tempo != null)
+                {
+                    int rows = tempo.Beats * 4;
+                    int span = (int)Math.Floor(vbls);
+                    string patterns = rows > DhsMode.BlockPatternRows
+                        ? $" in {(rows + DhsMode.BlockPatternRows - 1) / DhsMode.BlockPatternRows} patterns of {DhsMode.BlockPatternRows}" : "";
+                    text += $" Tempo heard: about {tempo.Bpm:0.#} BPM, {tempo.Beats} beats." +
+                            (span >= rows * 2
+                                ? $" As sixteenths: {rows} rows{patterns} of {(double)span / rows:0.##} VBL ({span} VBL: speeds {span / rows}" +
+                                  (span % rows != 0 ? $" and {span / rows + 1}" : "") + ")."
+                                : "");
+                }
+                else if (sample != null && !_tempos.ContainsKey(key) && !_temposWorkedOut.Contains(key))
+                    _ = RefreshWhenTempoKnownAsync(inst.Sample, sample);
+                dhsLength.Text = text;
+            }
         });
 
         // ── FILTER ──
@@ -688,9 +725,25 @@ public partial class TrackerWindow : Window
         {
             Title = "Load Sample",
             SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound, "Samples"),
-            FileTypeFilter = new[] { new FilePickerFileType("WAV sound") { Patterns = new[] { "*.wav" } } }
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("Samples (WAV, raw 8-bit)") { Patterns = new[] { "*.wav", "*.raw", "*.smp", "*.sam" } },
+                new FilePickerFileType("All files") { Patterns = new[] { "*" } }
+            }
         });
         if (files.Count == 0 || files[0].TryGetLocalPath() is not { } path) return;
+        if (!Path.GetExtension(path).Equals(".wav", StringComparison.OrdinalIgnoreCase))
+        {
+            // A raw file (8-bit signed, as the STe's DMA plays it): its rate asked for, a WAV file made beside it
+            var rate = await AskRawRateAsync(Path.GetFileName(path));
+            if (rate == null) return;
+            try { path = await RawToWavAsync(path, rate.Value); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                SetStatus($"Could not make a WAV file of {Path.GetFileName(path)}: {ex.Message}");
+                return;
+            }
+        }
         string root = Path.GetFullPath(Workspace.Root) + Path.DirectorySeparatorChar;
         string stored = Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase)
             ? Path.GetRelativePath(Workspace.Root, path).Replace('\\', '/') : path;
@@ -706,6 +759,115 @@ public partial class TrackerWindow : Window
         });
         RefreshInstrumentPanel();
         SetStatus($"Sample {Path.GetFileName(path)}: {sample.Seconds:0.00} s at {sample.Rate} Hz");
+        // The tempo heard in it, told when it is known (it takes a moment for a long sample)
+        var tempo = await TempoOfAsync(stored, sample);
+        if (tempo != null)
+            SetStatus($"Sample {Path.GetFileName(path)}: {sample.Seconds:0.00} s at {sample.Rate} Hz, " +
+                      $"tempo about {tempo.Bpm:0.#} BPM ({tempo.Beats} beats)");
+        RefreshInstrumentPanel();
+        // A DHS song's sample: the song's rows fitted to it, if wanted
+        if (tempo != null && DhsMode.Is(_song) && Pattern.Instrument > DhsMode.YmInstruments)
+        {
+            int rows = Math.Max(1, tempo.Beats * 4);
+            string where = rows > DhsMode.BlockPatternRows
+                ? $"It is longer than a pattern, so it gets places of its own: {(rows + DhsMode.BlockPatternRows - 1) / DhsMode.BlockPatternRows} " +
+                  $"patterns of {DhsMode.BlockPatternRows} rows, the note on the first."
+                : "From each note of it on channel 4, or in a place of its own if it has none yet.";
+            if (await AskAsync("Fit the rows to it?",
+                    $"The sample is about {tempo.Bpm:0.#} BPM, {tempo.Beats} beats. Make its rows on channel 4 last as long as it: " +
+                    $"{rows} rows of sixteenths, their speeds set with S (5, 6 …)? {where}", "Fit", "Not now"))
+                FitRowsToSample(rows);
+        }
+    }
+
+    // The current sample instrument's rows on channel 4 fitted to its length (DhsMode.FitRows)
+    private void FitRowsToSample(int rows)
+    {
+        try
+        {
+            var copy = TrackerSong.FromJson(_song.ToJson());
+            var told = DhsMode.FitRows(copy, Pattern.Instrument, rows);
+            Stop();
+            PushUndo("fit");
+            _song = copy;
+            LoadSongIntoUi(keepPositions: true);
+            SongChanged();
+            _ = ShowReportAsync("Rows fitted", string.Join("\n\n", told));
+        }
+        catch (InvalidOperationException ex) { SetStatus("Could not fit the rows: " + ex.Message); }
+    }
+
+    // The tempo heard in a sample, worked out once for each file
+    private readonly Dictionary<string, SampleTempo.Result?> _tempos = new();
+    private readonly HashSet<string> _temposWorkedOut = new();   // being worked out now
+
+    private async Task<SampleTempo.Result?> TempoOfAsync(string file, SampleData sample)
+    {
+        string key = file + "|" + sample.Data.Length + "|" + sample.Rate;
+        if (_tempos.TryGetValue(key, out var known)) return known;
+        if (!_temposWorkedOut.Add(key)) return null;
+        try
+        {
+            var tempo = await Task.Run(() => SampleTempo.Detect(new[] { sample }));
+            _tempos[key] = tempo;
+            return tempo;
+        }
+        finally { _temposWorkedOut.Remove(key); }
+    }
+
+    private async Task RefreshWhenTempoKnownAsync(string file, SampleData sample)
+    {
+        await TempoOfAsync(file, sample);
+        RefreshInstrumentPanel();
+    }
+
+    // A raw file as a WAV file beside it (one made from it before, alike, is used as it is)
+    private static async Task<string> RawToWavAsync(string path, int rate)
+    {
+        var raw = SampleBank.ReadRaw(await File.ReadAllBytesAsync(path), rate);
+        string wav = Path.ChangeExtension(path, ".wav");
+        var there = File.Exists(wav) ? SampleBank.ReadWav(await File.ReadAllBytesAsync(wav)) : null;
+        if (there != null && (there.Rate != raw.Rate || there.Data.Length != raw.Data.Length))
+            wav = Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)} {rate} Hz.wav");
+        if (there == null || wav != Path.ChangeExtension(path, ".wav")) SampleBank.WriteWav(wav, raw);
+        return wav;
+    }
+
+    // The rate a raw file was made for: the STe's four
+    private async Task<int?> AskRawRateAsync(string name)
+    {
+        var dialog = new Window
+        {
+            Title = "Raw sample",
+            Width = 380,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false
+        };
+        var tcs = new TaskCompletionSource<int?>();
+        var rateBox = new ComboBox { ItemsSource = ChiptuneSynth.DmaRates.Select(r => $"{r} Hz").ToList(), SelectedIndex = 1, Width = 160 };
+        var ok = new Button { Content = "Load", Width = 80, Margin = new Thickness(5) };
+        var cancel = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(5) };
+        ok.Click += (_, _) => { tcs.TrySetResult(ChiptuneSynth.DmaRates[Math.Max(0, rateBox.SelectedIndex)]); dialog.Close(); };
+        cancel.Click += (_, _) => { tcs.TrySetResult(null); dialog.Close(); };
+        dialog.Closed += (_, _) => tcs.TrySetResult(null);
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(12),
+            Spacing = 8,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = $"{name} is raw 8-bit signed mono, as the STe's DMA plays it. At what rate? A WAV file is made beside it.",
+                    TextWrapping = TextWrapping.Wrap
+                },
+                rateBox,
+                new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Children = { ok, cancel } }
+            }
+        };
+        await dialog.ShowDialog(this);
+        return await tcs.Task;
     }
 
     // An LFO: what it moves, its wave, speed (in Hz or in rows of the song) and depth
@@ -1956,15 +2118,7 @@ public partial class TrackerWindow : Window
             {
                 string wav = path;
                 if (!Path.GetExtension(path).Equals(".wav", StringComparison.OrdinalIgnoreCase))
-                {
-                    // A raw file as a WAV file beside it (one made from it before is used as it is)
-                    var raw = SampleBank.ReadRaw(await File.ReadAllBytesAsync(path), rate);
-                    wav = Path.ChangeExtension(path, ".wav");
-                    var there = File.Exists(wav) ? SampleBank.ReadWav(await File.ReadAllBytesAsync(wav)) : null;
-                    if (there != null && (there.Rate != raw.Rate || there.Data.Length != raw.Data.Length))
-                        wav = Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)} {rate} Hz.wav");
-                    if (there == null || wav != Path.ChangeExtension(path, ".wav")) SampleBank.WriteWav(wav, raw);
-                }
+                    wav = await RawToWavAsync(path, rate);
                 string stored = Path.GetFullPath(wav).StartsWith(root, StringComparison.OrdinalIgnoreCase)
                     ? Path.GetRelativePath(Workspace.Root, wav).Replace('\\', '/') : wav;
                 SampleBank.Forget(stored);

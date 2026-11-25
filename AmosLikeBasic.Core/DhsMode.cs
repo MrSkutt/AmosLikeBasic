@@ -171,8 +171,7 @@ namespace AmosLikeBasic
                 int span = (int)Math.Floor(vbls);
                 if (span < rowsPerPart * 2)
                     throw new InvalidOperationException($"{parts[k].Name} lasts {vbls:0.0} VBL: too short for {rowsPerPart} rows (2 VBL a row at least).");
-                var speedOf = Enumerable.Range(0, rowsPerPart)
-                    .Select(r => (int)Math.Round((r + 1) * (double)span / rowsPerPart) - (int)Math.Round(r * (double)span / rowsPerPart)).ToArray();
+                var speedOf = SpeedsFor(span, rowsPerPart);
                 var pattern = new TrackerPattern(rowsPerPart);
                 song.Patterns.Add(pattern);
                 int index = song.Patterns.Count - 1;
@@ -198,6 +197,130 @@ namespace AmosLikeBasic
                      "The song waits for the DMA at each part, a VBL at most.");
             told.Add("Write the YM's channels 1 – 3 in these places. (A song saved for maxYMiser has channels 1 – 3 only, " +
                      "without the speeds on channel 4.)");
+            return told;
+        }
+
+        // The rows' speeds for a part: span VBL over rows rows, 5 and 6 and so on, spread evenly
+        public static int[] SpeedsFor(int span, int rows) => Enumerable.Range(0, rows)
+            .Select(r => (int)Math.Round((r + 1) * (double)span / rows) - (int)Math.Round(r * (double)span / rows)).ToArray();
+
+        public const int BlockPatternRows = 64;   // a long sample's rows: patterns of 4 bars of sixteenths
+        public const int MaxSpeed = 31;           // the most VBL a row is given
+
+        // A single sample's rows fitted to it (Instrument → Load sample on channel 4, or the sample page's
+        // button): from each note of it on channel 4, its rows (as many as rowsWanted, up to the next note on
+        // channel 4 or the pattern's end) get speeds (S) that make them last as long as the sample. With no
+        // note of it yet, or when it is longer than a pattern (a whole song as one sample), it gets places of
+        // its own: patterns of 64 rows, the note on the first row, the sample's length spread over all of them.
+        public static List<string> FitRows(TrackerSong song, int instrument, int rowsWanted)
+        {
+            if (!Is(song)) throw new InvalidOperationException("Fitting rows to a sample is for a DHS song's channel 4.");
+            if (instrument <= YmInstruments || instrument > song.Instruments.Count)
+                throw new InvalidOperationException("Only a sample instrument (from 21) plays on channel 4.");
+            var inst = song.Instruments[instrument - 1];
+            var dma = ChiptuneSynth.DmaSample(inst) ?? throw new InvalidOperationException($"{inst.Name}: the sample cannot be read.");
+            double vbls = dma.Data.Length / ChiptuneSynth.DmaBytesPerVbl(dma.Mode);
+            int span = (int)Math.Floor(vbls);
+            var told = new List<string>();
+
+            // Its notes on channel 4: each pattern once (a pattern played at many places is changed once)
+            var notes = new List<(int Pattern, int Row)>();
+            var seen = new HashSet<int>();
+            for (int place = 0; place < song.Order.Count; place++)
+            {
+                int p = song.PatternAt(place, 3);
+                if (p < 0 || p >= song.Patterns.Count || !seen.Add(p)) continue;
+                for (int r = 0; r < song.Patterns[p].Rows; r++)
+                {
+                    var cell = song.Patterns[p][r, 3];
+                    if (cell.Note >= 0 && cell.Instrument == instrument) notes.Add((p, r));
+                }
+            }
+            if (span < rowsWanted * 2)
+                throw new InvalidOperationException($"{inst.Name} lasts {vbls:0.0} VBL: too short for {rowsWanted} rows (2 VBL a row at least).");
+            string Size() => dma.Data.Length > 900_000
+                ? $" At {ChiptuneSynth.DmaRates[dma.Mode & 3]} Hz it is {dma.Data.Length / 1024} KB in the DHS file: it needs an STe with " +
+                  (dma.Data.Length > 3_500_000 ? "more than 4 MB, so it does not fit; a lower rate or a shorter sample would." : "4 MB.")
+                : "";
+            if (notes.Count == 0 || rowsWanted > BlockPatternRows)
+            {
+                // Places of its own, after the song's (or from its start, if it has nothing yet): patterns of 64
+                // rows, the sample's length spread over all their rows, each pattern starting with its speed
+                bool fresh = song.Order.Count == 1 && Enumerable.Range(0, 4).All(c => IsEmpty(song.Patterns[song.PatternAt(0, c)]));
+                int place = fresh ? 0 : song.Order.Count, firstPlace = place;
+                var speeds = SpeedsFor(span, rowsWanted);
+                for (int from = 0; from < rowsWanted; from += BlockPatternRows, place++)
+                {
+                    int rows = Math.Min(BlockPatternRows, rowsWanted - from);
+                    var pattern = new TrackerPattern(rows);
+                    song.Patterns.Add(pattern);
+                    int index = song.Patterns.Count - 1;
+                    if (place < song.Order.Count) song.Order[place] = index; else song.Order.Add(index);
+                    if (place < song.ChannelOrder.Count) song.ChannelOrder[place] = null;
+                    int previous = -1;
+                    for (int r = 0; r < rows; r++)
+                    {
+                        int speed = speeds[from + r];
+                        bool set = speed != previous;
+                        previous = speed;
+                        if (from == 0 && r == 0)
+                            pattern[r, 3] = new TrackerCell(60, instrument, 'S', speed);
+                        else if (set)
+                            pattern[r, 3] = new TrackerCell(TrackerCell.NoNote, 0, 'S', speed);
+                    }
+                }
+                if (fresh) song.Speed = song.Ym!.Speed = Math.Clamp(speeds[0], 2, 31);
+                told.Add($"{inst.Name} lasts {vbls:0.0} VBL. It is on channel 4's first row of places {firstPlace} – {place - 1} " +
+                         $"({place - firstPlace} patterns, {rowsWanted} rows of sixteenths), their speeds (S, " +
+                         $"{string.Join(" and ", speeds.Distinct().OrderBy(v => v))} VBL) making them last {span} VBL, as long as it.{Size()}");
+                if (notes.Count > 0)
+                    told.Add($"Its notes elsewhere on channel 4 were left as they were ({notes.Count}): take them away if it should not start there too.");
+                told.Add("Write the YM's channels 1 – 3 in these places.");
+                return told;
+            }
+            if (span > rowsWanted * MaxSpeed)
+                throw new InvalidOperationException($"{inst.Name} lasts {vbls:0.0} VBL: more than {MaxSpeed} VBL a row in {rowsWanted} rows.");
+            int fitted = 0, early = 0, full = 0;
+            var speedsOf = SpeedsFor(span, rowsWanted);
+            foreach (var (p, row) in notes)
+            {
+                var pattern = song.Patterns[p];
+                // Its rows up to the next note on channel 4: all it needs, or it is cut before it ends and left be
+                int next = row + 1;
+                while (next < pattern.Rows && pattern[next, 3].Note == TrackerCell.NoNote) next++;
+                if (next - row < rowsWanted) { early++; continue; }
+                // A speed in a free effect column, or over an S there before; an S there before and not needed now goes
+                bool room = Enumerable.Range(0, rowsWanted).All(r =>
+                {
+                    var c = pattern[row + r, 3];
+                    return c.Effect is '\0' or 'S' || c.Effect2 is '\0' or 'S';
+                });
+                if (!room) { full++; continue; }
+                int previous = -1;
+                for (int r = 0; r < rowsWanted; r++)
+                {
+                    var cell = pattern[row + r, 3];
+                    if (cell.Effect == 'S') cell = cell.WithEffect('\0', 0);
+                    if (cell.Effect2 == 'S') cell = cell.WithEffect2('\0', 0);
+                    if (speedsOf[r] != previous || r == 0)
+                        cell = cell.Effect == '\0' ? cell.WithEffect('S', speedsOf[r]) : cell.WithEffect2('S', speedsOf[r]);
+                    previous = speedsOf[r];
+                    pattern[row + r, 3] = cell;
+                }
+                fitted++;
+            }
+            int skipped = early + full;
+            string speedsText = string.Join(" and ", SpeedsFor(span, rowsWanted).Distinct().OrderByDescending(v => v));
+            told.Insert(0, $"{inst.Name} lasts {vbls:0.0} VBL. Its rows now last {span} VBL: {rowsWanted} rows of {speedsText} VBL " +
+                           $"(S on channel 4), so the song keeps time with it.{Size()}");
+            if (fitted > 1) told.Add($"Fitted at {fitted} notes of it.");
+            if (early > 0)
+                told.Add($"{early} of its notes were left as they were: the next note on channel 4 comes before its {rowsWanted} rows end.");
+            if (full > 0)
+                told.Add($"{full} of its notes were left as they were: both effect columns taken on a row the speed should go in.");
+            if (fitted == 0)
+                told[0] = $"{inst.Name} lasts {vbls:0.0} VBL, {rowsWanted} rows of sixteenths: no note of it had room for them, so nothing was changed.";
+            told.Add("After its rows the song goes on at the last speed: set another with S where it should change.");
             return told;
         }
 

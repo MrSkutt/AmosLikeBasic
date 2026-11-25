@@ -363,6 +363,23 @@ public class DhsTests
         var tempo = SampleTempo.Detect(parts)!;
         Assert.Equal(beats, tempo.Beats);
         Assert.InRange(tempo.Bpm, bpm - 0.5, bpm + 0.5);
+        // One part alone, a single sample, as well
+        var one = SampleTempo.Detect(new[] { parts[1] })!;
+        Assert.Equal(beats, one.Beats);
+        Assert.InRange(one.Bpm, bpm - 0.5, bpm + 0.5);
+    }
+
+    [Fact]
+    public void The_tempo_of_a_long_sample_is_heard_too()
+    {
+        // 36 beats at 123 BPM (17.6 s), and four of them (70 s: more beats than a part has, so every tempo is tried)
+        var loop = Loop(123, 36, 7);
+        var tempo = SampleTempo.Detect(new[] { loop })!;
+        Assert.InRange(tempo.Bpm, 122.5, 123.5);
+        var longer = new SampleData(Enumerable.Repeat(loop.Data, 4).SelectMany(d => d).ToArray(), loop.Rate);
+        var t2 = SampleTempo.Detect(new[] { longer })!;
+        Assert.InRange(t2.Bpm, 122.5, 123.5);
+        Assert.InRange(t2.Beats, 143, 145);
     }
 
     [Fact]
@@ -410,6 +427,103 @@ public class DhsTests
             Assert.Equal(3 * 187, export.Frames);
         }
         finally { foreach (var w in wavs) { File.Delete(w); SampleBank.Forget(w); } }
+    }
+
+    // One sample's rows fitted to it: from its note on channel 4, or in a place of its own when it has none
+    [Fact]
+    public void A_single_samples_rows_are_fitted_to_it()
+    {
+        var song = Open();
+        DhsMode.Convert(song);
+        string wav = Path.Combine(Path.GetTempPath(), $"dhs-fit-{Guid.NewGuid():N}.wav");
+        SampleBank.WriteWav(wav, new SampleData(Enumerable.Range(0, 46939).Select(i => (float)Math.Sin(i * 0.1) * 0.5f).ToArray(), 12517));
+        try
+        {
+            while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+            song.Instruments.Add(new TrackerInstrument { Name = "Loop", Wave = "Sample", Sample = wav, SampleNote = 60 });
+            int Total(TrackerPattern p, int from, int rows)
+            {
+                int speed = 0, total = 0;
+                for (int r = from; r < from + rows; r++)
+                {
+                    var c = p[r, 3];
+                    if (c.Effect == 'S') speed = c.Param;
+                    if (c.Effect2 == 'S') speed = c.Param2;
+                    total += speed;
+                }
+                return total;
+            }
+
+            // No note of it yet: a place of its own, 32 rows of 187 VBL
+            int places = song.Order.Count;
+            DhsMode.FitRows(song, 33, 32);
+            Assert.Equal(places + 1, song.Order.Count);
+            var own = song.Patterns[song.PatternAt(places, 3)];
+            Assert.Equal(33, own[0, 3].Instrument);
+            Assert.Equal(187, Total(own, 0, 32));
+
+            // A note of it at row 8 with an LMC effect there and an old S7F further down, the next note at row 40:
+            // its 32 rows fitted, the old speed gone
+            var p2 = new TrackerPattern(64);
+            song.Patterns.Add(p2);
+            song.Order.Add(song.Patterns.Count - 1);
+            p2[8, 3] = new TrackerCell(60, 33, 'M', 0x20);
+            p2[20, 3] = new TrackerCell(TrackerCell.NoNote, 0, 'S', 0x7F);
+            p2[40, 3] = new TrackerCell(TrackerCell.NoteOff, 0, '\0', 0);
+            // and one at row 50, the next at 54: no room for its 32 rows, so it is left as it is
+            p2[50, 3] = new TrackerCell(60, 33, '\0', 0);
+            p2[54, 3] = new TrackerCell(TrackerCell.NoteOff, 0, '\0', 0);
+            var told = DhsMode.FitRows(song, 33, 32);
+            Assert.Equal('M', p2[8, 3].Effect);
+            Assert.Equal('S', p2[8, 3].Effect2);
+            Assert.Equal(187, Total(p2, 8, 32));
+            for (int r = 0; r < 64; r++)
+            {
+                if (p2[r, 3].Effect == 'S') Assert.InRange(p2[r, 3].Param, 5, 6);
+                if (p2[r, 3].Effect2 == 'S') Assert.InRange(p2[r, 3].Param2, 5, 6);
+            }
+            Assert.Equal('\0', p2[50, 3].Effect);
+            Assert.Contains(told, t => t.Contains("next note"));
+            Assert.Empty(DhsMode.Problems(song));
+        }
+        finally { File.Delete(wav); SampleBank.Forget(wav); }
+    }
+
+    // A whole song as one sample: its rows in patterns of 64, its length spread over all of them
+    [Fact]
+    public void A_long_samples_rows_go_over_patterns_of_their_own()
+    {
+        var song = Open();
+        DhsMode.Convert(song);
+        string wav = Path.Combine(Path.GetTempPath(), $"dhs-long-{Guid.NewGuid():N}.wav");
+        // 60 s at 12517 Hz: 15 000 VBL (if 250.4 bytes a VBL); 120 BPM is 120 beats, 480 rows
+        SampleBank.WriteWav(wav, new SampleData(Enumerable.Range(0, 12517 * 60).Select(i => (float)Math.Sin(i * 0.1) * 0.5f).ToArray(), 12517));
+        try
+        {
+            while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+            song.Instruments.Add(new TrackerInstrument { Name = "Song", Wave = "Sample", Sample = wav, SampleNote = 60 });
+            int places = song.Order.Count;
+            var told = DhsMode.FitRows(song, 33, 480);
+            Assert.Equal(places + 8, song.Order.Count);   // 7 patterns of 64 and one of 32
+            int total = 0, speed = 0, rows = 0;
+            for (int place = places; place < song.Order.Count; place++)
+            {
+                var p = song.Patterns[song.PatternAt(place, 3)];
+                Assert.Equal('S', p[0, 3].Effect);   // each pattern says its speed on its first row
+                rows += p.Rows;
+                for (int r = 0; r < p.Rows; r++)
+                {
+                    if (p[r, 3].Effect == 'S') speed = p[r, 3].Param;
+                    Assert.InRange(speed, 5, 7);
+                    total += speed;
+                }
+            }
+            Assert.Equal(480, rows);
+            Assert.Equal((int)Math.Floor(12517 * 60 / 250.4), total);
+            Assert.Equal(33, song.Patterns[song.PatternAt(places, 3)][0, 3].Instrument);
+            Assert.Empty(DhsMode.Problems(song));
+        }
+        finally { File.Delete(wav); SampleBank.Forget(wav); }
     }
 
     [Fact]
