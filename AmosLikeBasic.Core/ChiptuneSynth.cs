@@ -106,7 +106,7 @@ namespace AmosLikeBasic
             public double Led1, Led2, LedIn1, LedIn2;
             public double SampleBaseFreq = 261.63;
             public int LoopStart, LoopEnd;
-            // A sample queued to follow this one without a gap, as the STe's DMA does (a DHS song's Q): taken
+            // A sample queued to follow this one without a gap, as the STe's DMA does (a GHOST song's Q): taken
             // up where this one ends (or its loop does); ChainSwitched says it has been
             public SampleData? NextSample;
             public int NextLoopStart, NextLoopEnd;

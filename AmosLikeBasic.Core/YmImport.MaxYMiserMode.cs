@@ -142,8 +142,8 @@ public static partial class YmImport
 
         // Each place's tracks: the lines each plays, and the pattern it played when read
         int places = Math.Min(song.Order.Count, 256);
-        // (a DHS song's channel 4 is the DMA's samples, which maxYMiser does not have: its DMA track stays as it was)
-        int tracks = Math.Min(DhsMode.Is(song) ? 3 : song.Channels, MaxYMiserSong.Tracks);
+        // (a GHOST song's channel 4 is the DMA's samples, which maxYMiser does not have: its DMA track stays as it was)
+        int tracks = Math.Min(GhostMode.Is(song) ? 3 : song.Channels, MaxYMiserSong.Tracks);
         var lines = new MaxYMiserSong.Line[places, MaxYMiserSong.Tracks][];
         var was = new int[places, MaxYMiserSong.Tracks];
         for (int p = 0; p < places; p++)

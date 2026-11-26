@@ -1,28 +1,29 @@
 ;-----------------------------------------------------------------------------
-; DHSPLAY.S - player for DHS songs (Dead Hackers Society format)
+; GHSPLAY.S - player for GHOST songs (one file: YM, STe DMA, LMC1992)
 ;
-; A DHS song is a YM register dump at 50 Hz, with STe DMA samples and LMC1992
+; A GHOST song is a YM register dump at 50 Hz, with STe DMA samples and LMC1992
 ; (Microwire) commands. The player needs no interrupt but the VBL: call
-; dhs_play from it 50 times a second. It is position independent and has
-; no self-modifying code, so it can be included anywhere. Devpac syntax.
+; ghs_play from it 50 times a second. It is position independent and has
+; no self-modifying code, so it can be included anywhere. Devpac syntax
+; (GHSPLAY_RMAC.S is the same for rmac, and assembles to the same code).
 ;
 ;   lea    song,a0       ; the song, on an even address
-;   bsr    dhs_init      ; d0.l = 0: ok, -1: not a DHS song
+;   bsr    ghs_init      ; d0.l = 0: ok, -1: not a GHOST song
 ;   ...
-;   bsr    dhs_play      ; 50 times a second (keeps all registers)
+;   bsr    ghs_play      ; 50 times a second (keeps all registers)
 ;   ...
-;   bsr    dhs_stop      ; silence, DMA stopped, LMC1992 back to normal
+;   bsr    ghs_stop      ; silence, DMA stopped, LMC1992 back to normal
 ;
-; A song is made for 50 frames a second. On a 50 Hz screen, call dhs_play
+; A song is made for 50 frames a second. On a 50 Hz screen, call ghs_play
 ; every VBL; at 60 Hz (colour) or 71 Hz (monochrome), leave a call out now
-; and then, as DHSTEST.S does.
+; and then, as GHSTEST.S does.
 ;
 ; All three must run in supervisor mode. Songs without DMA samples or LMC
 ; commands (header flags 0) touch only the YM and play on any ST; the others
 ; need an STe (or a Falcon/TT with STe sound).
 ;
 ; The song's format (big-endian, offsets from the song's start):
-;    0  "DHS1"
+;    0  "GHS1"
 ;    4  L offset of the frames
 ;    8  L offset of the frame the song loops back to (0: it stops at the end)
 ;   12  L offset of the sample table (0: none)
@@ -41,15 +42,15 @@
 ; goes from there to the end), W DMA mode ($FF8920), W reserved.
 ;-----------------------------------------------------------------------------
 
-DHS_POS		equ	0	; L the next frame
-DHS_LOOP	equ	4	; L the loop frame (0: none)
-DHS_SAMPLES	equ	8	; L the sample table
-DHS_BASE	equ	12	; L the song
-DHS_FLAGS	equ	16	; W the header's flags
-DHS_ON		equ	18	; B playing
-DHS_WAIT	equ	19	; B VBLs waited for the DMA at a sync
-DHS_QADR	equ	20	; L the start of the sample queued last
-DHS_SIZE	equ	24
+GHS_POS		equ	0	; L the next frame
+GHS_LOOP	equ	4	; L the loop frame (0: none)
+GHS_SAMPLES	equ	8	; L the sample table
+GHS_BASE	equ	12	; L the song
+GHS_FLAGS	equ	16	; W the header's flags
+GHS_ON		equ	18	; B playing
+GHS_WAIT	equ	19	; B VBLs waited for the DMA at a sync
+GHS_QADR	equ	20	; L the start of the sample queued last
+GHS_SIZE	equ	24
 
 YM_SELECT	equ	$ffff8800
 DMA_CONTROL	equ	$ffff8901
@@ -67,29 +68,29 @@ MW_DATA		equ	$ffff8922
 MW_MASK		equ	$ffff8924
 
 ;-----------------------------------------------------------------------------
-; dhs_init: a0 = the song. d0.l = 0 ok, -1 not a DHS song.
+; ghs_init: a0 = the song. d0.l = 0 ok, -1 not a GHOST song.
 ;-----------------------------------------------------------------------------
-dhs_init:
+ghs_init:
 	movem.l	d1/a1,-(sp)
-	lea	dhs_vars(pc),a1
-	clr.b	DHS_ON(a1)
-	clr.b	DHS_WAIT(a1)
-	cmp.l	#'DHS1',(a0)
+	lea	ghs_vars(pc),a1
+	clr.b	GHS_ON(a1)
+	clr.b	GHS_WAIT(a1)
+	cmp.l	#'GHS1',(a0)
 	bne.s	.bad
-	move.l	a0,DHS_BASE(a1)
+	move.l	a0,GHS_BASE(a1)
 	move.l	4(a0),d1
 	add.l	a0,d1
-	move.l	d1,DHS_POS(a1)
+	move.l	d1,GHS_POS(a1)
 	move.l	8(a0),d1
 	beq.s	.noloop
 	add.l	a0,d1
-.noloop	move.l	d1,DHS_LOOP(a1)
+.noloop	move.l	d1,GHS_LOOP(a1)
 	move.l	12(a0),d1
 	add.l	a0,d1
-	move.l	d1,DHS_SAMPLES(a1)
-	move.w	18(a0),DHS_FLAGS(a1)
-	bsr	dhs_quiet
-	st	DHS_ON(a1)
+	move.l	d1,GHS_SAMPLES(a1)
+	move.w	18(a0),GHS_FLAGS(a1)
+	bsr	ghs_quiet
+	st	GHS_ON(a1)
 	moveq	#0,d0
 	movem.l	(sp)+,d1/a1
 	rts
@@ -98,23 +99,23 @@ dhs_init:
 	rts
 
 ;-----------------------------------------------------------------------------
-; dhs_play: one frame. Call from the VBL. Keeps all registers.
+; ghs_play: one frame. Call from the VBL. Keeps all registers.
 ;-----------------------------------------------------------------------------
-dhs_play:
+ghs_play:
 	movem.l	d0-d2/a0-a2,-(sp)
-	lea	dhs_vars(pc),a2
-	tst.b	DHS_ON(a2)
+	lea	ghs_vars(pc),a2
+	tst.b	GHS_ON(a2)
 	beq	.out
-	move.l	DHS_POS(a2),a0
+	move.l	GHS_POS(a2),a0
 .next	move.w	(a0)+,d0
 	cmp.w	#$ffff,d0
 	bne.s	.sync
-	move.l	DHS_LOOP(a2),d1		; the end: back to the loop, or stop
+	move.l	GHS_LOOP(a2),d1		; the end: back to the loop, or stop
 	beq.s	.end
 	move.l	d1,a0
 	bra.s	.next
-.end	clr.b	DHS_ON(a2)
-	bsr	dhs_quiet
+.end	clr.b	GHS_ON(a2)
+	bsr	ghs_quiet
 	bra	.out
 
 	; A sync: a frame of only the DMA event $80. The song goes on when the
@@ -130,13 +131,13 @@ dhs_play:
 	move.b	DMA_CM.w,d1
 	lsl.l	#8,d1
 	move.b	DMA_CL.w,d1
-	sub.l	DHS_QADR(a2),d1		; just past the queued sample's start?
+	sub.l	GHS_QADR(a2),d1		; just past the queued sample's start?
 	cmp.l	#16384,d1
 	blo.s	.synced
-	addq.b	#1,DHS_WAIT(a2)
-	cmp.b	#3,DHS_WAIT(a2)
+	addq.b	#1,GHS_WAIT(a2)
+	cmp.b	#3,GHS_WAIT(a2)
 	blo	.out
-.synced	clr.b	DHS_WAIT(a2)
+.synced	clr.b	GHS_WAIT(a2)
 	addq.l	#2,a0			; past $80 and its pad byte
 	bra.s	.next
 
@@ -210,16 +211,16 @@ dhs_play:
 	beq.s	.nodma
 	moveq	#0,d1
 	move.b	(a0)+,d1
-	bsr.s	dhs_dma
+	bsr.s	ghs_dma
 .nodma	move.l	a0,d0			; the next frame is on an even address
 	addq.l	#1,d0
 	and.b	#$fe,d0
-	move.l	d0,DHS_POS(a2)
+	move.l	d0,GHS_POS(a2)
 .out	movem.l	(sp)+,d0-d2/a0-a2
 	rts
 
 ;-----------------------------------------------------------------------------
-; dhs_dma: d1.w = the DMA event, a2 = the variables. Uses d0-d2/a1.
+; ghs_dma: d1.w = the DMA event, a2 = the variables. Uses d0-d2/a1.
 ;   0        stop
 ;   n        start sample n now (the one playing is cut)
 ;   $80+n    queue sample n: it follows the one playing without a gap
@@ -230,7 +231,7 @@ dhs_play:
 ; while the one before plays (repeat on), and the DMA goes on with it at the
 ; end, to the sample. Queued samples have the mode of the one playing.
 ;-----------------------------------------------------------------------------
-dhs_dma:
+ghs_dma:
 	moveq	#0,d0
 	tst.b	d1
 	bmi.s	.queue
@@ -245,7 +246,7 @@ dhs_dma:
 .done	rts
 .loop	move.b	#3,DMA_CONTROL.w	; played round and round...
 	add.l	d2,d0			; ...from the loop start after the first time
-	bra.s	dhs_setstart
+	bra.s	ghs_setstart
 .queue	and.w	#$7f,d1
 	bsr.s	.regs
 	btst	#0,DMA_CONTROL.w
@@ -257,13 +258,13 @@ dhs_dma:
 ; start, d2 is the song's address
 .regs	subq.w	#1,d1
 	lsl.w	#4,d1
-	move.l	DHS_SAMPLES(a2),a1
+	move.l	GHS_SAMPLES(a2),a1
 	add.w	d1,a1
-	move.l	DHS_BASE(a2),d2
+	move.l	GHS_BASE(a2),d2
 	move.l	(a1)+,d0		; start
 	add.l	d2,d0
-	move.l	d0,DHS_QADR(a2)
-	bsr.s	dhs_setstart
+	move.l	d0,GHS_QADR(a2)
+	bsr.s	ghs_setstart
 	move.l	(a1)+,d0		; end
 	add.l	d2,d0
 	swap	d0
@@ -275,8 +276,8 @@ dhs_dma:
 	move.b	d0,DMA_EL.w
 	rts
 
-; dhs_setstart: d0.l = the DMA's start address. Uses d1.
-dhs_setstart:
+; ghs_setstart: d0.l = the DMA's start address. Uses d1.
+ghs_setstart:
 	swap	d0
 	move.b	d0,DMA_SH.w
 	swap	d0
@@ -287,28 +288,28 @@ dhs_setstart:
 	rts
 
 ;-----------------------------------------------------------------------------
-; dhs_stop: silence; the DMA stopped and the LMC1992 as TOS has it, if the
+; ghs_stop: silence; the DMA stopped and the LMC1992 as TOS has it, if the
 ; song used them.
 ;-----------------------------------------------------------------------------
-dhs_stop:
+ghs_stop:
 	movem.l	d0-d1/a0-a1,-(sp)
-	lea	dhs_vars(pc),a1
-	clr.b	DHS_ON(a1)
-	bsr.s	dhs_quiet
-	btst	#1,DHS_FLAGS+1(a1)
+	lea	ghs_vars(pc),a1
+	clr.b	GHS_ON(a1)
+	bsr.s	ghs_quiet
+	btst	#1,GHS_FLAGS+1(a1)
 	beq.s	.nolmc
-	lea	dhs_lmcdefault(pc),a0
+	lea	ghs_lmcdefault(pc),a0
 	moveq	#6-1,d1
 .lmc	move.w	(a0)+,d0
-	bsr.s	dhs_wire
+	bsr.s	ghs_wire
 	dbf	d1,.lmc
 .nolmc	movem.l	(sp)+,d0-d1/a0-a1
 	rts
 
-; dhs_quiet: the YM's three volumes 0, its tone and noise off; the DMA stopped
-dhs_quiet:
+; ghs_quiet: the YM's three volumes 0, its tone and noise off; the DMA stopped
+ghs_quiet:
 	movem.l	d0/a0-a1,-(sp)
-	lea	dhs_vars(pc),a1
+	lea	ghs_vars(pc),a1
 	lea	YM_SELECT.w,a0
 	moveq	#0,d0
 	move.b	#8,(a0)
@@ -321,15 +322,15 @@ dhs_quiet:
 	move.b	(a0),d0
 	or.b	#$3f,d0
 	move.b	d0,2(a0)
-	btst	#0,DHS_FLAGS+1(a1)
+	btst	#0,GHS_FLAGS+1(a1)
 	beq.s	.nodma
 	moveq	#0,d0
 	move.b	d0,DMA_CONTROL.w
 .nodma	movem.l	(sp)+,d0/a0-a1
 	rts
 
-; dhs_wire: d0.w = a Microwire command, sent when the last one is done. Uses d0.
-dhs_wire:
+; ghs_wire: d0.w = a Microwire command, sent when the last one is done. Uses d0.
+ghs_wire:
 	move.l	d1,-(sp)
 	move.w	#2000,d1
 .idle	cmp.w	#$07ff,MW_MASK.w	; the last command shifted out
@@ -344,7 +345,7 @@ dhs_wire:
 
 ; The LMC1992 as TOS sets it: master 0 dB, left and right 0 dB, bass and
 ; treble flat, the YM mixed in
-dhs_lmcdefault:
+ghs_lmcdefault:
 	dc.w	$04e8			; master  40
 	dc.w	$0554			; left    20
 	dc.w	$0514			; right   20
@@ -353,6 +354,6 @@ dhs_lmcdefault:
 	dc.w	$0401			; mix      1
 
 	even
-dhs_vars:
-	ds.b	DHS_SIZE
+ghs_vars:
+	ds.b	GHS_SIZE
 	even

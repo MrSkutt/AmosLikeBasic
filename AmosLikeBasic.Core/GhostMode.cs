@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace AmosLikeBasic
 {
-    // A maxYMiser song kept within what DHS plays (TrackerSong.Mode "DHS"): a player called from the VBL
+    // A maxYMiser song kept within what GHOST plays (TrackerSong.Mode "GHOST"): a player called from the VBL
     // only, so nothing that needs a timer.
     //   Channels 1 – 3  maxYMiser's instruments 1 – 32, without timer effects (the mixer's timer digit:
     //                   5 SID, 9 PWM, B sync buzzer, D digidrum) and without the effects for them (7, 8, 9
@@ -12,10 +12,10 @@ namespace AmosLikeBasic
     //   Channel 4       the STe's DMA: sample instruments (33 and up, a WAV file each), played at their own
     //                   pitch; its effects set the LMC1992: M master, L left, R right, B bass, T treble,
     //                   X the YM in the mix
-    // The song's timers are off (TrackerYmSong.Timers 0), so the tracker plays it as DHS will.
-    public static class DhsMode
+    // The song's timers are off (TrackerYmSong.Timers 0), so the tracker plays it as GHOST will.
+    public static class GhostMode
     {
-        public const string Name = "DHS";
+        public const string Name = "GHOST";
         public const int YmInstruments = 32;
         public const string TimerEffects = "789GIR";
         public const string LmcEffects = "MLRBTX";
@@ -23,7 +23,7 @@ namespace AmosLikeBasic
 
         public static bool Is(TrackerSong song) => song.Mode == Name && song.Ym != null;
 
-        // What the song has that DHS cannot play, each said once (where it is does not matter for asking)
+        // What the song has that GHOST cannot play, each said once (where it is does not matter for asking)
         public static SortedSet<string> Problems(TrackerSong song)
         {
             var found = new SortedSet<string>(StringComparer.Ordinal);
@@ -77,11 +77,11 @@ namespace AmosLikeBasic
             return found;
         }
 
-        // A maxYMiser song made one for DHS: timers off, their digits taken out of the mixer sequences,
+        // A maxYMiser song made one for GHOST: timers off, their digits taken out of the mixer sequences,
         // the effects that need them taken away, channel 4 the DMA's. What was taken is told.
         public static List<string> Convert(TrackerSong song)
         {
-            var ym = song.Ym ?? throw new InvalidOperationException("Only a maxYMiser song can be made a DHS song");
+            var ym = song.Ym ?? throw new InvalidOperationException("Only a maxYMiser song can be made a GHOST song");
             var told = new List<string>();
             var mixers = new HashSet<int>(song.Instruments.Take(YmInstruments).Where(i => i.Ym != null).Select(i => i.Ym!.MixerSeq));
             foreach (var pattern in song.Patterns)
@@ -125,7 +125,7 @@ namespace AmosLikeBasic
             }
             if (effects > 0) told.Add($"{effects} timer effects (7, 8, 9, G, I, R) taken off the lines.");
             if (channel4 > 0) told.Add($"{channel4} notes of maxYMiser's DMA track taken off channel 4: it is the DMA's samples now.");
-            if (ym.Rate != 50) told.Add($"The replay runs at {ym.Rate} Hz; DHS plays at 50 Hz, so the song is taken at 50 Hz when saved.");
+            if (ym.Rate != 50) told.Add($"The replay runs at {ym.Rate} Hz; GHOST plays at 50 Hz, so the song is taken at 50 Hz when saved.");
             ym.Timers = 0;
             song.Channels = 4;
             song.Mode = Name;
@@ -140,12 +140,12 @@ namespace AmosLikeBasic
         public static List<string> AddSampleSequence(TrackerSong song, IReadOnlyList<(string Name, string Sample)> parts,
                                                      int rowsPerPart, bool chain)
         {
-            if (!Is(song)) throw new InvalidOperationException("A sample sequence is for a DHS song's channel 4.");
+            if (!Is(song)) throw new InvalidOperationException("A sample sequence is for a GHOST song's channel 4.");
             if (parts.Count == 0) return new List<string>();
             var told = new List<string>();
             while (song.Instruments.Count < YmInstruments) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
             int first = song.Instruments.Count + 1;
-            if (first + parts.Count - 1 > 33 + 125) throw new InvalidOperationException("DHS has room for 126 samples.");
+            if (first + parts.Count - 1 > 33 + 125) throw new InvalidOperationException("GHOST has room for 126 samples.");
             var lengths = new List<(int Bytes, int Mode)>();
             foreach (var (name, sample) in parts)
             {
@@ -214,7 +214,7 @@ namespace AmosLikeBasic
         // its own: patterns of 64 rows, the note on the first row, the sample's length spread over all of them.
         public static List<string> FitRows(TrackerSong song, int instrument, int rowsWanted)
         {
-            if (!Is(song)) throw new InvalidOperationException("Fitting rows to a sample is for a DHS song's channel 4.");
+            if (!Is(song)) throw new InvalidOperationException("Fitting rows to a sample is for a GHOST song's channel 4.");
             if (instrument <= YmInstruments || instrument > song.Instruments.Count)
                 throw new InvalidOperationException("Only a sample instrument (from 21) plays on channel 4.");
             var inst = song.Instruments[instrument - 1];
@@ -239,7 +239,7 @@ namespace AmosLikeBasic
             if (span < rowsWanted * 2)
                 throw new InvalidOperationException($"{inst.Name} lasts {vbls:0.0} VBL: too short for {rowsWanted} rows (2 VBL a row at least).");
             string Size() => dma.Data.Length > 900_000
-                ? $" At {ChiptuneSynth.DmaRates[dma.Mode & 3]} Hz it is {dma.Data.Length / 1024} KB in the DHS file: it needs an STe with " +
+                ? $" At {ChiptuneSynth.DmaRates[dma.Mode & 3]} Hz it is {dma.Data.Length / 1024} KB in the GHOST file: it needs an STe with " +
                   (dma.Data.Length > 3_500_000 ? "more than 4 MB, so it does not fit; a lower rate or a shorter sample would." : "4 MB.")
                 : "";
             if (notes.Count == 0 || rowsWanted > BlockPatternRows)
@@ -332,7 +332,7 @@ namespace AmosLikeBasic
             return true;
         }
 
-        // Out of DHS: an ordinary maxYMiser song, its timers on again
+        // Out of GHOST: an ordinary maxYMiser song, its timers on again
         public static void Leave(TrackerSong song)
         {
             if (song.Mode != Name) return;
@@ -345,9 +345,9 @@ namespace AmosLikeBasic
             5 => "SID", 9 => "PWM", 0xB => "sync buzzer", 0xD => "digidrum", _ => $"timer {t:X}"
         };
 
-        // What DHS plays, for the help
+        // What GHOST plays, for the help
         public const string Help =
-            "A DHS song is a maxYMiser song kept within what a player called from the VBL alone (50 Hz, no other " +
+            "A GHOST song is a maxYMiser song kept within what a player called from the VBL alone (50 Hz, no other " +
             "interrupts) can play.\n\n" +
             "Channels 1 – 3, the YM: maxYMiser's instruments 1 – 32 and its effects, but nothing that needs a timer. " +
             "The mixer's timer digit (5 SID, 9 PWM, B sync buzzer, D digidrum) and the effects 7, 8, 9 (PWM), G (digidrum), " +
@@ -363,7 +363,7 @@ namespace AmosLikeBasic
             "  Mxx master 00 – 28    Lxx left 00 – 14    Rxx right 00 – 14\n" +
             "  Bxx bass 00 – 0C      Txx treble 00 – 0C (06 flat)\n" +
             "  Xxx the YM in the mix: 00 −12 dB, 01 heard, 02 not heard\n\n" +
-            "Anything else asks first whether the song should become an ordinary maxYMiser song. File → Save as DHS " +
-            "saves it for DHSPLAY.S; it can also be saved for maxYMiser (channels 1 – 3).";
+            "Anything else asks first whether the song should become an ordinary maxYMiser song. File → Save as GHOST " +
+            "saves it for GHSPLAY.S; it can also be saved for maxYMiser (channels 1 – 3).";
     }
 }

@@ -59,7 +59,7 @@ public partial class TrackerWindow : Window
         Pattern.NotePreview += (ch, note) => TryEngine(() => ChiptuneSynth.TrackPreview(_song, Pattern.Instrument, note, ch));
         Pattern.NoteRelease += ChiptuneSynth.TrackPreviewRelease;
         Pattern.MuteChanged += ApplyMutes;
-        Pattern.CursorMoved += FollowDhsChannel;
+        Pattern.CursorMoved += FollowGhostChannel;
         Pattern.Command += OnPatternCommand;
 
         OrderList.SelectionChanged += (_, _) =>
@@ -73,7 +73,7 @@ public partial class TrackerWindow : Window
         InstrumentList.SelectionChanged += (_, _) =>
         {
             if (_loading || InstrumentList.SelectedIndex < 0) return;
-            if (!DhsAllows(Pattern.CursorChannel, InstrumentList.SelectedIndex + 1))
+            if (!GhostAllows(Pattern.CursorChannel, InstrumentList.SelectedIndex + 1))
             {
                 SetStatus(Pattern.CursorChannel == 3
                     ? "Channel 4 is the DMA: it plays samples (instruments from 21, Instrument → Add)."
@@ -255,7 +255,7 @@ public partial class TrackerWindow : Window
         RefreshInstrumentPanel();
         UpdateTitle();
         UpdateStatus();
-        CheckDhs();   // a DHS song as it comes is what later changes are checked against
+        CheckGhost();   // a GHOST song as it comes is what later changes are checked against
     }
 
     private void RefreshOrderList()
@@ -373,16 +373,16 @@ public partial class TrackerWindow : Window
         var cards = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0) };
         // In a song in YM mode, an instrument with a YM part is edited as the chip plays it
         var ymPanel = BuildYmPanel();
-        // A DHS song's channel 4 with no sample yet: how to get one, instead of a YM instrument it cannot play
-        var dhsEmpty = BuildDhsChannel4Panel();
-        panel.Children.Add(dhsEmpty);
+        // A GHOST song's channel 4 with no sample yet: how to get one, instead of a YM instrument it cannot play
+        var ghostEmpty = BuildGhostChannel4Panel();
+        panel.Children.Add(ghostEmpty);
         panel.Children.Add(ymPanel);
         panel.Children.Add(cards);
         _instrumentRefresh.Add(() =>
         {
-            bool empty = DhsChannel4WithoutSample;
+            bool empty = GhostChannel4WithoutSample;
             bool ym = !empty && _song.Ym != null && CurrentInstrument?.Ym != null;
-            dhsEmpty.IsVisible = empty;
+            ghostEmpty.IsVisible = empty;
             ymPanel.IsVisible = ym;
             cards.IsVisible = !ym && !empty;
         });
@@ -466,28 +466,28 @@ public partial class TrackerWindow : Window
         };
         sampleCard.Children.Add(sampleHelp);
 
-        // A DHS song's sample (channel 4, the STe's DMA): only this card, with the instrument's name
-        var dhsName = new TextBox();
-        dhsName.TextChanged += (_, _) =>
+        // A GHOST song's sample (channel 4, the STe's DMA): only this card, with the instrument's name
+        var ghostName = new TextBox();
+        ghostName.TextChanged += (_, _) =>
         {
-            if ((dhsName.Text ?? "") != (CurrentInstrument?.Name ?? ""))
-                EditInstrument("name", i => i.Name = dhsName.Text ?? "", refreshList: true);
+            if ((ghostName.Text ?? "") != (CurrentInstrument?.Name ?? ""))
+                EditInstrument("name", i => i.Name = ghostName.Text ?? "", refreshList: true);
         };
-        var dhsNameRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Margin = new Thickness(0, 0, 0, 4) };
-        dhsNameRow.Children.Add(new TextBlock { Text = "Name", Classes = { "amos-label" }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
-        Grid.SetColumn(dhsName, 1);
-        dhsNameRow.Children.Add(dhsName);
-        sampleCard.Children.Insert(1, dhsNameRow);
-        var dhsHelp = new TextBlock
+        var ghostNameRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Margin = new Thickness(0, 0, 0, 4) };
+        ghostNameRow.Children.Add(new TextBlock { Text = "Name", Classes = { "amos-label" }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+        Grid.SetColumn(ghostName, 1);
+        ghostNameRow.Children.Add(ghostName);
+        sampleCard.Children.Insert(1, ghostNameRow);
+        var ghostHelp = new TextBlock
         {
-            Text = "DHS: the STe's DMA plays it on channel 4, 8-bit mono at the nearest of 6258, 12517, 25033 or 50066 Hz, " +
+            Text = "GHOST: the STe's DMA plays it on channel 4, 8-bit mono at the nearest of 6258, 12517, 25033 or 50066 Hz, " +
                    "at its own pitch whatever the note (NOTE is the pitch it is heard at here). A loop goes from LOOP START to " +
                    "LOOP END over and over; LOOP END at 0 plays it once. Note off stops it.",
             Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, FontSize = 11
         };
-        sampleCard.Children.Add(dhsHelp);
-        var dhsLength = new TextBlock { Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
-        sampleCard.Children.Add(dhsLength);
+        sampleCard.Children.Add(ghostHelp);
+        var ghostLength = new TextBlock { Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        sampleCard.Children.Add(ghostLength);
         var fitRows = new Button { Content = "Fit the rows to it", Focusable = false, HorizontalAlignment = HorizontalAlignment.Left };
         ToolTip.SetTip(fitRows, "Set the speed (S) of its rows on channel 4 so that they last as long as the sample, by the tempo heard");
         fitRows.Click += (_, _) =>
@@ -501,14 +501,14 @@ public partial class TrackerWindow : Window
         var sampleBorder = (Border)sampleCard.Parent!;
         _instrumentRefresh.Add(() =>
         {
-            bool dhsSample = DhsMode.Is(_song) && Pattern.Instrument > DhsMode.YmInstruments && CurrentInstrument?.Ym == null;
-            foreach (var child in cards.Children) child.IsVisible = !dhsSample || child == sampleBorder;
-            dhsNameRow.IsVisible = dhsHelp.IsVisible = dhsLength.IsVisible = fitRows.IsVisible = dhsSample;
-            fitRows.IsEnabled = dhsSample && !string.IsNullOrEmpty(CurrentInstrument?.Sample);
-            sampleHelp.IsVisible = !dhsSample;
-            if (dhsSample) dhsName.Text = CurrentInstrument?.Name ?? "";
-            dhsLength.Text = "";
-            if (dhsSample && CurrentInstrument is { } inst && ChiptuneSynth.DmaSample(inst) is { } dma)
+            bool ghostSample = GhostMode.Is(_song) && Pattern.Instrument > GhostMode.YmInstruments && CurrentInstrument?.Ym == null;
+            foreach (var child in cards.Children) child.IsVisible = !ghostSample || child == sampleBorder;
+            ghostNameRow.IsVisible = ghostHelp.IsVisible = ghostLength.IsVisible = fitRows.IsVisible = ghostSample;
+            fitRows.IsEnabled = ghostSample && !string.IsNullOrEmpty(CurrentInstrument?.Sample);
+            sampleHelp.IsVisible = !ghostSample;
+            if (ghostSample) ghostName.Text = CurrentInstrument?.Name ?? "";
+            ghostLength.Text = "";
+            if (ghostSample && CurrentInstrument is { } inst && ChiptuneSynth.DmaSample(inst) is { } dma)
             {
                 // How long the DMA plays it, and the rows that would fit it at the tempo heard
                 double vbls = dma.Data.Length / ChiptuneSynth.DmaBytesPerVbl(dma.Mode);
@@ -519,8 +519,8 @@ public partial class TrackerWindow : Window
                 {
                     int rows = tempo.Beats * 4;
                     int span = (int)Math.Floor(vbls);
-                    string patterns = rows > DhsMode.BlockPatternRows
-                        ? $" in {(rows + DhsMode.BlockPatternRows - 1) / DhsMode.BlockPatternRows} patterns of {DhsMode.BlockPatternRows}" : "";
+                    string patterns = rows > GhostMode.BlockPatternRows
+                        ? $" in {(rows + GhostMode.BlockPatternRows - 1) / GhostMode.BlockPatternRows} patterns of {GhostMode.BlockPatternRows}" : "";
                     text += $" Tempo heard: about {tempo.Bpm:0.#} BPM, {tempo.Beats} beats." +
                             (span >= rows * 2
                                 ? $" As sixteenths: {rows} rows{patterns} of {(double)span / rows:0.##} VBL ({span} VBL: speeds {span / rows}" +
@@ -529,7 +529,7 @@ public partial class TrackerWindow : Window
                 }
                 else if (sample != null && !_tempos.ContainsKey(key) && !_temposWorkedOut.Contains(key))
                     _ = RefreshWhenTempoKnownAsync(inst.Sample, sample);
-                dhsLength.Text = text;
+                ghostLength.Text = text;
             }
         });
 
@@ -765,13 +765,13 @@ public partial class TrackerWindow : Window
             SetStatus($"Sample {Path.GetFileName(path)}: {sample.Seconds:0.00} s at {sample.Rate} Hz, " +
                       $"tempo about {tempo.Bpm:0.#} BPM ({tempo.Beats} beats)");
         RefreshInstrumentPanel();
-        // A DHS song's sample: the song's rows fitted to it, if wanted
-        if (tempo != null && DhsMode.Is(_song) && Pattern.Instrument > DhsMode.YmInstruments)
+        // A GHOST song's sample: the song's rows fitted to it, if wanted
+        if (tempo != null && GhostMode.Is(_song) && Pattern.Instrument > GhostMode.YmInstruments)
         {
             int rows = Math.Max(1, tempo.Beats * 4);
-            string where = rows > DhsMode.BlockPatternRows
-                ? $"It is longer than a pattern, so it gets places of its own: {(rows + DhsMode.BlockPatternRows - 1) / DhsMode.BlockPatternRows} " +
-                  $"patterns of {DhsMode.BlockPatternRows} rows, the note on the first."
+            string where = rows > GhostMode.BlockPatternRows
+                ? $"It is longer than a pattern, so it gets places of its own: {(rows + GhostMode.BlockPatternRows - 1) / GhostMode.BlockPatternRows} " +
+                  $"patterns of {GhostMode.BlockPatternRows} rows, the note on the first."
                 : "From each note of it on channel 4, or in a place of its own if it has none yet.";
             if (await AskAsync("Fit the rows to it?",
                     $"The sample is about {tempo.Bpm:0.#} BPM, {tempo.Beats} beats. Make its rows on channel 4 last as long as it: " +
@@ -780,13 +780,13 @@ public partial class TrackerWindow : Window
         }
     }
 
-    // The current sample instrument's rows on channel 4 fitted to its length (DhsMode.FitRows)
+    // The current sample instrument's rows on channel 4 fitted to its length (GhostMode.FitRows)
     private void FitRowsToSample(int rows)
     {
         try
         {
             var copy = TrackerSong.FromJson(_song.ToJson());
-            var told = DhsMode.FitRows(copy, Pattern.Instrument, rows);
+            var told = GhostMode.FitRows(copy, Pattern.Instrument, rows);
             Stop();
             PushUndo("fit");
             _song = copy;
@@ -1140,16 +1140,16 @@ public partial class TrackerWindow : Window
                    "it goes round from (without it, it stays on its last step).",
             Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap
         });
-        var dhsNote = new TextBlock
+        var ghostNote = new TextBlock
         {
-            Text = "A DHS song: no timer effects. The mixer's last digit stays 0 (no 5 SID, 9 PWM, B sync buzzer, D digidrum); " +
-                   "the timer's and PWM's settings are not used. Song → What DHS can play tells the rest.",
+            Text = "A GHOST song: no timer effects. The mixer's last digit stays 0 (no 5 SID, 9 PWM, B sync buzzer, D digidrum); " +
+                   "the timer's and PWM's settings are not used. Song → What GHOST can play tells the rest.",
             Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap, Foreground = Brushes.Orange
         };
-        panel.Children.Add(dhsNote);
-        _instrumentRefresh.Add(() => dhsNote.IsVisible = DhsMode.Is(_song));
+        panel.Children.Add(ghostNote);
+        _instrumentRefresh.Add(() => ghostNote.IsVisible = GhostMode.Is(_song));
 
-        // (timer: only for a timer effect, which a DHS song does not have)
+        // (timer: only for a timer effect, which a GHOST song does not have)
         void Number(string label, int min, int max, Func<TrackerYmInstrument, int> get, Action<TrackerYmInstrument, int> set, bool timer = false)
         {
             var box = new NumericUpDown { Minimum = min, Maximum = max, Increment = 1, FormatString = "0", Width = 150, HorizontalAlignment = HorizontalAlignment.Left };
@@ -1161,7 +1161,7 @@ public partial class TrackerWindow : Window
             _instrumentRefresh.Add(() =>
             {
                 var y = CurrentInstrument?.Ym;
-                box.IsEnabled = y != null && !(timer && DhsMode.Is(_song));
+                box.IsEnabled = y != null && !(timer && GhostMode.Is(_song));
                 box.Value = y == null ? null : Math.Clamp(get(y), min, max);
             });
         }
@@ -1263,8 +1263,8 @@ public partial class TrackerWindow : Window
             _instrumentRefresh.Add(() =>
             {
                 var y = CurrentInstrument?.Ym;
-                // (the timer's and the PWM's sequences: not in a DHS song)
-                number.IsEnabled = box.IsEnabled = y != null && !(index >= 6 && DhsMode.Is(_song));
+                // (the timer's and the PWM's sequences: not in a GHOST song)
+                number.IsEnabled = box.IsEnabled = y != null && !(index >= 6 && GhostMode.Is(_song));
                 box.BorderBrush = null;
                 int n = y == null ? 0 : GetYmSeq(y, index);
                 number.Value = n;
@@ -1428,7 +1428,7 @@ public partial class TrackerWindow : Window
 
     private void SongChanged()
     {
-        CheckDhs();
+        CheckGhost();
         _dirty = true;
         UpdateTitle();
         Pattern.InvalidateVisual();
@@ -1436,95 +1436,95 @@ public partial class TrackerWindow : Window
         else if (_playMode == PlayMode.Pattern) TryEngine(() => ChiptuneSynth.TrackUpdate(_song, Pattern.PatternIndex, PositionToPlay));
     }
 
-    // ── DHS: kept within what the VBL player plays ─────────────────────────
+    // ── GHOST: kept within what the VBL player plays ─────────────────────────
 
-    // The song as it was last within DHS (with what it had then that DHS cannot play, if anything), to go
-    // back to when a change goes outside and the song should stay a DHS song
-    private TrackerSong? _dhsSong;
-    private SortedSet<string> _dhsKnown = new();
-    private string? _dhsGood;
-    private bool _dhsAsking;
+    // The song as it was last within GHOST (with what it had then that GHOST cannot play, if anything), to go
+    // back to when a change goes outside and the song should stay a GHOST song
+    private TrackerSong? _ghostSong;
+    private SortedSet<string> _ghostKnown = new();
+    private string? _ghostGood;
+    private bool _ghostAsking;
 
-    private void CheckDhs()
+    private void CheckGhost()
     {
-        if (!DhsMode.Is(_song)) { _dhsSong = null; _dhsGood = null; return; }
-        var now = DhsMode.Problems(_song);
-        if (!ReferenceEquals(_dhsSong, _song) || _dhsGood == null || now.IsSubsetOf(_dhsKnown))
+        if (!GhostMode.Is(_song)) { _ghostSong = null; _ghostGood = null; return; }
+        var now = GhostMode.Problems(_song);
+        if (!ReferenceEquals(_ghostSong, _song) || _ghostGood == null || now.IsSubsetOf(_ghostKnown))
         {
-            _dhsSong = _song;
-            _dhsKnown = now;
-            _dhsGood = _song.ToJson();
+            _ghostSong = _song;
+            _ghostKnown = now;
+            _ghostGood = _song.ToJson();
             return;
         }
-        if (_dhsAsking) return;
-        var added = now.Except(_dhsKnown).ToList();
-        _ = AskLeaveDhsAsync(added);
+        if (_ghostAsking) return;
+        var added = now.Except(_ghostKnown).ToList();
+        _ = AskLeaveGhostAsync(added);
     }
 
-    private async Task AskLeaveDhsAsync(List<string> added)
+    private async Task AskLeaveGhostAsync(List<string> added)
     {
-        _dhsAsking = true;
+        _ghostAsking = true;
         try
         {
-            string text = "DHS cannot play " + string.Join("; ", added) + ".\n\n" +
+            string text = "GHOST cannot play " + string.Join("; ", added) + ".\n\n" +
                           "Its player is called from the VBL alone, so there is nothing that needs a timer, and channel 4 is " +
-                          "the STe's DMA samples. Make the song an ordinary maxYMiser song (no longer saved as DHS), or take " +
+                          "the STe's DMA samples. Make the song an ordinary maxYMiser song (no longer saved as GHOST), or take " +
                           "the change back?";
-            if (await AskAsync("Leave DHS?", text, "Make it maxYMiser", "Take it back"))
+            if (await AskAsync("Leave GHOST?", text, "Make it maxYMiser", "Take it back"))
             {
-                DhsMode.Leave(_song);
-                _dhsSong = null;
+                GhostMode.Leave(_song);
+                _ghostSong = null;
                 UpdateYmMode();
                 SongChanged();
                 SetStatus("The song is an ordinary maxYMiser song now (Undo takes it back).");
             }
-            else if (_dhsGood != null)
+            else if (_ghostGood != null)
             {
                 Stop();
-                _song = TrackerSong.FromJson(_dhsGood);
+                _song = TrackerSong.FromJson(_ghostGood);
                 int row = Pattern.CursorRow;
                 LoadSongIntoUi(keepPositions: true);
                 Pattern.SetCursor(Math.Min(row, _song.Patterns[Pattern.PatternIndex].Rows - 1), Pattern.CursorChannel, Pattern.CursorColumn);
                 SongChanged();
             }
         }
-        finally { _dhsAsking = false; }
+        finally { _ghostAsking = false; }
     }
 
-    private async void MenuToDhs_OnClick(object? sender, RoutedEventArgs e)
+    private async void MenuToGhost_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (_song.Ym == null || DhsMode.Is(_song)) return;
+        if (_song.Ym == null || GhostMode.Is(_song)) return;
         var copy = TrackerSong.FromJson(_song.ToJson());
-        var told = DhsMode.Convert(copy);
-        string text = "The song is kept within what DHS plays from then on: the YM without timer effects on channels 1 – 3, " +
+        var told = GhostMode.Convert(copy);
+        string text = "The song is kept within what GHOST plays from then on: the YM without timer effects on channels 1 – 3, " +
                       "and the STe's DMA samples on channel 4.\n\n" +
                       (told.Count > 0 ? "Taken out:\n" + string.Join("\n", told.Select(t => "  • " + t)) : "Nothing needs to be taken out.") +
                       "\n\n(Undo takes it back.)";
-        if (!await AskAsync("Make it a DHS song?", text, "Make it DHS", "Cancel")) return;
+        if (!await AskAsync("Make it a GHOST song?", text, "Make it GHOST", "Cancel")) return;
         Stop();
-        PushUndo("dhs");
+        PushUndo("ghost");
         _song = copy;
         LoadSongIntoUi(keepPositions: true);
         UpdateYmMode();
         SongChanged();
     }
 
-    // The cursor on a DHS song's channel 4 with no sample instrument chosen (the song has none yet)
-    private bool DhsChannel4WithoutSample =>
-        DhsMode.Is(_song) && Pattern.CursorChannel == 3 && Pattern.Instrument <= DhsMode.YmInstruments;
+    // The cursor on a GHOST song's channel 4 with no sample instrument chosen (the song has none yet)
+    private bool GhostChannel4WithoutSample =>
+        GhostMode.Is(_song) && Pattern.CursorChannel == 3 && Pattern.Instrument <= GhostMode.YmInstruments;
 
-    private StackPanel BuildDhsChannel4Panel()
+    private StackPanel BuildGhostChannel4Panel()
     {
         var panel = new StackPanel { Spacing = 8, Margin = new Thickness(0, 10, 0, 0), MaxWidth = 700, HorizontalAlignment = HorizontalAlignment.Left };
         AddHeading(panel, "CHANNEL 4: THE STE'S DMA");
         panel.Children.Add(new TextBlock
         {
-            Text = "Channel 4 of a DHS song plays samples (instruments from 21), and the song has none yet. Add one and " +
+            Text = "Channel 4 of a GHOST song plays samples (instruments from 21), and the song has none yet. Add one and " +
                    "choose its WAV file, or load a long sound in parts as a sample sequence, chained on channel 4.",
             Classes = { "amos-label" }, TextWrapping = TextWrapping.Wrap
         });
         var add = new Button { Content = "Add a sample...", Focusable = false };
-        add.Click += async (_, _) => await AddDhsSampleAsync();
+        add.Click += async (_, _) => await AddGhostSampleAsync();
         var sequence = new Button { Content = "Load a sample sequence...", Focusable = false };
         sequence.Click += (_, _) => InstSampleSequence_OnClick(null, new RoutedEventArgs());
         panel.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { add, sequence } });
@@ -1532,9 +1532,9 @@ public partial class TrackerWindow : Window
     }
 
     // A new sample instrument for channel 4, its WAV file asked for straight away
-    private async Task AddDhsSampleAsync()
+    private async Task AddGhostSampleAsync()
     {
-        while (_song.Instruments.Count < DhsMode.YmInstruments) _song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+        while (_song.Instruments.Count < GhostMode.YmInstruments) _song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
         PushUndo();
         _song.Instruments.Add(new TrackerInstrument { Name = "Sample " + (_song.Instruments.Count + 1).ToString("X2"), Wave = "Sample" });
         Pattern.Instrument = _song.Instruments.Count;
@@ -1544,32 +1544,32 @@ public partial class TrackerWindow : Window
         await LoadSampleAsync();
     }
 
-    // In a DHS song channel 4 takes the samples (instruments from 33) and channels 1 – 3 the YM's (1 – 32)
-    private bool DhsAllows(int channel, int instrument) =>
-        !DhsMode.Is(_song) || instrument < 1 || (channel == 3) == (instrument > DhsMode.YmInstruments);
+    // In a GHOST song channel 4 takes the samples (instruments from 33) and channels 1 – 3 the YM's (1 – 32)
+    private bool GhostAllows(int channel, int instrument) =>
+        !GhostMode.Is(_song) || instrument < 1 || (channel == 3) == (instrument > GhostMode.YmInstruments);
 
     // The instrument each side had last, taken up again when the cursor goes over
-    private int _dhsYmInstrument = 1, _dhsSampleInstrument, _dhsLastChannel;
+    private int _ghostYmInstrument = 1, _ghostSampleInstrument, _ghostLastChannel;
 
-    private void FollowDhsChannel()
+    private void FollowGhostChannel()
     {
-        if (!DhsMode.Is(_song)) return;
+        if (!GhostMode.Is(_song)) return;
         int c = Pattern.CursorChannel, now = Pattern.Instrument;
-        if (DhsAllows(c, now))
+        if (GhostAllows(c, now))
         {
-            if (now > DhsMode.YmInstruments) _dhsSampleInstrument = now; else if (now >= 1) _dhsYmInstrument = now;
-            if (c != _dhsLastChannel && (c == 3 || _dhsLastChannel == 3)) RefreshInstrumentPanel();
-            _dhsLastChannel = c;
+            if (now > GhostMode.YmInstruments) _ghostSampleInstrument = now; else if (now >= 1) _ghostYmInstrument = now;
+            if (c != _ghostLastChannel && (c == 3 || _ghostLastChannel == 3)) RefreshInstrumentPanel();
+            _ghostLastChannel = c;
             return;
         }
-        _dhsLastChannel = c;
+        _ghostLastChannel = c;
         int next;
         if (c == 3)
         {
-            if (now >= 1) _dhsYmInstrument = now;
-            next = _dhsSampleInstrument > DhsMode.YmInstruments && _dhsSampleInstrument <= _song.Instruments.Count
-                ? _dhsSampleInstrument
-                : _song.Instruments.Count > DhsMode.YmInstruments ? DhsMode.YmInstruments + 1 : 0;
+            if (now >= 1) _ghostYmInstrument = now;
+            next = _ghostSampleInstrument > GhostMode.YmInstruments && _ghostSampleInstrument <= _song.Instruments.Count
+                ? _ghostSampleInstrument
+                : _song.Instruments.Count > GhostMode.YmInstruments ? GhostMode.YmInstruments + 1 : 0;
             if (next == 0)
             {
                 SetStatus("Channel 4 is the DMA: it plays samples. Make one with Instrument → Add.");
@@ -1579,15 +1579,15 @@ public partial class TrackerWindow : Window
         }
         else
         {
-            _dhsSampleInstrument = now;
-            next = Math.Clamp(_dhsYmInstrument, 1, Math.Min(DhsMode.YmInstruments, _song.Instruments.Count));
+            _ghostSampleInstrument = now;
+            next = Math.Clamp(_ghostYmInstrument, 1, Math.Min(GhostMode.YmInstruments, _song.Instruments.Count));
         }
         Pattern.Instrument = next;
         RefreshInstrumentList();
         RefreshInstrumentPanel();
     }
 
-    private void MenuDhsHelp_OnClick(object? sender, RoutedEventArgs e) => _ = ShowReportAsync("What DHS can play", DhsMode.Help);
+    private void MenuGhostHelp_OnClick(object? sender, RoutedEventArgs e) => _ = ShowReportAsync("What GHOST can play", GhostMode.Help);
 
     // The song cannot be played if an instrument has a bad table step
     private bool TryEngine(Action action)
@@ -1898,10 +1898,10 @@ public partial class TrackerWindow : Window
 
     private async void InstAdd_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (DhsMode.Is(_song))
+        if (GhostMode.Is(_song))
         {
-            // A DHS song's instruments from 33 are the DMA's samples (channel 4)
-            while (_song.Instruments.Count < DhsMode.YmInstruments) _song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
+            // A GHOST song's instruments from 33 are the DMA's samples (channel 4)
+            while (_song.Instruments.Count < GhostMode.YmInstruments) _song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
             AddInstrument(new TrackerInstrument { Name = "Sample " + (_song.Instruments.Count + 1), Wave = "Sample" });
             SetStatus("A sample for channel 4 (the DMA): choose its WAV file on the instrument page.");
             return;
@@ -2010,11 +2010,12 @@ public partial class TrackerWindow : Window
         }
     }
 
-    // The song as DHS (Dead Hackers Society): YM registers at 50 Hz, DMA samples and LMC1992 commands
-    // for the 68000 player in DHSPLAY.S, which is written next to it with a test program, if not there
-    private async void ExportDhs_OnClick(object? sender, RoutedEventArgs e)
+    // The song as GHOST: YM registers at 50 Hz, DMA samples and LMC1992 commands
+    // for the 68000 player in GHSPLAY.S, which is written next to it with a test program, if not there (and
+    // the same for rmac: GHSPLAY_RMAC.S, GHSTEST_RMAC.S)
+    private async void ExportGhost_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (!DhsMode.Is(_song)) { SetStatus("Only a DHS song can be saved as DHS: Song → Make it a DHS song."); return; }
+        if (!GhostMode.Is(_song)) { SetStatus("Only a GHOST song can be saved as GHOST: Song → Make it a GHOST song."); return; }
         string name = string.IsNullOrWhiteSpace(_song.Title) ? "song" : _song.Title;
         if (_path != null) name = Path.GetFileNameWithoutExtension(_path);
         // An Atari file name: 8 letters or digits, in capitals
@@ -2022,10 +2023,10 @@ public partial class TrackerWindow : Window
         if (name.Length == 0) name = "SONG";
         var path = await SaveDialog.AskPathAsync(StorageProvider, new FilePickerSaveOptions
         {
-            Title = "Save the song as DHS for the Atari ST",
-            SuggestedFileName = name + ".DHS",
+            Title = "Save the song as GHOST for the Atari ST",
+            SuggestedFileName = name + ".GHS",
             SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound),
-            FileTypeChoices = new[] { new FilePickerFileType("DHS (YM, STe DMA, LMC1992)") { Patterns = new[] { "*.DHS", "*.dhs" } } }
+            FileTypeChoices = new[] { new FilePickerFileType("GHOST (YM, STe DMA, LMC1992)") { Patterns = new[] { "*.GHS", "*.ghs" } } }
         });
         if (path == null) return;
 
@@ -2034,16 +2035,16 @@ public partial class TrackerWindow : Window
         var song = TrackerSong.FromJson(_song.ToJson());
         try
         {
-            SetStatus("Making the DHS file...");
-            var result = await Task.Run(() => ChiptuneSynth.ExportDhs(song));
+            SetStatus("Making the GHOST file...");
+            var result = await Task.Run(() => ChiptuneSynth.ExportGhost(song));
             await File.WriteAllBytesAsync(path, result.Data);
             string folder = Path.GetDirectoryName(path)!;
             var written = new List<string>();
-            foreach (var source in new[] { "DHSPLAY.S", "DHSTEST.S" })
+            foreach (var source in ChiptuneSynth.GhostSources)
             {
                 string to = Path.Combine(folder, source);
                 if (File.Exists(to)) continue;
-                await File.WriteAllTextAsync(to, ChiptuneSynth.DhsSource(source, Path.GetFileName(path).ToUpperInvariant()));
+                await File.WriteAllTextAsync(to, ChiptuneSynth.GhostSource(source, Path.GetFileName(path).ToUpperInvariant()));
                 written.Add(source);
             }
             SetStatus($"Saved {Path.GetFileName(path)} ({result.Data.Length / 1024} KB, {result.Frames / 50.0:0.0} s)"
@@ -2053,7 +2054,55 @@ public partial class TrackerWindow : Window
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            SetStatus("Could not save the DHS file: " + ex.Message);
+            SetStatus("Could not save the GHOST file: " + ex.Message);
+        }
+        finally
+        {
+            ApplyMutes();
+        }
+    }
+
+    // The song in the DHS spec's three files: NAME.GYM (the YM), NAME.GPC (the samples, if channel 4 plays any)
+    // and NAME.GLM (the LMC1992, if it is used)
+    private async void ExportDhs_OnClick(object? sender, RoutedEventArgs e)
+    {
+        if (!GhostMode.Is(_song)) { SetStatus("Only a GHOST song can be saved as DHS: Song → Make it a GHOST song."); return; }
+        string name = string.IsNullOrWhiteSpace(_song.Title) ? "song" : _song.Title;
+        if (_path != null) name = Path.GetFileNameWithoutExtension(_path);
+        name = new string(name.ToUpperInvariant().Where(c => c is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_').Take(8).ToArray());
+        if (name.Length == 0) name = "SONG";
+        var path = await SaveDialog.AskPathAsync(StorageProvider, new FilePickerSaveOptions
+        {
+            Title = "Save the song as DHS (three files) for the Atari ST",
+            SuggestedFileName = name + ".GYM",
+            SuggestedStartLocation = await Workspace.StartFolderAsync(StorageProvider, WorkspaceFolder.Sound),
+            FileTypeChoices = new[] { new FilePickerFileType("DHS: the YM file, with .GPC and .GLM next to it") { Patterns = new[] { "*.GYM", "*.gym" } } }
+        });
+        if (path == null) return;
+
+        Stop();
+        ReleasePageNotes();
+        var song = TrackerSong.FromJson(_song.ToJson());
+        try
+        {
+            SetStatus("Making the DHS files...");
+            var result = await Task.Run(() => ChiptuneSynth.ExportDhs(song));
+            string stem = Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path));
+            var written = new List<string>();
+            foreach (var (ext, data) in new[] { (".GYM", result.Ym), (".GPC", result.Pcm), (".GLM", result.Lmc) })
+            {
+                if (data == null) continue;
+                await File.WriteAllBytesAsync(stem + ext, data);
+                written.Add($"{Path.GetFileName(stem + ext)} ({data.Length / 1024} KB)");
+            }
+            SetStatus($"Saved {string.Join(", ", written)}: {result.Frames / 50.0:0.0} s"
+                      + (result.Pcm != null ? $", samples at {result.Rate} Hz" : ""));
+            if (result.Warnings.Count > 0)
+                _ = ShowReportAsync("Saved " + Path.GetFileName(path), string.Join("\n\n", result.Warnings));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            SetStatus("Could not save the DHS files: " + ex.Message);
         }
         finally
         {
@@ -2064,18 +2113,19 @@ public partial class TrackerWindow : Window
     private void UpdateYmMode()
     {
         MenuSaveSndh.IsEnabled = _song.Ym != null;
-        MenuSaveDhs.IsEnabled = DhsMode.Is(_song);
-        MenuToDhs.IsEnabled = _song.Ym != null && !DhsMode.Is(_song);
-        MenuSampleSequence.IsEnabled = DhsMode.Is(_song);
+        MenuSaveGhost.IsEnabled = GhostMode.Is(_song);
+        MenuSaveDhs.IsEnabled = GhostMode.Is(_song);
+        MenuToGhost.IsEnabled = _song.Ym != null && !GhostMode.Is(_song);
+        MenuSampleSequence.IsEnabled = GhostMode.Is(_song);
         MenuConvert.IsEnabled = _song.Ym != null || _song.Mode != null;
         UpdateTitle();
     }
 
-    // A long sound in parts for a DHS song's channel 4: the files as instruments from 33 (raw ones made WAV
+    // A long sound in parts for a GHOST song's channel 4: the files as instruments from 33 (raw ones made WAV
     // files next to them first), and, if asked, chained on channel 4 with rows that fit each part
     private async void InstSampleSequence_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (!DhsMode.Is(_song)) { SetStatus("A sample sequence is for a DHS song: New → DHS, or Song → Make it a DHS song."); return; }
+        if (!GhostMode.Is(_song)) { SetStatus("A sample sequence is for a GHOST song: New → GHOST, or Song → Make it a GHOST song."); return; }
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Load a sample sequence (the parts in name order)",
@@ -2126,7 +2176,7 @@ public partial class TrackerWindow : Window
             }
             Stop();
             var copy = TrackerSong.FromJson(_song.ToJson());
-            var told = DhsMode.AddSampleSequence(copy, parts, rows, chain);
+            var told = GhostMode.AddSampleSequence(copy, parts, rows, chain);
             if (tempo != null)
             {
                 double seconds = anyRaw ? tempo.Seconds * ChiptuneSynth.DmaRates[1] / rate : tempo.Seconds;
@@ -2226,8 +2276,8 @@ public partial class TrackerWindow : Window
 
     private async void InstClone_OnClick(object? sender, RoutedEventArgs e)
     {
-        bool dhsSample = DhsMode.Is(_song) && Pattern.Instrument > DhsMode.YmInstruments;
-        if (!dhsSample && !await LeaveYmModeAsync("more than its 32 instruments")) return;
+        bool ghostSample = GhostMode.Is(_song) && Pattern.Instrument > GhostMode.YmInstruments;
+        if (!ghostSample && !await LeaveYmModeAsync("more than its 32 instruments")) return;
         var inst = CurrentInstrument;
         if (inst == null) return;
         // A copy via JSON, so that lists are not shared
@@ -2311,7 +2361,7 @@ public partial class TrackerWindow : Window
 
     private async void InstDelete_OnClick(object? sender, RoutedEventArgs e)
     {
-        if (!(DhsMode.Is(_song) && Pattern.Instrument > DhsMode.YmInstruments) && !await LeaveYmModeAsync("fewer than its 32 instruments")) return;
+        if (!(GhostMode.Is(_song) && Pattern.Instrument > GhostMode.YmInstruments) && !await LeaveYmModeAsync("fewer than its 32 instruments")) return;
         int n = Pattern.Instrument;
         if (n < 1 || n > _song.Instruments.Count) return;
         PushUndo();
@@ -2351,7 +2401,7 @@ public partial class TrackerWindow : Window
         if (kind == null) { KeepTypingFocus(); return; }
         if (!await ConfirmDiscardAsync()) return;
         TrackerSong song;
-        if (kind is "maxYMiser" or "DHS")
+        if (kind is "maxYMiser" or "GHOST")
         {
             var template = await MaxYMiserTemplateAsync();
             if (template == null) { KeepTypingFocus(); return; }
@@ -2361,7 +2411,7 @@ public partial class TrackerWindow : Window
                 SetStatus("Could not start a maxYMiser song from the template: " + ex.Message);
                 return;
             }
-            if (kind == "DHS") DhsMode.Convert(song);
+            if (kind == "GHOST") GhostMode.Convert(song);
         }
         else
         {
@@ -2394,10 +2444,10 @@ public partial class TrackerWindow : Window
         ("maxYMiser", "SNDH – maxYMiser on the Atari ST",
          "The Atari ST's sound chip, as in gwEm's maxYMiser: three tracks, 32 instruments made of sequences, two effects on a line. " +
          "Saved as an SNDH file that maxYMiser opens and SNDH players play.", true),
-        ("DHS", "DHS – the Atari ST from the VBL (Dead Hackers Society)",
+        ("GHOST", "GHOST – the Atari ST from the VBL",
          "A maxYMiser song kept within what a small 68000 player called once a frame can play: the YM without timer effects " +
-         "on channels 1 – 3, and the STe's DMA samples and volume chip (LMC1992) on channel 4. Saved as DHS for DHSPLAY.S, " +
-         "and for maxYMiser too.", true),
+         "on channels 1 – 3, and the STe's DMA samples and volume chip (LMC1992) on channel 4. Saved as GHOST (one file, for GHSPLAY.S) " +
+         "or DHS (three files: YM, PCM, LMC), and for maxYMiser too.", true),
         ("SID", "SID – the Commodore 64",
          "The C64's SID chip, saved to play on a C64. Not yet.", false),
     };
@@ -3073,7 +3123,7 @@ public partial class TrackerWindow : Window
     private void UpdateTitle()
     {
         string name = _path != null ? Path.GetFileName(_path) : "untitled";
-        string mode = DhsMode.Is(_song) ? " (DHS)" : _song.Ym != null ? " (maxYMiser)" : _song.Mode != null ? $" ({_song.Mode})" : "";
+        string mode = GhostMode.Is(_song) ? " (GHOST)" : _song.Ym != null ? " (maxYMiser)" : _song.Mode != null ? $" ({_song.Mode})" : "";
         Title = $"Tracker - {name}{mode}{(_dirty ? " *" : "")}";
     }
 

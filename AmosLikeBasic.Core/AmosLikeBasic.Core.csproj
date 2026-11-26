@@ -16,9 +16,11 @@
     </ItemGroup>
 
     <ItemGroup>
-        <!-- The DHS player for the Atari, written next to a song saved as DHS -->
-        <EmbeddedResource Include="..\Atari\DHS\DHSPLAY.S" LogicalName="DHSPLAY.S" />
-        <EmbeddedResource Include="..\Atari\DHS\DHSTEST.S" LogicalName="DHSTEST.S" />
+        <!-- The GHOST player for the Atari, written next to a song saved as GHOST -->
+        <EmbeddedResource Include="..\Atari\GHOST\GHSPLAY.S" LogicalName="GHSPLAY.S" />
+        <EmbeddedResource Include="..\Atari\GHOST\GHSTEST.S" LogicalName="GHSTEST.S" />
+        <EmbeddedResource Include="..\Atari\GHOST\GHSPLAY_RMAC.S" LogicalName="GHSPLAY_RMAC.S" />
+        <EmbeddedResource Include="..\Atari\GHOST\GHSTEST_RMAC.S" LogicalName="GHSTEST_RMAC.S" />
     </ItemGroup>
 
     <ItemGroup>

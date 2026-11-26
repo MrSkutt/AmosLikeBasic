@@ -1,24 +1,26 @@
 ;-----------------------------------------------------------------------------
-; DHSTEST.S - plays SONG.DHS from the VBL until SPACE is pressed. Devpac.
+; GHSTEST_RMAC.S - plays SONG.GHS from the VBL until SPACE is pressed. rmac.
 ;
 ; The player is called as a routine from the VBL (see vbl below), so
-; DHSPLAY.S can be taken out and used as it is. When the tracker saves a
-; song as DHS, it writes this file with DHSPLAY.S pasted in where it is
-; included, so that Devpac needs only this file and the song.
+; GHSPLAY_RMAC.S can be taken out and used as it is. When the tracker saves
+; a song as GHOST, it writes this file with GHSPLAY_RMAC.S pasted in where it
+; is included, so that it is one file. Build it, next to the song, with:
+;   rmac -p -o GHSTEST.PRG GHSTEST_RMAC.S
+; (GHSTEST.S is the same for Devpac: both give the same program.)
 ;
-; A DHS song is made for 50 frames a second. The screen's VBL can come 50,
+; A GHOST song is made for 50 frames a second. The screen's VBL can come 50,
 ; 60 (a colour screen at 60 Hz) or 71 times a second (the monochrome
 ; monitor), so the VBL here counts and leaves out a call now and then: the
 ; player is called 50 times a second on average whatever the screen.
 ;
-; With SHOWTIME 1 the screen's border is red while dhs_play runs: its height
+; With SHOWTIME 1 the screen's border is red while ghs_play runs: its height
 ; is the player's time (a line is 512 cycles; 1 % of a 50 Hz frame is about
 ; 3 lines).
 ;-----------------------------------------------------------------------------
 
 SHOWTIME	equ	1
 
-	section	text
+	.text
 
 start:	clr.l	-(sp)			; supervisor mode
 	move.w	#$20,-(sp)		; Super
@@ -27,7 +29,7 @@ start:	clr.l	-(sp)			; supervisor mode
 	move.l	d0,old_ssp
 
 	lea	song,a0
-	bsr	dhs_init
+	bsr	ghs_init
 	tst.l	d0
 	bne.s	.notdhs
 
@@ -43,26 +45,26 @@ start:	clr.l	-(sp)			; supervisor mode
 	bne.s	.colour
 	move.w	#71,vbl_hz
 	bra.s	.hz
-.colour	btst	#1,$ffff820a.w			; the sync mode: bit 1 set is 50 Hz
+.colour:	btst	#1,$ffff820a.w			; the sync mode: bit 1 set is 50 Hz
 	bne.s	.hz
 	move.w	#60,vbl_hz
-.hz
+.hz:
 	move.w	$ffff8240.w,old_colour
 	move.l	$70.w,old_vbl
 	move.l	#vbl,$70.w		; our VBL first, then the system's
 
-.key	move.w	#7,-(sp)		; Crawcin
+.key:	move.w	#7,-(sp)		; Crawcin
 	trap	#1
 	addq.l	#2,sp
 	cmp.b	#' ',d0
 	bne.s	.key
 
 	move.l	old_vbl,$70.w
-	bsr	dhs_stop
+	bsr	ghs_stop
 	move.w	old_colour,$ffff8240.w
 	bra.s	.quit
 
-.notdhs	pea	text_bad
+.notdhs:	pea	text_bad
 	move.w	#9,-(sp)
 	trap	#1
 	addq.l	#6,sp
@@ -70,7 +72,7 @@ start:	clr.l	-(sp)			; supervisor mode
 	trap	#1
 	addq.l	#2,sp
 
-.quit	move.l	old_ssp,-(sp)		; back to user mode
+.quit:	move.l	old_ssp,-(sp)		; back to user mode
 	move.w	#$20,-(sp)
 	trap	#1
 	addq.l	#6,sp
@@ -89,35 +91,35 @@ vbl:
 	sub.w	vbl_hz,d0
 	move.w	d0,vbl_count
 
-	ifne	SHOWTIME
+	.if	SHOWTIME
 	move.w	#1400,d0		; wait for the visible top border, so that
-.wait	dbf	d0,.wait		; the time bar is seen (the VBL comes in the
+.wait:	dbf	d0,.wait		; the time bar is seen (the VBL comes in the
 	move.w	#$700,$ffff8240.w	; blanking, which is not shown)
-	endc
+	.endif
 
-	bsr	dhs_play
+	bsr	ghs_play
 
-	ifne	SHOWTIME
+	.if	SHOWTIME
 	move.w	old_colour,$ffff8240.w
-	endc
+	.endif
 	bra.s	.done
-.skip	move.w	d0,vbl_count
-.done	move.l	(sp)+,d0
+.skip:	move.w	d0,vbl_count
+.done:	move.l	(sp)+,d0
 	move.l	old_vbl,-(sp)
 	rts
 
-	include	"DHSPLAY.S"
+	include	"GHSPLAY_RMAC.S"
 
-	section	data
+	.data
 text_play:
-	dc.b	27,"E","DHS player test - SPACE to quit",13,10,0
+	dc.b	27,"E","GHOST player test - SPACE to quit",13,10,0
 text_bad:
-	dc.b	27,"E","SONG.DHS is not a DHS song. Press a key.",13,10,0
+	dc.b	27,"E","SONG.GHS is not a GHOST song. Press a key.",13,10,0
 	even
-song:	incbin	"SONG.DHS"
+song:	incbin	"SONG.GHS"
 	even
 
-	section	bss
+	.bss
 old_ssp:	ds.l	1
 old_vbl:	ds.l	1
 old_colour:	ds.w	1

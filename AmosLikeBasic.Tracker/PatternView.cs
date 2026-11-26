@@ -293,9 +293,9 @@ public class PatternView : Control
         var instBrush = title;
         var effBrush = label;
         var volBrush = new SolidColorBrush(Color.FromRgb(70, 190, 110));
-        // A DHS song's queued samples (Q on channel 4): they follow the one before, not start at the row
+        // A GHOST song's queued samples (Q on channel 4): they follow the one before, not start at the row
         var chainBrush = new SolidColorBrush(Color.FromRgb(70, 170, 230));
-        bool dhs = Song != null && DhsMode.Is(Song);
+        bool ghost = Song != null && GhostMode.Is(Song);
 
         var (s0, s1, sc0, sc1) = HasSelection ? SelectionOrCursor() : (-1, -1, -1, -1);
 
@@ -324,7 +324,7 @@ public class PatternView : Control
                 string note = TrackerCell.NoteName(cell.Note);
                 string inst = cell.Instrument == 0 ? ".." : cell.Instrument.ToString("X2", CultureInfo.InvariantCulture);
                 string eff = cell.Effect == '\0' ? "..." : cell.Effect + cell.Param.ToString("X2", CultureInfo.InvariantCulture);
-                bool chained = dhs && c == 3 && cell.Note >= 0 && (cell.Effect == 'Q' || cell.Effect2 == 'Q');
+                bool chained = ghost && c == 3 && cell.Note >= 0 && (cell.Effect == 'Q' || cell.Effect2 == 'Q');
                 if (chained)
                 {
                     // A line down the note's side: the sound goes on into it without a new start

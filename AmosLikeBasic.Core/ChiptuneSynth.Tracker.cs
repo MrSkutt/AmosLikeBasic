@@ -210,9 +210,9 @@ namespace AmosLikeBasic
                 ? CompileInstrument(song.Instruments[instrument - 1], instrument) : DefaultInstrument;
             int tempo = Math.Clamp(song.Tempo, 32, 255);
             var ym = song.Ym;
-            bool dhs = DhsMode.Is(song);
-            // (a DHS song's channel 4 plays its samples at their own pitch, as the DMA does)
-            if (dhs && channel == 4 && instrument >= 1 && instrument <= song.Instruments.Count) note = song.Instruments[instrument - 1].SampleNote;
+            bool ghost = GhostMode.Is(song);
+            // (a GHOST song's channel 4 plays its samples at their own pitch, as the DMA does)
+            if (ghost && channel == 4 && instrument >= 1 && instrument <= song.Instruments.Count) note = song.Instruments[instrument - 1].SampleNote;
             _trackCommands.Enqueue(() =>
             {
                 int c = channel - 1;
@@ -225,8 +225,8 @@ namespace AmosLikeBasic
                     _trackUsed = used;
                     // A song in YM mode: the chip plays the notes tried on the keys too
                     if (ym == null) { _ym = null; _ymData = null; }
-                    else if (_ym == null || _ymData?.Song != ym) StartYm(CompileYm(ym, dhs));
-                    else _ymData = CompileYm(ym, dhs);   // the sequences as edited
+                    else if (_ym == null || _ymData?.Song != ym) StartYm(CompileYm(ym, ghost));
+                    else _ymData = CompileYm(ym, ghost);   // the sequences as edited
                 }
                 if (_ymData != null && c < 3)
                 {
@@ -737,7 +737,7 @@ namespace AmosLikeBasic
             _trackJump = false;
             _trackRowDelay = 0;
             _trackRepeatingRow = false;
-            _dhsHold = 0;
+            _ghostHold = 0;
             Volatile.Write(ref _track, req.Data);
         }
 
@@ -797,16 +797,16 @@ namespace AmosLikeBasic
                 YmFrame();
                 return;
             }
-            // A DHS song waits at a queued sample's row (a VBL or two at most) until channel 4 has gone on to it
-            if (_trackTick == 0 && !_trackRepeatingRow && _ymData is { Dhs: true } && d.Channels >= 4 && !_trackChannels[3].Sfx)
+            // A GHOST song waits at a queued sample's row (a VBL or two at most) until channel 4 has gone on to it
+            if (_trackTick == 0 && !_trackRepeatingRow && _ymData is { Ghost: true } && d.Channels >= 4 && !_trackChannels[3].Sfx)
             {
                 var v = _voices[3];
-                if (DhsQueued(d.Patterns[d.Order[_trackOrder]][_trackRow][3]) && v.NextSample != null && !v.ChainSwitched && _dhsHold < 2)
+                if (GhostQueued(d.Patterns[d.Order[_trackOrder]][_trackRow][3]) && v.NextSample != null && !v.ChainSwitched && _ghostHold < 2)
                 {
-                    _dhsHold++;
+                    _ghostHold++;
                     return;
                 }
-                _dhsHold = 0;
+                _ghostHold = 0;
             }
             // A row repeated by EE plays its effects again, but not its notes
             if (_trackTick == 0 && !_trackRepeatingRow) ReadRow(d);
@@ -857,9 +857,9 @@ namespace AmosLikeBasic
                     if (brk) breakRow = 0;
                     continue;
                 }
-                if (_ymData is { Dhs: true } && !ch.Sfx)
+                if (_ymData is { Ghost: true } && !ch.Sfx)
                 {
-                    // A DHS song's channel 4, the STe's DMA: a note starts the sample at its own pitch, note off
+                    // A GHOST song's channel 4, the STe's DMA: a note starts the sample at its own pitch, note off
                     // stops it; its effects are the volume chip's (LMC1992), not played here
                     ch.Effect = '\0';
                     ch.Param = 0;
@@ -875,7 +875,7 @@ namespace AmosLikeBasic
                     if (cell.Effect == 'S' && cell.Param >= 2) _trackSpeed = cell.Param;
                     if (cell.Effect2 == 'S' && cell.Param2 >= 2) _trackSpeed = cell.Param2;
                     // A note with Q follows the sample before without a gap: the voice has gone on to it already
-                    // (the song waited here for it, as DHS's player waits for the DMA)
+                    // (the song waited here for it, as GHOST's player waits for the DMA)
                     var v = _voices[c];
                     if (cell.Note == TrackerCell.NoteOff)
                     {
@@ -884,14 +884,14 @@ namespace AmosLikeBasic
                     }
                     else if (cell.Note >= 0 && ch.Inst != null)
                     {
-                        if (DhsQueued(cell) && v.ChainSwitched) v.ChainSwitched = false;
+                        if (GhostQueued(cell) && v.ChainSwitched) v.ChainSwitched = false;
                         else
                         {
                             v.NextSample = null;
                             v.ChainSwitched = false;
                             TriggerTrackNote(c, (int)Math.Round(69 + 12 * Math.Log2(ch.Inst.SampleBaseFreq / 440)));
                         }
-                        QueueDhsSample(d, c);
+                        QueueGhostSample(d, c);
                     }
                     continue;
                 }
@@ -1115,15 +1115,15 @@ namespace AmosLikeBasic
         private static void VolumeSlide(TrackChannel ch, int up, int down) =>
             ch.Vol = Math.Clamp(up > 0 ? ch.Vol + up : ch.Vol - down, 0, 64);
 
-        // ── DHS: samples in a chain on channel 4 ─────────────────────────────
+        // ── GHOST: samples in a chain on channel 4 ─────────────────────────────
 
-        private static int _dhsHold;
+        private static int _ghostHold;
 
-        private static bool DhsQueued(TrackerCell cell) => cell.Note >= 0 && (cell.Effect == 'Q' || cell.Effect2 == 'Q');
+        private static bool GhostQueued(TrackerCell cell) => cell.Note >= 0 && (cell.Effect == 'Q' || cell.Effect2 == 'Q');
 
-        // The sample of the next note on the channel, queued on its voice if that note is a Q (as DHS's player
+        // The sample of the next note on the channel, queued on its voice if that note is a Q (as GHOST's player
         // queues it on the DMA the frame after this one began). Looked for in the order the song plays.
-        private static void QueueDhsSample(TrackData d, int c)
+        private static void QueueGhostSample(TrackData d, int c)
         {
             var ch = _trackChannels[c];
             var v = _voices[c];
@@ -1145,7 +1145,7 @@ namespace AmosLikeBasic
                 var cell = d.Patterns[d.Order[order]][row][c];
                 if (cell.Instrument > 0) inst = cell.Instrument;
                 if (cell.Note == TrackerCell.NoNote) continue;
-                if (!DhsQueued(cell) || inst < 1 || inst > d.Instruments.Length) return;
+                if (!GhostQueued(cell) || inst < 1 || inst > d.Instruments.Length) return;
                 var next = d.Instruments[inst - 1];
                 if (next.Sample == null) return;
                 v.NextSample = next.Sample;

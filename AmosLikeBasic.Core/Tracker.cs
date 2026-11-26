@@ -40,7 +40,7 @@ namespace AmosLikeBasic
 
         // What the song is made for, and so what it is kept within: null the tracker's own (FULL), "MOD"
         // (ProTracker's four channels and 31 instruments) or "XM" (FastTracker 2's 128 instruments).
-        // A maxYMiser song has its Ym part instead, and "DHS" when it is kept within what DHS plays (DhsMode).
+        // A maxYMiser song has its Ym part instead, and "GHOST" when it is kept within what GHOST plays (GhostMode).
         public string? Mode { get; set; }
 
         public List<TrackerInstrument> Instruments { get; set; } = new();
@@ -305,7 +305,9 @@ namespace AmosLikeBasic
                     throw new FormatException("A channel's order points to a pattern that does not exist");
             song.TrimChannelOrder();
             song.Ym = file.Ym;
-            song.Mode = file.Mode is "MOD" or "XM" || (file.Mode == DhsMode.Name && file.Ym != null) ? file.Mode : null;
+            // ("DHS": the GHOST mode's name before, in songs saved then)
+            string? mode = file.Mode == "DHS" ? GhostMode.Name : file.Mode;
+            song.Mode = mode is "MOD" or "XM" || (mode == GhostMode.Name && file.Ym != null) ? mode : null;
             foreach (var inst in song.Instruments) inst.Table ??= new();
             return song;
         }

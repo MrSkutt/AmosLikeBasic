@@ -27,8 +27,10 @@
                 <MenuItem Header="Save as _XM (FastTracker 2)..." Click="ExportXm_OnClick"/>
                 <MenuItem Header="Save as S_NDH for maxYMiser..." Name="MenuSaveSndh" Click="ExportSndh_OnClick"
                           ToolTip.Tip="A song read from maxYMiser, saved in its own file with the changes made, to open in maxYMiser again"/>
-                <MenuItem Header="Save as _DHS for the Atari ST..." Name="MenuSaveDhs" Click="ExportDhs_OnClick"
-                          ToolTip.Tip="A song in YM mode as a YM register dump at 50 Hz, with STe DMA samples on channel 4, for a small 68000 player called from the VBL (DHSPLAY.S, written next to it)"/>
+                <MenuItem Header="Save as _GHOST for the Atari ST..." Name="MenuSaveGhost" Click="ExportGhost_OnClick"
+                          ToolTip.Tip="A song in YM mode as a YM register dump at 50 Hz, with STe DMA samples on channel 4, for a small 68000 player called from the VBL (GHSPLAY.S, written next to it)"/>
+                <MenuItem Header="Save as _DHS for the Atari ST (three files)..." Name="MenuSaveDhs" Click="ExportDhs_OnClick"
+                          ToolTip.Tip="A GHOST song in the DHS spec's three files: the YM's 14 registers a VBL (.GYM), the PCM sample sequence (.GPC) and the LMC1992 commands (.GLM), for a player of your own"/>
                 <Separator/>
                 <MenuItem Header="_Close" Name="MenuClose" Click="MenuClose_OnClick"/>
             </MenuItem>
@@ -48,9 +50,9 @@
                 <Separator/>
                 <MenuItem Header="_Convert to FULL (the tracker's own)" Name="MenuConvert" Click="MenuConvert_OnClick"
                           ToolTip.Tip="A MOD, XM or maxYMiser song as the tracker's own: all the tracker can do, but no longer kept within its format"/>
-                <MenuItem Header="Make it a _DHS song (Atari ST, from the VBL)" Name="MenuToDhs" Click="MenuToDhs_OnClick"
-                          ToolTip.Tip="A maxYMiser song kept within what DHS plays: the timer effects taken out, channel 4 the STe's DMA samples"/>
-                <MenuItem Header="What D_HS can play..." Click="MenuDhsHelp_OnClick"/>
+                <MenuItem Header="Make it a _GHOST song (Atari ST, from the VBL)" Name="MenuToGhost" Click="MenuToGhost_OnClick"
+                          ToolTip.Tip="A maxYMiser song kept within what GHOST plays: the timer effects taken out, channel 4 the STe's DMA samples"/>
+                <MenuItem Header="What G_HOST can play..." Click="MenuGhostHelp_OnClick"/>
             </MenuItem>
             <MenuItem Header="_Instrument">
                 <MenuItem Header="_Edit instrument" InputGesture="F4" Click="InstrumentTab_OnClick"/>
@@ -58,7 +60,7 @@
                 <MenuItem Header="_Clone" Click="InstClone_OnClick"/>
                 <MenuItem Header="_Delete" Click="InstDelete_OnClick"/>
                 <MenuItem Header="Load sample _sequence..." Name="MenuSampleSequence" Click="InstSampleSequence_OnClick"
-                          ToolTip.Tip="A DHS song: a long sound in parts (WAV or raw 8-bit files), as samples for channel 4, chained one after another without a gap"/>
+                          ToolTip.Tip="A GHOST song: a long sound in parts (WAV or raw 8-bit files), as samples for channel 4, chained one after another without a gap"/>
                 <Separator/>
                 <MenuItem Header="_Library..." Click="InstLibrary_OnClick"/>
                 <MenuItem Header="_Simplify" Click="InstSimplify_OnClick"/>

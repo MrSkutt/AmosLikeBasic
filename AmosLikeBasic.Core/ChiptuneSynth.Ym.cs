@@ -23,7 +23,7 @@ namespace AmosLikeBasic
             public int[] Repeat = Array.Empty<int>();
             public int[]?[] Digi = new int[]?[9];   // [1 – 8]
             public bool[] Skip = Array.Empty<bool>();   // places the replay passes over (a loop mark, $FD, in a track)
-            public bool Dhs;                             // a DHS song: channel 4 is the DMA's samples, at their own pitch
+            public bool Ghost;                             // a GHOST song: channel 4 is the DMA's samples, at their own pitch
         }
 
         // What a channel keeps, as the replay's instrument buffer
@@ -75,13 +75,13 @@ namespace AmosLikeBasic
         // The digidrums of each original file, read once
         private static readonly ConditionalWeakTable<string, int[]?[]> _ymDigis = new();
 
-        private static YmSongData CompileYm(TrackerYmSong song, bool dhs = false) => CompileYm(song, null, dhs);
+        private static YmSongData CompileYm(TrackerYmSong song, bool ghost = false) => CompileYm(song, null, ghost);
 
-        private static YmSongData CompileYm(TrackerYmSong song, TrackerSong? whole, bool dhs = false)
+        private static YmSongData CompileYm(TrackerYmSong song, TrackerSong? whole, bool ghost = false)
         {
             var data = new YmSongData
             {
-                Dhs = dhs || (whole != null && DhsMode.Is(whole)),
+                Ghost = ghost || (whole != null && GhostMode.Is(whole)),
                 Song = song,
                 Seq = song.Sequences.Select(q => q.Steps.ToArray()).ToArray(),
                 Repeat = song.Sequences.Select(q => q.Repeat).ToArray()
@@ -125,8 +125,8 @@ namespace AmosLikeBasic
         }
 
         // Whether the chip plays a channel (in YM mode, channels 1 – 3; the fourth is not played)
-        // (in a DHS song channel 4 is the DMA's: a sample channel of the tracker's own)
-        private static bool YmChannel(int c) => _ymData != null && c < (_ymData.Dhs ? 3 : 4) && !_trackChannels[c].Sfx;
+        // (in a GHOST song channel 4 is the DMA's: a sample channel of the tracker's own)
+        private static bool YmChannel(int c) => _ymData != null && c < (_ymData.Ghost ? 3 : 4) && !_trackChannels[c].Sfx;
 
         private static TrackerYmInstrument? YmInstrumentOf(int n, TrackInstrument[] instruments) =>
             n >= 1 && n <= instruments.Length ? instruments[n - 1].Ym : null;
@@ -424,7 +424,7 @@ namespace AmosLikeBasic
 
         // The chip's registers from the three channels, once a tick. The noise and the buzzer are one for
         // the chip: the highest channel that uses them sets them, as maxYMiser's replay does.
-        // While set, each frame's registers are handed to it after they are written (for DHS export):
+        // While set, each frame's registers are handed to it after they are written (for GHOST export):
         // registers 0 – 13 as written this frame, and whether 13 was written (it starts the envelope again)
         internal static Action<byte[], bool, bool>? YmRecorder;
         private static readonly byte[] _ymOut = new byte[14];

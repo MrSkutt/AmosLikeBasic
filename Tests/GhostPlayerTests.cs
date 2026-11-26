@@ -2,11 +2,11 @@ using System.Diagnostics;
 
 namespace AmosLikeBasic.Tests;
 
-// The 68000 player for DHS songs (Atari/DHS/DHSPLAY.S), assembled with vasm in Devpac mode and run on the
+// The 68000 player for GHOST songs (Atari/GHOST/GHSPLAY.S), assembled with vasm in Devpac mode and run on the
 // emulated 68000: frame by frame it must leave the YM, the DMA and the Microwire as the file says, keep
 // all registers, and take well under 1 % of a 50 Hz frame. Runs only where vasm is found: the environment
 // variable VASM (the vasmm68k_mot program) or vasmm68k_mot on the PATH.
-public class DhsPlayerTests
+public class GhostPlayerTests
 {
     private const uint Load = 0x10000, Return = 0x500;
     private const int FrameCycles = 160000;   // 8 MHz at 50 Hz
@@ -29,8 +29,8 @@ public class DhsPlayerTests
     private static string PlayerFolder()
     {
         var dir = AppContext.BaseDirectory;
-        while (dir != null && !File.Exists(Path.Combine(dir, "Atari", "DHS", "DHSPLAY.S"))) dir = Path.GetDirectoryName(dir);
-        return Path.Combine(dir ?? throw new DirectoryNotFoundException("Atari/DHS"), "Atari", "DHS");
+        while (dir != null && !File.Exists(Path.Combine(dir, "Atari", "GHOST", "GHSPLAY.S"))) dir = Path.GetDirectoryName(dir);
+        return Path.Combine(dir ?? throw new DirectoryNotFoundException("Atari/GHOST"), "Atari", "GHOST");
     }
 
     // The player and the song as one binary: init, stop, play at 0, 4, 8
@@ -38,14 +38,14 @@ public class DhsPlayerTests
     {
         var vasm = Vasm();
         if (vasm == null) return null;
-        var dir = Directory.CreateTempSubdirectory("dhs").FullName;
+        var dir = Directory.CreateTempSubdirectory("ghost").FullName;
         try
         {
-            File.Copy(Path.Combine(PlayerFolder(), "DHSPLAY.S"), Path.Combine(dir, "DHSPLAY.S"));
-            File.WriteAllBytes(Path.Combine(dir, "SONG.DHS"), song);
+            File.Copy(Path.Combine(PlayerFolder(), "GHSPLAY.S"), Path.Combine(dir, "GHSPLAY.S"));
+            File.WriteAllBytes(Path.Combine(dir, "SONG.GHS"), song);
             File.WriteAllText(Path.Combine(dir, "WRAP.S"),
-                "\tbra.w\tinit\n\tbra.w\tdhs_stop\n\tbra.w\tdhs_play\ninit:\tlea\tsong(pc),a0\n\tbra\tdhs_init\n" +
-                "\tinclude\t\"DHSPLAY.S\"\n\teven\nsong:\tincbin\t\"SONG.DHS\"\n");
+                "\tbra.w\tinit\n\tbra.w\tghs_stop\n\tbra.w\tghs_play\ninit:\tlea\tsong(pc),a0\n\tbra\tghs_init\n" +
+                "\tinclude\t\"GHSPLAY.S\"\n\teven\nsong:\tincbin\t\"SONG.GHS\"\n");
             var p = Process.Start(new ProcessStartInfo(vasm, "-devpac -Fbin -quiet -o WRAP.BIN WRAP.S")
                 { WorkingDirectory = dir, RedirectStandardError = true, RedirectStandardOutput = true })!;
             string output = p.StandardOutput.ReadToEnd() + p.StandardError.ReadToEnd();
@@ -83,33 +83,33 @@ public class DhsPlayerTests
     }
 
     // The song played through (and past its loop) by the player and read in C# side by side
-    private static long Check(byte[] dhs)
+    private static long Check(byte[] ghost)
     {
-        var bin = Assemble(dhs);
+        var bin = Assemble(ghost);
         if (bin == null) return -1;
         var m = new Machine(bin);
         m.Call(Load);
         Assert.Equal(0u, m.Cpu.D[0]);
-        uint song = Load + (uint)bin.AsSpan().LastIndexOf("DHS1"u8);
-        int pos = Long(dhs, 4), loop = Long(dhs, 8), table = Long(dhs, 12), frames = Long(dhs, 20);
+        uint song = Load + (uint)bin.AsSpan().LastIndexOf("GHS1"u8);
+        int pos = Long(ghost, 4), loop = Long(ghost, 8), table = Long(ghost, 12), frames = Long(ghost, 20);
         var regs = new byte[14];
         var starts = new List<(uint Start, uint End, double Rate)>();
         m.St.Dma.FrameStarted = (s, e, rate, stereo, again) => starts.Add((s, e, rate));
         long worst = 0;
         for (int f = 0; f < frames + 100; f++)
         {
-            int mask = Word(dhs, pos);
+            int mask = Word(ghost, pos);
             if (mask == 0xFFFF)
             {
                 if (loop == 0) break;
                 pos = loop;
-                mask = Word(dhs, pos);
+                mask = Word(ghost, pos);
             }
             int q = pos + 2;
             int? lmc = null, dma = null;
-            if ((mask & 0x8000) != 0) { lmc = Word(dhs, q); q += 2; }
-            for (int r = 0; r < 14; r++) if ((mask & 1 << r) != 0) regs[r] = dhs[q++];
-            if ((mask & 0x4000) != 0) dma = dhs[q++];
+            if ((mask & 0x8000) != 0) { lmc = Word(ghost, q); q += 2; }
+            for (int r = 0; r < 14; r++) if ((mask & 1 << r) != 0) regs[r] = ghost[q++];
+            if ((mask & 0x4000) != 0) dma = ghost[q++];
             pos = q + (q & 1);
 
             m.St.EnvelopeWritten = false;
@@ -128,15 +128,15 @@ public class DhsPlayerTests
             {
                 int t = table + (dma.Value - 1) * 16;
                 Assert.Single(starts);
-                Assert.Equal(song + (uint)Long(dhs, t), starts[0].Start);
-                Assert.Equal(song + (uint)Long(dhs, t + 4), starts[0].End);
-                Assert.Equal(ChiptuneSynth.DmaRates[dhs[t + 13] & 3], starts[0].Rate);
-                if (Long(dhs, t + 8) != 0)
+                Assert.Equal(song + (uint)Long(ghost, t), starts[0].Start);
+                Assert.Equal(song + (uint)Long(ghost, t + 4), starts[0].End);
+                Assert.Equal(ChiptuneSynth.DmaRates[ghost[t + 13] & 3], starts[0].Rate);
+                if (Long(ghost, t + 8) != 0)
                 {
                     // Looped: round and round, the loop's start waiting in the start registers
                     Assert.Equal(3, m.St.Read8(0xFF8901) & 3);
                     uint next = (uint)(m.St.Read8(0xFF8903) << 16 | m.St.Read8(0xFF8905) << 8 | m.St.Read8(0xFF8907));
-                    Assert.Equal(song + (uint)Long(dhs, t + 8), next);
+                    Assert.Equal(song + (uint)Long(ghost, t + 8), next);
                 }
             }
             if (dma == 0) Assert.Equal(0, m.St.Read8(0xFF8901) & 1);
@@ -157,7 +157,7 @@ public class DhsPlayerTests
     public void Queued_samples_follow_without_a_gap_and_the_song_keeps_time_with_them()
     {
         var song = Open();
-        DhsMode.Convert(song);
+        GhostMode.Convert(song);
         const int rows = 16, speed = 6, parts = 12;
         song.Speed = speed;
         song.Ym!.Speed = speed;
@@ -169,7 +169,7 @@ public class DhsPlayerTests
             while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
             for (int k = 0; k < 3; k++)
             {
-                string wav = Path.Combine(Path.GetTempPath(), $"dhs-part{k}-{Guid.NewGuid():N}.wav");
+                string wav = Path.Combine(Path.GetTempPath(), $"ghost-part{k}-{Guid.NewGuid():N}.wav");
                 SampleBank.WriteWav(wav, new SampleData(Enumerable.Range(0, bytes).Select(i => (float)Math.Sin(i * (0.05 + k * 0.03)) * 0.5f).ToArray(), 12517));
                 wavs.Add(wav);
                 song.Instruments.Add(new TrackerInstrument { Name = "Part " + k, Wave = "Sample", Sample = wav, SampleNote = 60 });
@@ -187,16 +187,16 @@ public class DhsPlayerTests
                 song.Patterns[own][0, 3] = new TrackerCell(60, 33 + place % 3, place == 0 ? '\0' : 'Q', 0, effect2: 'M', param2: place);
             }
 
-            var export = ChiptuneSynth.ExportDhs(song);
+            var export = ChiptuneSynth.ExportGhost(song);
             Assert.DoesNotContain(export.Warnings, w => w.Contains("gap"));
-            var dhs = export.Data;
-            var bin = Assemble(dhs);
+            var ghost = export.Data;
+            var bin = Assemble(ghost);
             if (bin == null) return;   // no vasm here
             var m = new Machine(bin);
             m.Call(Load);
-            uint songAt = Load + (uint)bin.AsSpan().LastIndexOf("DHS1"u8);
-            int table = Long(dhs, 12);
-            var partStart = Enumerable.Range(0, 3).Select(k => songAt + (uint)Long(dhs, table + k * 16)).ToArray();
+            uint songAt = Load + (uint)bin.AsSpan().LastIndexOf("GHS1"u8);
+            int table = Long(ghost, 12);
+            var partStart = Enumerable.Range(0, 3).Select(k => songAt + (uint)Long(ghost, table + k * 16)).ToArray();
 
             // VBL by VBL, the DMA run in 16 steps a frame to see when it goes on to the next part
             var switches = new List<(double At, uint Start, bool Again)>();
@@ -243,7 +243,7 @@ public class DhsPlayerTests
     [Fact]
     public void The_player_writes_the_YM_as_the_file_says_in_under_1_percent()
     {
-        long worst = Check(ChiptuneSynth.ExportDhs(Open()).Data);
+        long worst = Check(ChiptuneSynth.ExportGhost(Open()).Data);
         if (worst < 0) return;   // no vasm here
         Assert.InRange(worst, 1, FrameCycles / 100);
     }
@@ -252,7 +252,7 @@ public class DhsPlayerTests
     public void The_player_starts_DMA_samples_and_sends_LMC1992_commands()
     {
         var song = Open();
-        string wav = Path.Combine(Path.GetTempPath(), "dhs-player-" + Guid.NewGuid() + ".wav");
+        string wav = Path.Combine(Path.GetTempPath(), "ghost-player-" + Guid.NewGuid() + ".wav");
         SampleBank.WriteWav(wav, new SampleData(Enumerable.Range(0, 4000).Select(i => (float)Math.Sin(i * 0.1) * 0.5f).ToArray(), 12000));
         try
         {
@@ -266,7 +266,7 @@ public class DhsPlayerTests
             song.Patterns[p][0, 3] = new TrackerCell(60, looped, 'M', 20, effect2: 'L', param2: 10);
             song.Patterns[p][8, 3] = new TrackerCell(TrackerCell.NoteOff, 0, '\0', 0);
             song.Patterns[p][16, 3] = new TrackerCell(60, once, 'X', 2);
-            long worst = Check(ChiptuneSynth.ExportDhs(song).Data);
+            long worst = Check(ChiptuneSynth.ExportGhost(song).Data);
             if (worst < 0) return;
             Assert.InRange(worst, 1, FrameCycles / 100);
         }

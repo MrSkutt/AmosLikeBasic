@@ -75,14 +75,14 @@ public class TrackerViewTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void In_a_DHS_song_channel_4_takes_only_samples()
+    public void In_a_GHOST_song_channel_4_takes_only_samples()
     {
         var file = MaxYMiserTests.Song();
-        var song = YmImport.OpenMaxYMiser(file, MaxYMiserSong.Find(file)!, "Dhs");
-        DhsMode.Convert(song);
+        var song = YmImport.OpenMaxYMiser(file, MaxYMiserSong.Find(file)!, "Ghost");
+        GhostMode.Convert(song);
         while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
         song.Instruments.Add(new TrackerInstrument { Name = "Kick", Wave = "Sample" });
-        string path = Path.Combine(Path.GetTempPath(), $"amos-dhs-{Guid.NewGuid():N}.amostrk");
+        string path = Path.Combine(Path.GetTempPath(), $"amos-ghost-{Guid.NewGuid():N}.amostrk");
         File.WriteAllText(path, song.ToJson());
         try
         {
@@ -119,13 +119,13 @@ public class TrackerViewTests : IDisposable
     }
 
     [AvaloniaFact]
-    public void A_DHS_song_without_samples_shows_how_to_get_one_on_channel_4()
+    public void A_GHOST_song_without_samples_shows_how_to_get_one_on_channel_4()
     {
         var file = MaxYMiserTests.Song();
-        var song = YmImport.OpenMaxYMiser(file, MaxYMiserSong.Find(file)!, "Dhs");
-        DhsMode.Convert(song);
+        var song = YmImport.OpenMaxYMiser(file, MaxYMiserSong.Find(file)!, "Ghost");
+        GhostMode.Convert(song);
         while (song.Instruments.Count < 32) song.Instruments.Add(new TrackerInstrument { Ym = new TrackerYmInstrument() });
-        string path = Path.Combine(Path.GetTempPath(), $"amos-dhs-{Guid.NewGuid():N}.amostrk");
+        string path = Path.Combine(Path.GetTempPath(), $"amos-ghost-{Guid.NewGuid():N}.amostrk");
         File.WriteAllText(path, song.ToJson());
         try
         {
