@@ -133,20 +133,23 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
             int factor = Math.Max(1, (int)Math.Floor(scale + 0.001f));
             var dest = new SKRect((float)Bounds.X, (float)Bounds.Y, (float)Bounds.Right, (float)Bounds.Bottom);
 
-            if (_graphics.CrtEnabled && DrawCrt(canvas, image, w, h, dest, scale))
-                return;
-
-            if (factor == 1)
+            // A monitor round the picture (SCREEN FRAME): the game, still at its own resolution, fills
+            // the monitor's glass, the monitor picture stretched so that its glass has the game's shape,
+            // and the monitor is drawn over it, untouched by the CRT filter
+            var frame = _graphics.Frame;
+            var picture = dest;
+            (SKRect from, SKRect to)[] pieces = Array.Empty<(SKRect, SKRect)>();
+            if (frame != null)
             {
-                canvas.DrawImage(image, new SKRect(0, 0, w, h), dest, Linear);
-                return;
+                (picture, pieces) = frame.Layout(dest, w, h);
+                scale *= picture.Width / dest.Width;
+                factor = Math.Max(1, (int)Math.Floor(scale + 0.001f));
             }
 
-            using var big = CreateSurface(gr, w * factor, h * factor);
-            big.Canvas.Clear(SKColors.Transparent);
-            big.Canvas.DrawImage(image, new SKRect(0, 0, w, h), new SKRect(0, 0, w * factor, h * factor), Nearest);
-            using var bigImage = big.Snapshot();
-            canvas.DrawImage(bigImage, new SKRect(0, 0, w * factor, h * factor), dest, Linear);
+            DrawPicture(canvas, gr, image, w, h, picture, scale, factor);
+
+            foreach (var (from, to) in pieces)
+                canvas.DrawImage(frame.Image, from, to, Linear);
         }
         catch (Exception ex)
         {
@@ -157,6 +160,25 @@ public sealed class ScreenDrawOperation : ICustomDrawOperation
             _graphics.CountRenderedFrame(System.Diagnostics.Stopwatch.GetTimestamp() - start);
             FrameLog.Write("draw", Frame, System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds);
         }
+    }
+
+    // The game picture scaled up into dest: through the CRT filter, or sharp by whole pixels and then smooth
+    private void DrawPicture(SKCanvas canvas, GRContext? gr, SKImage image, int w, int h, SKRect dest, float scale, int factor)
+    {
+        if (_graphics.CrtEnabled && DrawCrt(canvas, image, w, h, dest, scale))
+            return;
+
+        if (factor == 1)
+        {
+            canvas.DrawImage(image, new SKRect(0, 0, w, h), dest, Linear);
+            return;
+        }
+
+        using var big = CreateSurface(gr, w * factor, h * factor);
+        big.Canvas.Clear(SKColors.Transparent);
+        big.Canvas.DrawImage(image, new SKRect(0, 0, w, h), new SKRect(0, 0, w * factor, h * factor), Nearest);
+        using var bigImage = big.Snapshot();
+        canvas.DrawImage(bigImage, new SKRect(0, 0, w * factor, h * factor), dest, Linear);
     }
 
     // The console text on top of the layers, placed as the text box places it (the same font size,
@@ -213,11 +235,14 @@ half4 main(float2 p) {
 
     // Scanlines: brightest in the middle of each row of the game picture, darker between the rows
     float fy = fract(sp.y) - 0.5;
-    float line = 1.0 - scanlines * 0.9 * (fy * fy * 4.0);
+    // (the lines and stripes fade out when a game row is less than a screen pixel, as in a small
+    // monitor frame, where they would only make a pattern of rings)
+    float fine = smoothstep(0.7, 1.1, pixelScale);
+    float line = 1.0 - scanlines * fine * 0.9 * (fy * fy * 4.0);
 
     // A faint colour mask in red, green and blue, like the phosphor stripes of a picture tube
-    float m = mod(floor(p.x * pixelScale), 3.0);
-    float d = 1.0 - mask * 0.36;
+    float m = mod(floor(p.x * max(pixelScale, 1.0)), 3.0);
+    float d = 1.0 - mask * fine * 0.36;
     float3 stripes = m < 1.0 ? float3(1.0, d, d) : (m < 2.0 ? float3(d, 1.0, d) : float3(d, d, 1.0));
 
     // Vignette: darker towards the edges and corners
@@ -258,9 +283,12 @@ half4 main(float2 p) {
             { "vignette", Math.Clamp(_graphics.CrtVignette, 0f, 1f) },
             { "brightness", Math.Clamp(_graphics.CrtBrightness, 0.3f, 2f) },
             { "softness", Math.Clamp(_graphics.CrtSoftness, 0f, 1f) },
-            { "pixelScale", Math.Max(1f, scale) }
+            { "pixelScale", Math.Max(0.1f, scale) }
         };
-        using var shader = _crtEffect.ToShader(uniforms, children);
+        // The shader works in the game's own coordinates (0 – w, 0 – h) wherever dest is: the whole
+        // window, or the glass of a monitor frame
+        var toDest = SKMatrix.CreateScaleTranslation(dest.Width / w, dest.Height / h, dest.Left, dest.Top);
+        using var shader = _crtEffect.ToShader(uniforms, children, toDest);
         using var paint = new SKPaint { Shader = shader };
         canvas.DrawRect(dest, paint);
         return true;
@@ -666,7 +694,7 @@ public sealed class AmosGpuView : Control
                 if (layersCopy[i].ShownVisible ?? layersCopy[i].PresentedVisible ?? layersCopy[i].Visible) mask |= 1 << i;
             FrameLog.Write("paint", frame, mask);
         }
-        bool consoleInPicture = Graphics.CrtEnabled && ConsoleSource != null;
+        bool consoleInPicture = (Graphics.CrtEnabled || Graphics.Frame != null) && ConsoleSource != null;
         ConsoleDrawnInPicture?.Invoke(consoleInPicture);
         ctx.Custom(new ScreenDrawOperation(screenRect, Graphics, layers)
         {
@@ -698,6 +726,111 @@ public sealed class AmosGraphics
     public float CrtVignette { get; set; } = 0.5f;
     public float CrtBrightness { get; set; } = 1.22f;   // a little brighter, so the lines and mask do not darken it
     public float CrtSoftness { get; set; } = 1f;
+
+    // A picture of a monitor round the game picture (SCREEN FRAME, CRT Settings): its glass is the
+    // see-through part in its middle, found by itself, so any monitor picture can be used
+    public sealed record MonitorFrame(SKImage Image, SKRectI Glass, string File, int L0 = 0, int L1 = 0, int R0 = 0, int R1 = 0)
+    {
+        // [L0, L1) and [R0, R1) are plain columns of the case left and right of the glass, all alike
+        // from left to right (found by FindStretch), that can be drawn wider without it showing
+        private bool CanStretch => L1 > L0 && R1 > R0;
+
+        // Where the monitor goes in dest: the pieces of the picture (from, to) and the glass. The game
+        // picture w x h fills the glass, so the glass gets the game's shape: the middle of the monitor
+        // is made narrower and its plain sides wider, so that the whole monitor still fills the window
+        // with no bars. A monitor with no plain sides is made narrower or lower as a whole instead.
+        public (SKRect glass, (SKRect from, SKRect to)[] pieces) Layout(SKRect dest, int w, int h)
+        {
+            float iw = Image.Width, ih = Image.Height;
+            float shape = (float)w / h, glassShape = (float)Glass.Width / Glass.Height;
+            if (glassShape > shape && CanStretch)
+            {
+                float s = Math.Min(dest.Width / iw, dest.Height / ih), k = shape / glassShape;
+                float left = dest.MidX - iw * s / 2, top = dest.MidY - ih * s / 2, bottom = top + ih * s;
+                float extra = (R0 - L1) * s * (1 - k) / 2;
+                float[] cuts = { 0, L0, L1, R0, R1, iw };
+                float[] widths = { L0 * s, (L1 - L0) * s + extra, (R0 - L1) * s * k, (R1 - R0) * s + extra, (iw - R1) * s };
+                var pieces = new (SKRect, SKRect)[5];
+                float x = left;
+                for (int i = 0; i < 5; i++)
+                {
+                    pieces[i] = (new SKRect(cuts[i], 0, cuts[i + 1], ih), new SKRect(x, top, x + widths[i], bottom));
+                    x += widths[i];
+                }
+                float gx = pieces[2].Item2.Left + (Glass.Left - L1) * s * k;
+                return (new SKRect(gx, top + Glass.Top * s, gx + Glass.Width * s * k, top + Glass.Bottom * s), pieces);
+            }
+
+            float kx = glassShape > shape ? shape / glassShape : 1f;
+            float ky = glassShape > shape ? 1f : glassShape / shape;
+            float mw = iw * kx, mh = ih * ky;
+            float sc = Math.Min(dest.Width / mw, dest.Height / mh);
+            var monitor = SKRect.Create(dest.MidX - mw * sc / 2, dest.MidY - mh * sc / 2, mw * sc, mh * sc);
+            float sx = kx * sc, sy = ky * sc;
+            var glass = new SKRect(monitor.Left + Glass.Left * sx, monitor.Top + Glass.Top * sy,
+                monitor.Left + Glass.Right * sx, monitor.Top + Glass.Bottom * sy);
+            return (glass, new[] { (new SKRect(0, 0, iw, ih), monitor) });
+        }
+
+        // The longest run of columns in [from, to) where each column is like the next one all the way down
+        public static (int, int) FindStretch(SKBitmap b, int from, int to)
+        {
+            bool Alike(int x)
+            {
+                for (int y = 0; y < b.Height; y++)
+                {
+                    SKColor p = b.GetPixel(x, y), q = b.GetPixel(x + 1, y);
+                    if (Math.Abs(p.Red - q.Red) > 6 || Math.Abs(p.Green - q.Green) > 6 ||
+                        Math.Abs(p.Blue - q.Blue) > 6 || Math.Abs(p.Alpha - q.Alpha) > 6) return false;
+                }
+                return true;
+            }
+            int best = 0, bestStart = 0, run = 0;
+            for (int x = Math.Max(0, from); x < Math.Min(to, b.Width - 1); x++)
+            {
+                run = Alike(x) ? run + 1 : 0;
+                if (run > best) { best = run; bestStart = x - run + 1; }
+            }
+            return best == 0 ? (0, 0) : (bestStart, bestStart + best + 1);
+        }
+
+        // The see-through part round the middle: from the middle outwards along its row and its column
+        public static SKRectI? FindGlass(SKBitmap b)
+        {
+            bool Clear(int x, int y) => b.GetPixel(x, y).Alpha < 16;
+            int cx = b.Width / 2, cy = b.Height / 2;
+            if (!Clear(cx, cy)) return null;
+            int l = cx, r = cx, t = cy, bo = cy;
+            while (l > 0 && Clear(l - 1, cy)) l--;
+            while (r < b.Width - 1 && Clear(r + 1, cy)) r++;
+            while (t > 0 && Clear(cx, t - 1)) t--;
+            while (bo < b.Height - 1 && Clear(cx, bo + 1)) bo++;
+            return new SKRectI(l, t, r + 1, bo + 1);
+        }
+    }
+
+    public MonitorFrame? Frame { get; private set; }
+
+    // SCREEN FRAME "file": the monitor round the picture; null or "" takes it away. An error text, or null.
+    public string? SetFrame(string? file)
+    {
+        if (string.IsNullOrWhiteSpace(file)) { Frame = null; return null; }
+        try
+        {
+            using var bitmap = SKBitmap.Decode(ResourceLoader.GetPath(file));
+            if (bitmap == null) return $"'{file}' is not a picture";
+            var glass = MonitorFrame.FindGlass(bitmap);
+            if (glass == null) return $"'{file}' has no see-through glass in its middle for the picture";
+            var (l0, l1) = MonitorFrame.FindStretch(bitmap, 0, glass.Value.Left);
+            var (r0, r1) = MonitorFrame.FindStretch(bitmap, glass.Value.Right, bitmap.Width);
+            Frame = new MonitorFrame(SKImage.FromBitmap(bitmap), glass.Value, file, l0, l1, r0, r1);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex.Message;
+        }
+    }
 
     // The CRT settings as percentages, in the order SCREEN CRT takes them
     public float[] CrtPercentages() => new[]

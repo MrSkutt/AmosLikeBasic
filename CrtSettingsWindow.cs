@@ -19,6 +19,9 @@ public class CrtSettingsWindow : Window
     private readonly Slider[] _sliders;
     private readonly TextBlock[] _values;
     private readonly TextBox _basicLine;
+    private readonly CheckBox _frameOn;
+    private readonly ComboBox _frames;
+    private readonly string[] _frameFiles;
     private bool _updating;
 
     // Name, lowest, highest and what it does, in the order SCREEN CRT takes them (percent)
@@ -96,6 +99,26 @@ public class CrtSettingsWindow : Window
         }
         panel.Children.Add(grid);
 
+        // A monitor round the picture: the pictures in Graphics/Frames, each with a see-through glass
+        _frameFiles = FrameFiles();
+        _frameOn = new CheckBox { Content = "Monitor frame", IsChecked = gfx.Frame != null, FontWeight = FontWeight.Bold, Margin = new Thickness(0, 6, 0, 0) };
+        ToolTip.SetTip(_frameOn, "The picture shown in a monitor, which is fitted to the picture's shape; the monitor is not touched by the CRT effect");
+        _frames = new ComboBox
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            ItemsSource = _frameFiles.Select(f => System.IO.Path.GetFileNameWithoutExtension(f)).ToList(),
+            SelectedIndex = Math.Max(0, Array.FindIndex(_frameFiles, f => f == gfx.Frame?.File)),
+            IsEnabled = _frameFiles.Length > 0
+        };
+        _frameOn.IsEnabled = _frameFiles.Length > 0;
+        _frameOn.IsCheckedChanged += (_, _) => { if (!_updating) ApplyFrame(); };
+        _frames.SelectionChanged += (_, _) => { if (!_updating && _frameOn.IsChecked == true) ApplyFrame(); };
+        var frameRow = new Grid { ColumnDefinitions = new ColumnDefinitions("140,*") };
+        frameRow.Children.Add(_frameOn);
+        Grid.SetColumn(_frames, 1);
+        frameRow.Children.Add(_frames);
+        panel.Children.Add(frameRow);
+
         panel.Children.Add(new TextBlock { Text = "The same in a program:", FontSize = 11, Margin = new Thickness(0, 6, 0, 0) });
         _basicLine = new TextBox { IsReadOnly = true, FontFamily = new FontFamily("Courier New, Monospace"), FontSize = 13 };
         var copy = new Button { Content = "Copy", Margin = new Thickness(6, 0, 0, 0) };
@@ -154,6 +177,7 @@ public class CrtSettingsWindow : Window
     {
         _gfx.CrtEnabled = _on.IsChecked == true;
         _gfx.SetCrtPercentages(_sliders.Select(s => (float)Math.Round(s.Value)).ToArray());
+        CrtConfig.Save(_gfx);
         UpdateTexts();
         _redraw();
     }
@@ -162,6 +186,70 @@ public class CrtSettingsWindow : Window
     {
         var values = _sliders.Select(s => (int)Math.Round(s.Value)).ToArray();
         for (int i = 0; i < values.Length; i++) _values[i].Text = values[i].ToString(CultureInfo.InvariantCulture);
-        _basicLine.Text = $"SCREEN CRT {(_on.IsChecked == true ? 1 : 0)}, {string.Join(", ", values)}";
+        _basicLine.Text = $"SCREEN CRT {(_on.IsChecked == true ? 1 : 0)}, {string.Join(", ", values)}"
+                          + (_gfx.Frame != null ? $" : SCREEN FRAME \"{_gfx.Frame.File}\"" : "");
+    }
+
+    // The monitor pictures, as a program names them ("Graphics/Frames/C64Monitor.png")
+    private static string[] FrameFiles()
+    {
+        try
+        {
+            var dir = System.IO.Path.Combine(Workspace.Graphics, "Frames");
+            if (!System.IO.Directory.Exists(dir)) return Array.Empty<string>();
+            return System.IO.Directory.GetFiles(dir, "*.png").OrderBy(f => f)
+                .Select(f => "Graphics/Frames/" + System.IO.Path.GetFileName(f)).ToArray();
+        }
+        catch (System.IO.IOException) { return Array.Empty<string>(); }
+    }
+
+    private void ApplyFrame()
+    {
+        string? file = _frameOn.IsChecked == true && _frames.SelectedIndex >= 0 ? _frameFiles[_frames.SelectedIndex] : null;
+        var error = _gfx.SetFrame(file);
+        if (error != null) _basicLine.Text = error;
+        else UpdateTexts();
+        CrtConfig.Save(_gfx);
+        _redraw();
+    }
+}
+
+// The CRT settings and the monitor frame, kept between runs of the editor (crt.json beside config.json)
+public static class CrtConfig
+{
+    private sealed class Settings
+    {
+        public bool On { get; set; }
+        public float[] Values { get; set; } = Array.Empty<float>();
+        public string? Frame { get; set; }
+    }
+
+    private static string SettingsFile =>
+        System.IO.Path.Combine(ConfigService.GetConfigFolder("AmosProject"), "crt.json");
+
+    public static void Load(AmosGraphics gfx)
+    {
+        try
+        {
+            if (!System.IO.File.Exists(SettingsFile)) return;
+            var s = System.Text.Json.JsonSerializer.Deserialize<Settings>(System.IO.File.ReadAllText(SettingsFile));
+            if (s == null) return;
+            gfx.CrtEnabled = s.On;
+            if (s.Values.Length > 0) gfx.SetCrtPercentages(s.Values);
+            if (s.Frame != null && gfx.SetFrame(s.Frame) != null) gfx.SetFrame(null);   // the picture is gone
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Could not read the CRT settings: " + ex.Message); }
+    }
+
+    public static void Save(AmosGraphics gfx)
+    {
+        try
+        {
+            var s = new Settings { On = gfx.CrtEnabled, Values = gfx.CrtPercentages(), Frame = gfx.Frame?.File };
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SettingsFile)!);
+            System.IO.File.WriteAllText(SettingsFile, System.Text.Json.JsonSerializer.Serialize(s,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Could not save the CRT settings: " + ex.Message); }
     }
 }

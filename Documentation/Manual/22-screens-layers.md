@@ -211,6 +211,17 @@ The easiest way to find a look is **View → CRT Settings...** in the editor. Mo
 
 The effect is drawn by the graphics card in the last step, when the picture is scaled up to the window, so it costs almost nothing. It looks best in a large window or in full screen. **F8** turns it on and off while the game runs, and in the editor it is also under **View → CRT Effect**. The text from `PRINT` gets the effect too, just like the graphics.
 
+### A monitor round the picture: SCREEN FRAME
+
+`SCREEN FRAME "file"` shows the game in a monitor: a picture of one, with a see-through glass in its middle. The game picture fills the glass, and the monitor is drawn on top of it. When the glass has another shape than the game (4:3 for 640 x 480), the plain parts of the monitor's case at the sides are drawn wider and its middle a little narrower, so that the glass fits the picture and the monitor still fills the window. The CRT effect only falls on the glass, as on a real monitor; the monitor itself stays sharp. The game still draws at its own resolution, so nothing in the program changes.
+
+```basic nocheck
+SCREEN FRAME "Graphics/Frames/C64Monitor.png"
+SCREEN CRT 1
+```
+
+`SCREEN FRAME OFF` takes the monitor away. **View → CRT Settings...** has the same as *Monitor frame*, with the pictures in `Graphics/Frames` to choose from. The editor remembers what you choose there, the CRT settings too, until the next time you start it; a program that should always look the same has its own `SCREEN CRT` and `SCREEN FRAME` lines. Draw your own in a paint program: a monitor of the size of the window (640 x 480) with the glass made transparent; the glass is found by itself.
+
 ## Snow, rain and stars
 
 `PARTICLE type, density` adds weather to the selected layer: type 1 is snow, 2 rain and 3 twinkling stars, and 0 turns it off. The density decides how big the particles and the gaps between them are:

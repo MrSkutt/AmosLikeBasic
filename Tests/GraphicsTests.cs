@@ -283,3 +283,45 @@ public class BumpTests
         Assert.True(near > far + 40, $"near the lamp {near:0}, far from it {far:0}");
     }
 }
+
+// SCREEN FRAME: the game picture in a monitor, at its own shape, the monitor on top
+public class MonitorFrameTests
+{
+    [AvaloniaFact]
+    public void The_glass_is_found_in_the_middle_of_the_monitor_picture()
+    {
+        var g = new AmosGraphics();
+        Assert.Null(g.SetFrame(Path.Combine(Repo.Root, "Graphics/Frames/C64Monitor.png")));
+        Assert.Equal(new SkiaSharp.SKRectI(49, 52, 591, 397), g.Frame!.Glass);
+        Assert.NotNull(g.SetFrame(Path.Combine(Repo.Root, "Graphics/font.png")));   // no glass in its middle
+        Assert.Null(g.SetFrame(null));
+        Assert.Null(g.Frame);
+    }
+
+    [AvaloniaFact]
+    public void The_picture_fills_the_glass_and_the_monitor_is_fitted_round_it()
+    {
+        var r = BasicRunner.Run("""
+            SCREEN 640,480
+            SCREEN FRAME "Graphics/Frames/C64Monitor.png"
+            INKG "Red"
+            BAR 0, 0, 639, 479
+            Loop:
+              WAIT VBL
+            GOTO Loop
+            """, 0.6, capture: true);
+        Assert.True(r.Errors.Count == 0, r.Describe());
+        var f = r.Frame!;
+        // The middle of the monitor is made narrower and its plain sides wider so that its glass is 4:3, and the red
+        // picture fills the glass right out to its edges (from x 90 to 550), with no black beside it
+        var bezel = f.GetPixel(70, 30);
+        Assert.True(bezel.Red > 150 && bezel.Green > 130 && bezel.Blue > 110, bezel.ToString());
+        var middle = f.GetPixel(320, 240);
+        Assert.True(middle.Red > 200 && middle.Green < 60, middle.ToString());
+        foreach (int x in new[] { 95, 545 })
+        {
+            var edge = f.GetPixel(x, 240);
+            Assert.True(edge.Red > 200 && edge.Green < 60, $"x {x}: {edge}");
+        }
+    }
+}

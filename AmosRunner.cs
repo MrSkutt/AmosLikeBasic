@@ -2790,6 +2790,16 @@ public static partial class AmosRunner
                                     graphics.SetCrtPercentages(crt);
                                     onGraphicsChanged();
                                 }
+                                else if (subCmd == "FRAME" && screenArgs.Count >= 2)
+                                {
+                                    // SCREEN FRAME "monitor.png": the game picture shown in a monitor; SCREEN FRAME OFF
+                                    string frameArg = screenArgs[1].Trim();
+                                    string? frameFile = frameArg.Equals("OFF", StringComparison.OrdinalIgnoreCase)
+                                        ? null : EvalText(frameArg, vars, ln, getInkey, isKeyDown, graphics);
+                                    var frameError = graphics.SetFrame(frameFile);
+                                    if (frameError != null) graphics.OnError?.Invoke("[SCREEN FRAME] " + frameError);
+                                    onGraphicsChanged();
+                                }
                                 else if (subCmd == "ON" && screenArgs.Count >= 2)
                                 {
                                     graphics.SetScreenVisible(

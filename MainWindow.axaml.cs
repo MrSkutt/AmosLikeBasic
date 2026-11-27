@@ -70,6 +70,7 @@ public partial class MainWindow : Window
         configService = new ConfigService("AmosProject");
         configService.Load();
         ChangeTheme(configService.Config.DefaultTheme);
+        CrtConfig.Load(_gfx);
         this.Width = configService.Config.WindowWidth;
         this.Height = configService.Config.WindowHeight;
         this.Position = new PixelPoint(configService.Config.WindowTop, configService.Config.WindowLeft);
@@ -934,6 +935,7 @@ public partial class MainWindow : Window
     private void ToggleCrt()
     {
         _gfx.CrtEnabled = !_gfx.CrtEnabled;
+        CrtConfig.Save(_gfx);
         _screenWindow?.ScreenControl.InvalidateVisual();
         Log($"CRT effect {(_gfx.CrtEnabled ? "on" : "off")}" + Environment.NewLine);
     }
