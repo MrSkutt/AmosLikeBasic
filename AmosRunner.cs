@@ -2240,8 +2240,16 @@ public static partial class AmosRunner
                         case "DIM":
                         {
                             var eqIdx = arg.IndexOf('=');
-                            string dimDecl = eqIdx >= 0 ? arg[..eqIdx].Trim() : arg;
+                            string dimAll = eqIdx >= 0 ? arg[..eqIdx].Trim() : arg;
                             string? initValues = eqIdx >= 0 ? arg[(eqIdx + 1)..].Trim() : null;
+
+                            // Several arrays at once: DIM A(10), B$(5), C(3,3) (values with = only for one)
+                            var dimDecls = SplitTopLevelCsv(dimAll);
+                            if (dimDecls.Count > 1 && initValues != null)
+                                throw new Exception($"DIM Syntax Error at line {ln}: values (=) can only be given to one array at a time");
+                            foreach (var dimOne in dimDecls)
+                            {
+                            string dimDecl = dimOne.Trim();
 
                             // Parse the array name and dimensions: A(10,20,5)
                             int openParen = dimDecl.IndexOf('(');
@@ -2282,6 +2290,7 @@ public static partial class AmosRunner
                             {
                                 InitializeArrayFromString(array, initValues, dimensions, vars, ln, getInkey, isKeyDown,
                                     graphics);
+                            }
                             }
                             break;
                         }
@@ -3149,7 +3158,7 @@ public static partial class AmosRunner
                                 else if (sub == "LOAD")
                                 {
                                     id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
-                                    string path = Unquote(ss[2]);
+                                    string path = EvalText(ss[2], vars, ln, getInkey, isKeyDown, graphics);
 
                                     // If we have more than 2 arguments (id + path), it is a sheet
                                     // SPRITE LOAD 1, "sheet.png", 32, 32, 7
@@ -3213,7 +3222,7 @@ public static partial class AmosRunner
                                 {
                                     id = EvalInt(ss[1], vars, ln, getInkey, isKeyDown, graphics);
                                     graphics.AddFrame(id.Value,
-                                        Unquote(ss[2]));
+                                        EvalText(ss[2], vars, ln, getInkey, isKeyDown, graphics));
                                 }
                                 else if (sub == "FRAME")
                                 {
@@ -3471,17 +3480,17 @@ public static partial class AmosRunner
                             var samArgs = SplitCsvOrSpaces(arg);
                             if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "PLAY")
                             {
-                                PlayEffect(Unquote(samArgs[1]), audioEngine, false);
+                                PlayEffect(EvalText(samArgs[1], vars, ln, getInkey, isKeyDown, graphics), audioEngine, false);
                             }
 
                             if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "LOOP")
                             {
-                                PlayEffect(Unquote(samArgs[1]), audioEngine, true);
+                                PlayEffect(EvalText(samArgs[1], vars, ln, getInkey, isKeyDown, graphics), audioEngine, true);
                             }
 
                             if (samArgs.Count >= 2 && samArgs[0].ToUpperInvariant() == "STOP")
                             {
-                                StopEffect(Unquote(samArgs[1]), audioEngine);
+                                StopEffect(EvalText(samArgs[1], vars, ln, getInkey, isKeyDown, graphics), audioEngine);
                             }
 
                             break;
@@ -3490,7 +3499,7 @@ public static partial class AmosRunner
                             var musArgs = SplitCsvOrSpaces(arg);
                             if (musArgs.Count >= 2 && musArgs[0].ToUpperInvariant() == "PLAY")
                             {
-                                PlayMusic(Unquote(musArgs[1]), audioEngine);
+                                PlayMusic(EvalText(musArgs[1], vars, ln, getInkey, isKeyDown, graphics), audioEngine);
                             }
                             else if (musArgs.Count >= 1 && musArgs[0].ToUpperInvariant() == "STOP")
                             {
@@ -3878,7 +3887,7 @@ public static partial class AmosRunner
                             {
                                 var tileSub = tArgs[0].ToUpperInvariant();
                                 if (tileSub == "LOAD" && tArgs.Count >= 4)
-                                    graphics.LoadTileBank(Unquote(tArgs[1]),
+                                    graphics.LoadTileBank(EvalText(tArgs[1], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(tArgs[2], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(tArgs[3], vars, ln, getInkey, isKeyDown, graphics));
                                 else if (tileSub == "MAP" && tArgs.Count >= 3)
@@ -3933,7 +3942,7 @@ public static partial class AmosRunner
                                 if (fSub == "LOAD" && fArgs.Count >= 5)
                                     graphics.FontLoad(
                                         EvalInt(fArgs[1], vars, ln, getInkey, isKeyDown, graphics),
-                                        Unquote(fArgs[2]),
+                                        EvalText(fArgs[2], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(fArgs[3], vars, ln, getInkey, isKeyDown, graphics),
                                         EvalInt(fArgs[4], vars, ln, getInkey, isKeyDown, graphics));
 
@@ -4199,7 +4208,7 @@ public static partial class AmosRunner
                             var mArgs = SplitCsvOrSpaces(arg);
                             if (mArgs.Count >= 2 && mArgs[0].ToUpperInvariant() == "LOAD")
                             {
-                                var path = Unquote(mArgs[1]);
+                                var path = EvalText(mArgs[1], vars, ln, getInkey, isKeyDown, graphics);
                                 try { path = ResourceLoader.GetPath(path); } catch (System.IO.FileNotFoundException) { }
                                 if (System.IO.File.Exists(path))
                                 {
@@ -5495,6 +5504,20 @@ public static partial class AmosRunner
     }
     private static bool IsQuotedString(string t) => t.Length >= 2 && t.StartsWith("\"") && t.EndsWith("\"");
     private static string Unquote(string t) => t.Trim('\"');
+
+    // A file name or other text given to a command: "file.png" as it is, or worked out when it is an
+    // expression ("Graphics/0" & I & ".png", F$). A bare word (ding.mp3) is taken as it is, as before.
+    private static string EvalText(string t, Dictionary<string, object> v, int ln, Func<string> gk, Func<string, bool> ikd, AmosGraphics g)
+    {
+        t = t.Trim();
+        if (t.Length >= 2 && t[0] == '"' && t.IndexOf('"', 1) == t.Length - 1) return t[1..^1];
+        try
+        {
+            if (EvalValue(t, v, ln, gk, ikd, g) is string s && s.Length > 0) return s;
+        }
+        catch (Exception) when (!t.Contains('"') && !t.Contains('$')) { }
+        return Unquote(t);
+    }
     private static double GetDoubleVar(string n, Dictionary<string, object> v, int ln)
     {
         if (v.TryGetValue(n, out var val))

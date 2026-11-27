@@ -27,6 +27,7 @@ public static class Examples
         {
             new Example("oldschool_demo", "Oldschool Demo", "Copper bars, chrome bobs, a bouncing logo and a sine scroller, Amiga style"),
             new Example("raster_bars", "Raster Bars", "Moving colour bars behind a picture, demo style"),
+            new Example("orbit", "Orbit", "A circle scroller round a turning Earth: the text changes at the top as it comes round"),
             new Example("tunnel", "Sine Tunnel", "An animated tunnel with particles and a scrolling text"),
             new Example("parallax_layers", "Parallax Layers", "Mountain ranges that scroll at different speeds; steer with left and right"),
             new Example("solar_system", "Solar System", "Planets on a raster sky, with C64-style music"),

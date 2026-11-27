@@ -744,7 +744,7 @@ SPRITE [#layer,] no, x, y, bank
 | `SPRITE ALPHA` | transparency, 0 – 255 |
 | `SPRITE FADE` | fades smoothly to the target value over that many frames |
 | `SPRITE LAYER` | moves the sprite to a layer; the position then counts in the layer's coordinates and follows when it scrolls |
-| `SPRITE HANDLE` | moves the point the collision tests count from |
+| `SPRITE HANDLE` | the point of the image that `SPRITE POS` puts at x, y (AMOS's hot spot); the sprite is zoomed and turned round it, and the collision tests count from it |
 | `SPRITE GROUP` | puts the sprite in a group for `HITGROUP` and the like |
 | `SPRITE UNGROUP` | takes the sprite out of the group |
 | `SPRITE CLEARGROUP` | empties the group |

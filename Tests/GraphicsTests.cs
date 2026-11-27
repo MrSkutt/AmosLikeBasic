@@ -191,3 +191,61 @@ public class CrtSettingsTests
         Assert.Equal(0.5f, g.CrtVignette);   // not given: unchanged
     }
 }
+
+// Sprites placed at their handle, and file names worked out as expressions
+public class SpriteHandleTests
+{
+    [AvaloniaFact]
+    public void A_sprite_is_put_with_its_handle_at_the_position_and_a_file_name_can_be_an_expression()
+    {
+        var r = BasicRunner.Run("""
+            SCREEN 640,480
+            N = 1
+            SPRITE LOAD 1, "Graphics/Bobs/Solarsystem/0" & N & ".png"
+            SPRITE HANDLE 1, 32, 32
+            SPRITE POS 1, 320, 240
+            SPRITE ON 1
+            Loop:
+              WAIT VBL
+            GOTO Loop
+            """, 0.6, capture: true);
+        Assert.True(r.Errors.Count == 0, r.Describe());
+        var empty = r.Frame!.GetPixel(10, 10);
+        // The planet's middle is at 320, 240: it covers 300, 240 on its left, not only what is right of 320
+        Assert.NotEqual(empty, r.Frame.GetPixel(300, 240));
+        Assert.NotEqual(empty, r.Frame.GetPixel(320, 240));
+        Assert.Equal(empty, r.Frame.GetPixel(370, 290));
+    }
+
+    // A rotated, zoomed font in a layer with RASTER COLOUR: no edge of the key colour left between the
+    // raster and the rest of the letter (smoothing would blend red into the blue and leave a red line)
+    [AvaloniaFact]
+    public void A_rotated_font_in_a_layer_with_RASTER_COLOUR_has_no_edge_of_the_key_colour()
+    {
+        var r = BasicRunner.Run("""
+            SCREEN 640,480
+            SCREEN SELECT 1
+            FONT LOAD 0, "Graphics/font.png", 32, 25
+            FONT MAP 0, "ABCDEFGHIJKLMNOPQRSTUVWXYZ!?:;0123456789@()£$%.’[]”,-"
+            FONT ZOOM 0, 140
+            FONT ROTATE 0, 30
+            FONT PRINT #1, 0, 100, 200, "HELLO"
+            RASTER 1, 0, 0, 480, "Lime, Lime"
+            RASTER COLOUR 1, "Red"
+            Loop:
+              WAIT VBL
+            GOTO Loop
+            """, 0.6, capture: true);
+        Assert.True(r.Errors.Count == 0, r.Describe());
+        int red = 0, lime = 0;
+        for (int y = 100; y < 400; y++)
+            for (int x = 60; x < 460; x++)
+            {
+                var c = r.Frame!.GetPixel(x, y);
+                if (c.Red > 120 && c.Green < 90 && c.Blue < 90) red++;
+                if (c.Green > 200 && c.Red < 60 && c.Blue < 60) lime++;
+            }
+        Assert.True(lime > 500, $"the raster shows on the letters ({lime} pixels)");
+        Assert.True(red == 0, $"{red} pixels of red edge");
+    }
+}

@@ -284,9 +284,12 @@ public sealed class LayerDrawOperation
 
     // Sharp pixels when an image is drawn at a whole size (100 %, 200 % ...) and not rotated, as on the
     // Amiga; smooth otherwise. Smoothing a 200 % bitmap font blends the colours at every edge, which
-    // made a thin line of half-colours that RASTER COLOUR could not recognise.
-    private static SKSamplingOptions SamplingFor(SKCanvas c)
+    // made a thin line of half-colours that RASTER COLOUR could not recognise. So in a layer with
+    // RASTER COLOUR everything is sharp, also rotated or zoomed 140 %: as with a palette colour, a
+    // pixel is the key colour or it is not, never a blend of it.
+    private SKSamplingOptions SamplingFor(SKCanvas c)
     {
+        if (KeyedLayer) return Sharp;
         var m = c.TotalMatrix;
         static bool Whole(float v) => v >= 0.999f && Math.Abs(v - MathF.Round(v)) < 0.001f;
         bool rotated = Math.Abs(m.SkewX) > 0.0001f || Math.Abs(m.SkewY) > 0.0001f;
@@ -295,6 +298,16 @@ public sealed class LayerDrawOperation
 
     private readonly AmosGraphics _graphics;
     private readonly GpuLayer _layer;
+
+    // RASTER COLOUR is on (mode 2 in the shader's first value)
+    private bool KeyedLayer
+    {
+        get
+        {
+            var values = _layer.ShownShaderValues ?? _layer.PresentedShaderValues ?? _layer.ShaderValues;
+            return values.Length > 0 && Math.Abs(values[0].Z - 2f) < 0.01f;
+        }
+    }
     private readonly List<AmosGraphics.QueuedFontText> _texts;
     private readonly List<AmosGraphics.SpriteRenderState> _sprites;
     private GRContext? _gr; // Set during Render: the GPU context the effects run in
@@ -449,21 +462,27 @@ public sealed class LayerDrawOperation
             var (img, owned) = sprite.Sprite.GetEffectImage(_gr, sprite.BaseBitmap, sprite.Effects);
             var pad = AmosGraphics.Sprite.GetTotalPadding(sprite.Effects);
 
-            DrawTransformed(c, img, sprite.X - pad.left, sprite.Y - pad.top, img.Width, img.Height,
-                sprite.Angle, sprite.ZoomX, sprite.ZoomY, paint);
+            DrawTransformed(c, img, sprite.X - sprite.HandleX - pad.left, sprite.Y - sprite.HandleY - pad.top, img.Width, img.Height,
+                sprite.Angle, sprite.ZoomX, sprite.ZoomY, paint,
+                HasHandle(sprite) ? pad.left + sprite.HandleX : null, HasHandle(sprite) ? pad.top + sprite.HandleY : null);
             if (owned) img.Dispose();
         }
         else
         {
-            // WITHOUT EFFECTS - sprite.X is the LEFT EDGE, the image is scaled to the sprite's size
+            // WITHOUT EFFECTS - sprite.X is the LEFT EDGE (less the handle), the image is scaled to the sprite's size
             using var img = ToSkImage(sprite.BaseBitmap);
-            DrawTransformed(c, img, sprite.X, sprite.Y, sprite.Width, sprite.Height,
-                sprite.Angle, sprite.ZoomX, sprite.ZoomY, paint, img.Width / 2f, img.Height / 2f);
+            DrawTransformed(c, img, sprite.X - sprite.HandleX, sprite.Y - sprite.HandleY, sprite.Width, sprite.Height,
+                sprite.Angle, sprite.ZoomX, sprite.ZoomY, paint,
+                HasHandle(sprite) ? sprite.HandleX : img.Width / 2f, HasHandle(sprite) ? sprite.HandleY : img.Height / 2f);
         }
     }
 
+    // SPRITE HANDLE: the point of the sprite that SPRITE POS puts at x, y (AMOS's hot spot), and the one it is
+    // zoomed and turned round; without one, the top left corner is at x, y and it turns round its middle
+    private static bool HasHandle(AmosGraphics.SpriteRenderState s) => s.HandleX != 0 || s.HandleY != 0;
+
     // Draw the image in (x, y, w, h), rotated and zoomed around the pivot (default: the middle of w/h)
-    private static void DrawTransformed(SKCanvas c, SKImage img, double x, double y, double w, double h,
+    private void DrawTransformed(SKCanvas c, SKImage img, double x, double y, double w, double h,
         double angle, double zoomX, double zoomY, SKPaint? paint, float? pivotX = null, float? pivotY = null)
     {
         float cX = pivotX ?? (float)(w / 2.0);
@@ -1559,7 +1578,7 @@ public sealed class AmosGraphics
     public sealed record SpriteRenderState(
         Sprite Sprite, WriteableBitmap BaseBitmap, List<SpriteEffect> Effects,
         int X, int Y, int Width, int Height,
-        double Angle, double ZoomX, double ZoomY, float Alpha, int Layer);
+        double Angle, double ZoomX, double ZoomY, float Alpha, int Layer, int HandleX = 0, int HandleY = 0);
 
     // A snapshot from the latest WAIT VBL, made on the runner thread so that Render never
     // reads a sprite that is being changed. null = the program does not use WAIT VBL.
@@ -1578,7 +1597,7 @@ public sealed class AmosGraphics
             states.Add(new SpriteRenderState(
                 s, baseBitmap, s.Effects.Where(e => e.RequiresGpuContext).ToList(),
                 s.X, s.Y, s.Width, s.Height,
-                s.Angle, s.ZoomX, s.ZoomY, s.Alpha, s.Layer));
+                s.Angle, s.ZoomX, s.ZoomY, s.Alpha, s.Layer, s.HandleX, s.HandleY));
         }
 
         return states;

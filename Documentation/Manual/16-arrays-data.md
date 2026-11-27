@@ -18,6 +18,8 @@ The places are numbered from 0, so `DIM SCORES(5)` gives `SCORES(0)` to `SCORES(
 
 > **Note:** `DIM A(10)` gives indexes 0 – 10, as in AMOS, C64 BASIC and QBasic. You can use place 0 or start from 1, whichever suits you best. `A(11)` gives an error.
 
+Several arrays can be made on one line: `DIM X(10), Y(10), NAME$(5)`.
+
 The nice thing is that the index can be a variable. Then a loop can go through the whole array:
 
 ```basic

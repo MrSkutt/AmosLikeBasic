@@ -74,6 +74,7 @@ public class LanguageTests
 
         // DIM gives the highest index
         Case("DIM A(10) has A(10)", "DIM A(10)\nA(10)=5\nPRINT A(10) & \" \" & DIM(A)", "5 11"),
+        Case("DIM of several arrays", "DIM A(2), B$(3), C(1, 1)\nB$(3)=\"x\"\nC(1, 1)=7\nPRINT DIM(A) & B$(3) & DIM(B$) & C(1, 1)", "3x47"),
         Case("DIM with starting values", "DIM T(2) = [10, 20, 30]\nPRINT JOIN$(T, \",\")", "10,20,30"),
     };
 

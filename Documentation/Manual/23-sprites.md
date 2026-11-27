@@ -12,7 +12,9 @@ SPRITE POS 1, 300, 200
 SPRITE ON 1
 ```
 
-`SPRITE LOAD` loads an image into sprite 1, `SPRITE POS` sets the position (the sprite's top left corner) and `SPRITE ON` makes it visible. `SPRITE OFF` hides it again.
+`SPRITE LOAD` loads an image into sprite 1, `SPRITE POS` sets the position (the sprite's top left corner, or its handle: see *The handle* below) and `SPRITE ON` makes it visible. `SPRITE OFF` hides it again.
+
+The file name can be worked out, as can every file name a command takes: `SPRITE LOAD I, "Graphics/Bobs/Solarsystem/0" & I & ".png"` loads a planet of its own into each sprite in a loop.
 
 > **Tip:** Black pixels (`0,0,0`) in the image become transparent, just like transparent pixels in PNG files.
 
@@ -111,7 +113,7 @@ The tools are on the left:
 |---|---|
 | `SPRITE ZOOM no, percent` | changes the size, 100 = normal, 200 = twice as big |
 | `SPRITE ZOOM no, x, y` | different in width and height |
-| `SPRITE ROTATE no, degrees` | turns the sprite around its centre |
+| `SPRITE ROTATE no, degrees` | turns the sprite around its centre (or its handle) |
 | `SPRITE ALPHA no, value` | transparency, 0 – 255 |
 | `SPRITE FADE no, target, frames` | fades smoothly to the target value |
 
@@ -130,6 +132,20 @@ Loop:
   WAIT VBL
 GOTO Loop
 ```
+
+### The handle: SPRITE HANDLE
+
+`SPRITE HANDLE no, x, y` chooses the point of the image that `SPRITE POS` puts at its position, what AMOS called the hot spot. The sprite is also zoomed and turned round that point. With the handle in the middle, a planet put at 320, 240 sits in the middle of the screen, whatever its size and zoom:
+
+```basic
+SPRITE LOAD 1, "Graphics/Bobs/Solarsystem/03.png"
+SPRITE HANDLE 1, 32, 32     ; the middle of the 64 x 64 image
+SPRITE ZOOM 1, 300
+SPRITE POS 1, 320, 240
+SPRITE ON 1
+```
+
+A handle at a figure's feet (`SPRITE HANDLE 1, 16, 48` for a 32 x 48 figure) puts its feet on the ground at the y you give. The collision tests count from the handle too.
 
 ## Image banks
 
