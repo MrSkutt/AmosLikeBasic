@@ -1293,7 +1293,7 @@ public static partial class AmosRunner
                     var arg = preparedCmd.Arg;
                     if (!preparedCmd.SubCommandChecked)
                     {
-                        CheckSubCommand(cmd, arg, ln);
+                        if (!procs.ContainsKey(cmd)) CheckSubCommand(cmd, arg, ln);
                         preparedCmd.SubCommandChecked = true;
                     }
 
@@ -3901,6 +3901,59 @@ public static partial class AmosRunner
                             break;
                         }
                         
+                        case "OBJECT" when !procs.ContainsKey(cmd):   // a PROC of the same name goes first
+                        {
+                            var (tempScreen, cleanArg) = ExtractScreenPrefix(arg);
+                            int? savedScreen = null;
+                            if (tempScreen.HasValue)
+                            {
+                                savedScreen = graphics.GetActiveScreenNumber();
+                                graphics.SetDrawingScreen(tempScreen.Value);
+                            }
+                            try
+                            {
+                                RunObjectCommand(SplitCsvOrSpaces(cleanArg), vars, ln, getInkey, isKeyDown, graphics);
+                            }
+                            finally
+                            {
+                                if (savedScreen.HasValue) graphics.SetDrawingScreen(savedScreen.Value);
+                            }
+                            onGraphicsChanged();
+                            break;
+                        }
+
+                        case "CAMERA" when !procs.ContainsKey(cmd):   // a PROC of the same name goes first
+                        {
+                            var ca = SplitCsvOrSpaces(arg);
+                            if (ca.Count == 0) throw new Exception($"CAMERA needs POS, LOOK or FOV, at line {ln}");
+                            float CF(int i) => (float)EvalDouble(ca[i], vars, ln, getInkey, isKeyDown, graphics);
+                            switch (ca[0].ToUpperInvariant())
+                            {
+                                case "POS" when ca.Count >= 4: graphics.SetCamera(pos: new System.Numerics.Vector3(CF(1), CF(2), CF(3))); break;
+                                case "LOOK" when ca.Count >= 4: graphics.SetCamera(look: new System.Numerics.Vector3(CF(1), CF(2), CF(3))); break;
+                                case "FOV" when ca.Count >= 2: graphics.SetCamera(fov: Math.Clamp(CF(1), 1f, 170f)); break;
+                                default: throw new Exception($"CAMERA POS x, y, z / CAMERA LOOK x, y, z / CAMERA FOV degrees, at line {ln}");
+                            }
+                            onGraphicsChanged();
+                            break;
+                        }
+
+                        case "LIGHT" when !procs.ContainsKey(cmd):   // a PROC of the same name goes first
+                        {
+                            var la = SplitCsvOrSpaces(arg);
+                            if (la.Count == 1 && la[0].Equals("OFF", StringComparison.OrdinalIgnoreCase))
+                                graphics.SetLight(Light3D.Default with { On = false });
+                            else if (la.Count >= 3)
+                            {
+                                float LF(int i) => (float)EvalDouble(la[i], vars, ln, getInkey, isKeyDown, graphics);
+                                float ambient = la.Count >= 4 ? Math.Clamp(LF(3) / 100f, 0f, 1f) : Light3D.Default.Ambient;
+                                graphics.SetLight(new Light3D(new System.Numerics.Vector3(LF(0), LF(1), LF(2)), ambient, true));
+                            }
+                            else throw new Exception($"LIGHT x, y, z [, ambient] or LIGHT OFF, at line {ln}");
+                            onGraphicsChanged();
+                            break;
+                        }
+
                         case "PARTICLE":
                             var rainArgs = SplitCsvOrSpaces(arg);
                             if (rainArgs.Count >= 2)
@@ -5706,6 +5759,110 @@ public static partial class AmosRunner
     // and not around operators. So "1, X + 10, Y" becomes 1 | X + 10 | Y, "T MOD 6" is kept together
     // and "HELLO THERE" in quotation marks stays one string. Words without an operator between them are split as before
     // (e.g. "ADD 0, BLUR 1.0"). A lone "-5" after a space counts as an argument of its own.
+    // OBJECT CUBE / SPHERE / ... / POS / ROTATE / ZOOM / TEXTURE / COLOUR ... (3D objects, Scene3D.cs)
+    private static void RunObjectCommand(List<string> a, Dictionary<string, object> vars, int ln,
+        Func<string> getInkey, Func<string, bool> isKeyDown, AmosGraphics graphics)
+    {
+        if (a.Count == 1 && a[0].Equals("CLEAR", StringComparison.OrdinalIgnoreCase)) { graphics.ObjectClear(); return; }
+        if (a.Count < 2) throw new Exception($"OBJECT needs what to do and the object's number, at line {ln}");
+        var sub = a[0].ToUpperInvariant();
+        int id = EvalInt(a[1], vars, ln, getInkey, isKeyDown, graphics);
+        float F(int i) => (float)EvalDouble(a[i], vars, ln, getInkey, isKeyDown, graphics);
+        float Opt(int i, float d) => a.Count > i ? F(i) : d;
+        void Need(int n, string syntax)
+        {
+            if (a.Count < n) throw new Exception($"OBJECT {sub} needs: OBJECT {sub} {syntax}, at line {ln}");
+        }
+
+        switch (sub)
+        {
+            case "CUBE":
+                Need(3, "no, size [, height, depth]");
+                graphics.SetObjectMesh(id, Mesh3D.Box(F(2), Opt(3, F(2)), Opt(4, F(2))));
+                break;
+            case "SPHERE":
+                Need(3, "no, radius [, detail]");
+                graphics.SetObjectMesh(id, Mesh3D.Sphere(F(2), (int)Opt(3, 24)));
+                break;
+            case "CYLINDER":
+                Need(4, "no, radius, height [, detail]");
+                graphics.SetObjectMesh(id, Mesh3D.Cylinder(F(2), F(2), F(3), (int)Opt(4, 24)));
+                break;
+            case "CONE":
+                Need(4, "no, radius, height [, sides]");
+                graphics.SetObjectMesh(id, Mesh3D.Cylinder(F(2), 0, F(3), (int)Opt(4, 24)));
+                break;
+            case "TORUS":
+                Need(4, "no, radius, thickness [, detail]");
+                graphics.SetObjectMesh(id, Mesh3D.Torus(F(2), F(3), (int)Opt(4, 32)));
+                break;
+            case "PLANE":
+                Need(4, "no, width, depth [, tilesX, tilesZ]");
+                graphics.SetObjectMesh(id, Mesh3D.Plane(F(2), F(3), Opt(4, 1), Opt(5, Opt(4, 1))));
+                break;
+            case "LOAD":
+            {
+                Need(3, "no, \"file.obj\"");
+                string file = EvalText(a[2], vars, ln, getInkey, isKeyDown, graphics);
+                Mesh3D mesh;
+                try { mesh = Mesh3D.LoadObj(ResourceLoader.GetPath(file)); }
+                catch (Exception ex) when (ex is IOException or FormatException or InvalidDataException or ArgumentOutOfRangeException or UnauthorizedAccessException)
+                {
+                    throw new Exception($"OBJECT LOAD could not read '{file}': {ex.Message}, at line {ln}");
+                }
+                graphics.SetObjectMesh(id, mesh);
+                break;
+            }
+            case "POS":
+                Need(5, "no, x, y, z");
+                graphics.ObjectPos(id, F(2), F(3), F(4));
+                break;
+            case "ROTATE":
+                Need(5, "no, angleX, angleY, angleZ");
+                graphics.ObjectRotate(id, F(2), F(3), F(4));
+                break;
+            case "ZOOM":
+            {
+                Need(3, "no, percent [, percentY, percentZ]");
+                float zx = F(2) / 100f;
+                graphics.ObjectZoom(id, zx, a.Count > 3 ? F(3) / 100f : zx, a.Count > 4 ? F(4) / 100f : zx);
+                break;
+            }
+            case "TEXTURE":
+            {
+                Need(3, "no, \"picture\" [, sharp [, timesX, timesY]] / OBJECT TEXTURE no, OFF");
+                if (a[2].Equals("OFF", StringComparison.OrdinalIgnoreCase)) { graphics.ObjectTexture(id, null, false); break; }
+                string file = EvalText(a[2], vars, ln, getInkey, isKeyDown, graphics);
+                float timesX = Opt(4, 1);
+                graphics.ObjectTexture(id, file, a.Count > 3 && F(3) != 0, timesX, Opt(5, timesX));
+                break;
+            }
+            case "COLOUR":
+            case "COLOR":
+            {
+                Need(3, "no, \"colour\"");
+                Color c;
+                try { c = ParseColorFlexible(Unquote(a[2])); }
+                catch { c = PaperValueToColor(EvalValue(a[2], vars, ln, getInkey, isKeyDown, graphics)); }
+                graphics.ObjectColour(id, new SkiaSharp.SKColor(c.R, c.G, c.B, c.A));
+                break;
+            }
+            case "ALPHA":
+                Need(3, "no, alpha (0 – 255)");
+                graphics.ObjectAlpha(id, F(2) / 255f);
+                break;
+            case "LAYER":
+                Need(3, "no, layer");
+                graphics.ObjectLayer(id, (int)F(2));
+                break;
+            case "ON": graphics.ObjectVisible(id, true); break;
+            case "OFF": graphics.ObjectVisible(id, false); break;
+            case "DEL": graphics.ObjectDelete(id); break;
+            default:
+                throw new Exception($"OBJECT does not know {sub}, at line {ln}");
+        }
+    }
+
     private static List<string> SplitCsvOrSpaces(string a) {
         if (a == null) return new List<string>();
         return new List<string>(CsvOrSpacesCache.GetOrAdd(a, x => SplitCsvOrSpacesUncached(x).ToArray()));

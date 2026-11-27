@@ -332,7 +332,7 @@ sequenceDiagram
     AR->>G: TickSpriteFades, TickLayerFades, TickSpriteEffects
     AR->>G: EndFrame, layer timers += 1/60 s
     AR->>AR: AnimationManager.Tick (ANIM sequences)
-    AR->>G: PresentFrame  (snapshot: sprites, texts, shader values, visible layers)
+    AR->>G: PresentFrame  (snapshot: sprites, texts, 3D objects, shader values, visible layers)
     AR->>DC: await WaitFrameAsync
     V->>V: OnRefresh  (RequestAnimationFrame, every screen refresh)
     V->>G: LatchShownFrame  (lock in the presented frame, copy pixels)
@@ -340,7 +340,7 @@ sequenceDiagram
     DC-->>AR: the frame is due (60 a second)
     AR->>G: BeginFrame  (draw the next frame)
     V->>R: Render → ScreenDrawOperation
-    R->>R: per layer: LayerDrawOperation.DrawTo  (bitmap + sprites + texts through the layer shader)
+    R->>R: per layer: LayerDrawOperation.DrawTo  (bitmap + 3D objects + texts + sprites through the layer shader)
     R->>R: PAPER and PRINT text when CRT is on (DrawConsole)
     R->>R: scale to the window: whole pixels, then smoothly ("sharp bilinear"), or DrawCrt
 ```
@@ -360,6 +360,13 @@ frame the program has just finished, with everything from the same frame.
 - `RASTER COLOUR` (raster on one colour),
 - `PARTICLE` weather,
 - other effects.
+
+**3D objects** (`Scene3D.cs`, state in `AmosGraphics.ThreeD.cs`): `OBJECT`, `CAMERA`, `LIGHT`.
+- The shapes (`Mesh3D`) are lists of triangles, never changed once made.
+- `Renderer3D` turns and projects the corners on the CPU, shades them per corner, cuts them at
+  the near plane, sorts all the triangles of a layer from the back to the front (no depth
+  buffer) and draws each run from one object with one `DrawVertices`, the texture times the
+  corner colours.
 
 **Measuring.** `AMOS_FRAMELOG=file` logs every refresh, `WAIT VBL` and draw (`FrameLog.cs`).
 
@@ -504,6 +511,7 @@ The main groups:
 | a BASIC command | the `case "NAME":` in `AmosRunner.ExecuteAsync`; its sub-commands in `Words(...)` in `AmosRunner.Compiled.cs`; the manual in `42-commands.md` |
 | a function | `BuiltinFunctions` in `AmosRunner.Compiled.cs` (and `ParseFactor` for the old path); `43-functions.md` |
 | how the screen is drawn | `ScreenDrawOperation` / `LayerDrawOperation` in `AmosGraphics.cs`, the shaders in `Shaders.cs`; read `Info.txt` first |
+| 3D objects | `Scene3D.cs` (shapes, camera, drawing) and `AmosGraphics.ThreeD.cs` (the program's objects) |
 | frame timing | `DisplayClock.cs`, `PresentFrame` / `LatchShownFrame`; measure with `AMOS_FRAMELOG` |
 | the synth's sound | `RenderDry`, `NextModulation`, `Oscillator`, `ApplyFilter` in `ChiptuneSynth.cs` |
 | a tracker effect | `ReadRow` / `TickEffects` in `ChiptuneSynth.Tracker.cs` |

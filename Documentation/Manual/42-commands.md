@@ -45,6 +45,16 @@ Draws the edge of a rectangle.
 
 ## C
 
+### CAMERA
+
+```text
+CAMERA POS x, y, z
+CAMERA LOOK x, y, z
+CAMERA FOV degrees
+```
+
+The camera the 3D objects are seen through: where it is (0, 0, 0 to begin with), the point it looks at (straight ahead along z to begin with) and how wide it sees (60 degrees). See `OBJECT`.
+
 ### CIRCLE
 
 ```text
@@ -337,6 +347,15 @@ Like `INPUT`, but writes in the graphics with the `TEXT` font and the `INKG` col
 
 Gives a variable a value. The word `LET` is not needed.
 
+### LIGHT
+
+```text
+LIGHT x, y, z [, ambient]
+LIGHT OFF
+```
+
+The way the light comes from for the 3D objects, and how light their dark sides are in percent (30). The standard is `LIGHT -1, -1.2, -1`, from the top left and a little in front. `LIGHT OFF` shows the objects without shading.
+
 ### LINE
 
 ```text
@@ -405,6 +424,46 @@ MUSIC STOP
 Plays a music module (MOD, XM, S3M or IT) or stops it. For the synth's music, see `PLAY`.
 
 ## O
+
+### OBJECT
+
+```text
+OBJECT CUBE no, size [, height, depth]
+OBJECT SPHERE no, radius [, detail]
+OBJECT CYLINDER no, radius, height [, detail]
+OBJECT CONE no, radius, height [, sides]
+OBJECT TORUS no, radius, thickness [, detail]
+OBJECT PLANE no, width, depth [, tilesX, tilesZ]
+OBJECT LOAD no, "file.obj"
+OBJECT TEXTURE no, "picture" [, sharp [, timesX, timesY]]
+OBJECT TEXTURE no, OFF
+OBJECT COLOUR no, "colour"
+OBJECT POS no, x, y, z
+OBJECT ROTATE no, angleX, angleY, angleZ
+OBJECT ZOOM no, percent [, percentY, percentZ]
+OBJECT ALPHA no, value
+OBJECT LAYER no, layer
+OBJECT ON no
+OBJECT OFF no
+OBJECT DEL no
+OBJECT CLEAR
+```
+
+| Command | Does |
+|---|---|
+| `OBJECT CUBE` … `PLANE` | makes a 3D object, in the selected layer; built round its middle. Made again, it keeps its texture, place and angle |
+| `OBJECT LOAD` | a model from a Wavefront .obj file |
+| `OBJECT TEXTURE` | a picture wrapped round the object; sharp 1 gives sharp pixels; times repeats it across the shape |
+| `OBJECT COLOUR` | the object's colour, or the tint of its texture |
+| `OBJECT POS` | where its middle is: x to the right, y down, z into the screen |
+| `OBJECT ROTATE` | turns it round x, y and z, in degrees |
+| `OBJECT ZOOM` | its size, 100 = as made |
+| `OBJECT ALPHA` | 0 (invisible) – 255 |
+| `OBJECT LAYER` | the layer it is drawn in |
+| `OBJECT ON` / `OFF` | shows or hides it |
+| `OBJECT DEL` / `CLEAR` | removes one object / all of them |
+
+See the chapter on 3D objects, and `CAMERA` and `LIGHT`.
 
 ### ON ... GOTO / ON ... GOSUB
 

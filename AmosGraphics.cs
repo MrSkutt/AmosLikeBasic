@@ -342,6 +342,10 @@ public sealed class LayerDrawOperation
 
     private readonly SKImage? _pixels;   // the layer's pixels as they were at the screen refresh, if copied
 
+    // The layer's 3D objects, drawn over its pixels and under its texts and sprites
+    public IReadOnlyList<Object3DState> Objects { get; init; } = Array.Empty<Object3DState>();
+    public Scene3DState? Scene { get; init; }
+
     public LayerDrawOperation(Rect bounds, AmosGraphics graphics, GpuLayer layer,
         List<AmosGraphics.QueuedFontText> texts, List<AmosGraphics.SpriteRenderState> sprites, SKImage? pixels = null)
     {
@@ -425,6 +429,9 @@ public sealed class LayerDrawOperation
         else
             using (var bg = ToSkImage(_layer.Bitmap))
                 c.DrawImage(bg, 0, 0);
+
+        if (Scene != null)
+            Renderer3D.Draw(c, Objects, Scene.Camera, Scene.Light, _layer.Bitmap.PixelSize.Width, _layer.Bitmap.PixelSize.Height);
 
         foreach (var qt in _texts)
             DrawText(c, qt);
@@ -662,12 +669,14 @@ public sealed class AmosGpuView : Control
         List<GpuLayer> layersCopy;
         List<AmosGraphics.QueuedFontText> fontTextsCopy;
         List<AmosGraphics.SpriteRenderState> spritesCopy;
+        Scene3DState scene;
 
         lock (Graphics.LockObject)
         {
             layersCopy = new List<GpuLayer>(Graphics.ActiveFrame);
             fontTextsCopy = Graphics.GetQueuedTexts().ToList();
             spritesCopy = Graphics.GetSpriteRenderStates();
+            scene = Graphics.GetSceneState();
         }
 
         var screenRect = new Rect(0, 0, Graphics.Width, Graphics.Height);
@@ -683,7 +692,11 @@ public sealed class AmosGpuView : Control
 
             var texts = fontTextsCopy.Where(qt => qt.Layer == -1 || qt.Layer == layerIndex).ToList();
             var sprites = spritesCopy.Where(s => s.Layer == -1 || s.Layer == layerIndex).ToList();
-            layers.Add(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites, layer.ShownImage));
+            var objects = scene.Objects.Where(o => o.Layer == layerIndex).ToList();
+            layers.Add(new LayerDrawOperation(screenRect, Graphics, layer, texts, sprites, layer.ShownImage)
+            {
+                Objects = objects, Scene = objects.Count > 0 ? scene : null
+            });
         }
         long frame = Graphics.ShownFrame;
         if (FrameLog.On)
@@ -704,7 +717,7 @@ public sealed class AmosGpuView : Control
     }
 }
 
-public sealed class AmosGraphics
+public sealed partial class AmosGraphics
 {
     public Action<string>? OnError { get; set; }
 
@@ -1948,6 +1961,7 @@ public sealed class AmosGraphics
             bool changed = ShownFrame != PresentedFrame;
             _shownFontTexts = _presentedFontTexts;
             _shownSprites = _presentedSprites;
+            LatchScene();
             foreach (var layer in _layers)
             {
                 layer.ShownShaderValues = layer.PresentedShaderValues;
@@ -1969,6 +1983,7 @@ public sealed class AmosGraphics
     {
         _shownFontTexts = null;
         _shownSprites = null;
+        ClearShownScene();
         foreach (var layer in _layers) { layer.ShownShaderValues = null; layer.ShownVisible = null; layer.RetireShownImage(); }
     }
 
@@ -1980,6 +1995,7 @@ public sealed class AmosGraphics
             PresentedFrame++;
             _presentedFontTexts = _fontTexts.ToList();
             _presentedSprites = BuildSpriteStates();
+            PresentScene();
             foreach (var layer in _layers)
             {
                 layer.PresentedShaderValues = (Vector4[])layer.ShaderValues.Clone();
@@ -2006,6 +2022,7 @@ public sealed class AmosGraphics
             _groups.Clear();
             _presentedSprites = null;
             ClearShownFrame();
+            ClearScene();
             _imageBank.Clear();
             _tiles.Clear();
             _tilesInWidth = 0;
