@@ -57,7 +57,7 @@ Choose a tile in the palette and draw with it. Besides the pencil there are **li
 
 ```basic nocheck
 SCREEN SELECT 1
-TILE LOAD "Graphics/tileset.png", 32, 32
+TILE LOAD "Graphics/Tiles/tileset.png", 32, 32
 MAP LOAD "Graphics/test.amosmap"
 TILE DRAW 0, 0
 ```

@@ -106,4 +106,4 @@ This works for `PLOT`, `LINE`, `BOX`, `BAR`, `CIRCLE`, `CIRCLEF`, `ELLIPSE`, `FI
 
 ## File names
 
-File names are written in quotation marks. A relative path such as `"Graphics/hero.png"` is looked for in the project folder, and in the app's own folder once the game is exported. Always use forward slashes `/`, even on Windows.
+File names are written in quotation marks. A relative path such as `"Graphics/Sprites/hero.png"` is looked for in the project folder, and in the app's own folder once the game is exported. Always use forward slashes `/`, even on Windows.

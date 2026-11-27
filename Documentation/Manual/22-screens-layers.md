@@ -37,7 +37,7 @@ This works for most drawing commands: `PLOT`, `LINE`, `BOX`, `BAR`, `CIRCLE`, `C
 
 ```basic nocheck
 LOAD "Graphics/Layer/Background.png"
-LOAD #1, "Graphics/berg.png"
+LOAD #1, "Graphics/Backgrounds/berg.png"
 ```
 
 The file name counts from the project folder. The image is not scaled, so make it the same size as the screen.

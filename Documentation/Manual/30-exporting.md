@@ -18,7 +18,7 @@ What is exported is the program in the editor right then, even if you have not s
 
 ## Files that are included
 
-The export looks for every file name in quotation marks in your program, such as `"Graphics/hero.png"` or `"Sound/Tracker/forest_song.amostrk"`, and includes the files that exist. Songs from the tracker are therefore included just like images and sounds. If the program builds file names while it runs, for example `"level" & LEVEL & ".amosmap"`, they are not found. Then you can export from the terminal and name them yourself:
+The export looks for every file name in quotation marks in your program, such as `"Graphics/Sprites/hero.png"` or `"Sound/Tracker/forest_song.amostrk"`, and includes the files that exist. Songs from the tracker are therefore included just like images and sounds. If the program builds file names while it runs, for example `"level" & LEVEL & ".amosmap"`, they are not found. Then you can export from the terminal and name them yourself:
 
 ```text
 python3 Tools/export_app.py Projects/mygame.amosproj --name MyGame --include Graphics/Levels

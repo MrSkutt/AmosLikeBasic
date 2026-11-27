@@ -39,7 +39,7 @@ FONT MAP 0, "ABCDEFGHIJKLMNOPQRSTUVWXYZ!?:;0123456789@()£$%.’[]”,-"
 FONT EFFECT ADD 0, BLUR 2.0
 FONT EFFECT ADD 0, WAVE, 20, 0.05, 20, 0.02
 
-SPRITE LOAD 1, "Graphics/hero.png"
+SPRITE LOAD 1, "Graphics/Sprites/hero.png"
 SPRITE ON 1
 
 Y = 0
@@ -62,7 +62,7 @@ Effects belong to the font, so they survive `FONT CLEAR`. Slow effects like blur
 
 The `Projects/` folder contains 28 examples, which the IDE lists under **Project → Examples**, sorted into *Games*, *Graphics and effects* and *Sound and music*. Hover over a name to see what it shows. The list is in [`Examples.cs`](Examples.cs); a test checks that it matches the files in `Projects/`, so a new example must be added there too.
 
-Put your own experiments in a `Sandbox/` folder in the project folder. It is ignored by git, so nothing there ends up on GitHub, and file paths such as `"Graphics/hero.png"` work from there just as they do from `Projects/`. The manual, a step-by-step guide plus a full command reference, is in [`Documentation/AMOS Like Basic - Manual.pdf`](Documentation/AMOS%20Like%20Basic%20-%20Manual.pdf). It is built from the Markdown chapters in `Documentation/Manual` with `python3 Tools/build_manual.py`.
+Put your own experiments in a `Sandbox/` folder in the project folder. It is ignored by git, so nothing there ends up on GitHub, and file paths such as `"Graphics/Sprites/hero.png"` work from there just as they do from `Projects/`. The manual, a step-by-step guide plus a full command reference, is in [`Documentation/AMOS Like Basic - Manual.pdf`](Documentation/AMOS%20Like%20Basic%20-%20Manual.pdf). It is built from the Markdown chapters in `Documentation/Manual` with `python3 Tools/build_manual.py`.
 
 ---
 
@@ -75,7 +75,7 @@ Ready-to-run versions for macOS (Apple Silicon) and Windows (x64) are on the [Re
 - **Mac:** the app is not signed by Apple, so the first time you right-click it and choose **Open**.
 - **Windows:** if SmartScreen warns, click **More info** and **Run anyway**.
 
-On the first start the example projects, graphics and sounds are copied to `Documents/AmosLikeBasic` (with an `Export` folder for exported games). That folder is where your programs count their file paths from, so put your own images and sounds there (for example `Documents/AmosLikeBasic/Graphics/hero.png`). **Project → Folders...** moves the Projects, Graphics, Sound and Export folders elsewhere.
+On the first start the example projects, graphics and sounds are copied to `Documents/AmosLikeBasic` (with an `Export` folder for exported games). That folder is where your programs count their file paths from, so put your own images and sounds there (for example `Documents/AmosLikeBasic/Graphics/Sprites/hero.png`). **Project → Folders...** moves the Projects, Graphics, Sound and Export folders elsewhere.
 
 To build and run from the source code instead:
 

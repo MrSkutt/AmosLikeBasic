@@ -714,9 +714,9 @@ You can also play recorded sounds and ready-made music:
 
 ```basic nocheck
 MUSIC PLAY "Sound/Tracker/MODs/mus2.mod"
-SAM PLAY "Sound/ding.mp3"
+SAM PLAY "Sound/Effects/ding.mp3"
 ```
 
-Music modules are the music format of the Amiga days, and there are thousands of them freely available online. If your music is an MP3, use `SAM LOOP`. Remember to check that you are allowed to use the music if you are going to share your game.
+Sound effects go in `Sound/Effects`, where there are a few to start with (`ding.mp3`, `ding2.mp3`, `rain.mp3`, `stairs.mp3`). Music modules are the music format of the Amiga days, and there are thousands of them freely available online. If your music is an MP3, use `SAM LOOP`. Remember to check that you are allowed to use the music if you are going to share your game.
 
 > **Try it:** Compose a little tune of your own on two channels: melody on channel 1 and bass on channel 2.
