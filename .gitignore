@@ -71,7 +71,6 @@ Sandbox/
 Sound/Samples/*/
 
 # Other people's chip music, for trying the YM player
-Sound/AtariYM/
 Sound/Tracker/YM/
 Sound/Tracker/SNDH/
 Sound/SID/
