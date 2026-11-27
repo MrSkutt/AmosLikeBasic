@@ -249,3 +249,37 @@ public class SpriteHandleTests
         Assert.True(red == 0, $"{red} pixels of red edge");
     }
 }
+
+// BUMP: a picture lit by a lamp, bright near it and dark far from it; and grey PNGs load
+public class BumpTests
+{
+    [AvaloniaFact]
+    public void A_grey_picture_loads_and_BUMP_lights_it_round_the_lamp()
+    {
+        var r = BasicRunner.Run("""
+            SCREEN 640,480
+            SPRITE LOAD 1, "Graphics/Textures/320_001.png"
+            SPRITE POS 1, 0, 0
+            SPRITE ON 1
+            SPRITE EFFECT ADD 1, BUMP, 280, 280, 8, 150
+            Loop:
+              WAIT VBL
+            GOTO Loop
+            """, 0.8, capture: true);
+        Assert.True(r.Errors.Count == 0, r.Describe());
+        double Light(int cx, int cy)
+        {
+            double sum = 0;
+            for (int y = cy - 20; y < cy + 20; y++)
+                for (int x = cx - 20; x < cx + 20; x++)
+                {
+                    var c = r.Frame!.GetPixel(x, y);
+                    sum += c.Red + c.Green + c.Blue;
+                }
+            return sum / 1600 / 3;
+        }
+        // (the picture itself is a little darker at 280, 280 than at 80, 80: only the lamp makes it lighter)
+        double near = Light(280, 280), far = Light(80, 80);
+        Assert.True(near > far + 40, $"near the lamp {near:0}, far from it {far:0}");
+    }
+}

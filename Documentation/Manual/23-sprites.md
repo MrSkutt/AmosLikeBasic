@@ -223,6 +223,7 @@ Sprites can get effects that are worked out by the graphics card:
 | `SPRITE EFFECT ADD no, BLUR, radius` | makes the sprite blurry |
 | `SPRITE EFFECT ADD no, WAVE, ampX, freqX, ampY, freqY` | makes the sprite ripple |
 | `SPRITE EFFECT ADD no, COLOR, brightness, contrast, saturation` | changes the colours (1 = unchanged) |
+| `SPRITE EFFECT ADD no, BUMP, lightX, lightY, depth, radius` | lights the sprite with a lamp (bump mapping, see below) |
 | `SPRITE EFFECT CLEAR no` | removes all effects |
 
 ```basic
@@ -237,6 +238,25 @@ GOTO Loop
 ```
 
 The wave moves by itself. With `SPRITE EFFECT UPDATE no, index, parameter, value` you change an effect while the program runs, for example `SPRITE EFFECT UPDATE 1, 0, AMPLITUDEX, 10`. The effects are numbered from 0 in the order they were added.
+
+### Bump mapping
+
+`BUMP` is a new school demo effect from the mid 1990s: the picture is lit by a lamp, and its brightness is taken as height. Every edge in it becomes a slope that is lit and shines when it is turned towards the lamp, and lies in shadow when it is turned away. The lamp is at `lightX, lightY` in the picture's own pixels (for a 640 x 480 picture at 0, 0 the same as the screen's), `depth` is how steep the slopes are (6 if left out) and `radius` how far the light reaches (320). Move the lamp with `SPRITE EFFECT UPDATE`:
+
+```basic
+SPRITE LOAD 1, "Graphics/Layer/Amiga.png"
+SPRITE ON 1
+SPRITE EFFECT ADD 1, BUMP, 320, 240, 12, 300
+T = 0
+Loop:
+  T = T + 1
+  SPRITE EFFECT UPDATE 1, 0, LIGHTX, 320 + SIN(T * 2) * 250
+  SPRITE EFFECT UPDATE 1, 0, LIGHTY, 240 + SIN(T * 3) * 160
+  WAIT VBL
+GOTO Loop
+```
+
+Grey pictures with soft shapes (clouds, stone, metal) give the most relief. The project `bump_mapping` lights a wall of stone and the Amiga's Kickstart disk.
 
 > **Try it:** Make a sprite that you steer with the arrow keys (see the chapter on input) and that mirrors itself in the direction it walks.
 

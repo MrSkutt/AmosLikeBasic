@@ -1043,7 +1043,7 @@ public sealed class AmosGraphics
         try
         {
             string fullPath = ResourceLoader.GetPath(fileName);
-            using var b = new Bitmap(fullPath);
+            using var b = OpenBitmap(fullPath);
             int w = (int)b.Size.Width, h = (int)b.Size.Height;
 
             var entry = new ImageBankEntry { FrameWidth = w, FrameHeight = h };
@@ -1072,7 +1072,7 @@ public sealed class AmosGraphics
         try
         {
             string fullPath = ResourceLoader.GetPath(fileName);
-            using var b = new Bitmap(fullPath);
+            using var b = OpenBitmap(fullPath);
             int cols = (int)b.Size.Width / frameW;
             int sheetH = (int)b.Size.Height;
 
@@ -1488,8 +1488,8 @@ public sealed class AmosGraphics
             List<SpriteEffect> allEffects)
         {
             // Rotation/zoom is NOT done here - LayerDrawOperation takes care of it with a transform
-            var staticEffects = allEffects.Where(e => e is not WaveEffect).ToList();
-            var dynamicEffects = allEffects.Where(e => e is WaveEffect).ToList();
+            var staticEffects = allEffects.Where(e => !e.IsDynamic).ToList();
+            var dynamicEffects = allEffects.Where(e => e.IsDynamic).ToList();
 
             SKImage current;
             bool owned;
@@ -1678,8 +1678,8 @@ public sealed class AmosGraphics
             var font = graphics.GetFont(FontId);
             if (font == null) return null;
 
-            var staticEffects = effects.Where(e => e is not WaveEffect).ToList();
-            var dynamicEffects = effects.Where(e => e is WaveEffect).ToList();
+            var staticEffects = effects.Where(e => !e.IsDynamic).ToList();
+            var dynamicEffects = effects.Where(e => e.IsDynamic).ToList();
 
             // The cache is cleared when the effects change, when the GPU context changes,
             // or if the text changes often (e.g. a score counter)
@@ -2826,7 +2826,7 @@ public sealed class AmosGraphics
         {
             string fullPath = ResourceLoader.GetPath(file);
 
-            using var b = new Bitmap(fullPath);
+            using var b = OpenBitmap(fullPath);
             var font = new Font { CharWidth = tw, CharHeight = th };
             int cols = (int)b.Size.Width / tw;
             int rows = (int)b.Size.Height / th;
@@ -2978,6 +2978,32 @@ public sealed class AmosGraphics
     // All our WriteableBitmaps store pixels as BGRA (premultiplied alpha), just as their
     // PixelFormat says. Images from disk and RenderTargetBitmap have the platform's order
     // (RGBA on macOS, BGRA on Windows), so they are converted when they are copied in.
+    // An image file as a bitmap whose pixels can be copied. A grey PNG (or one with 16 bits a colour)
+    // cannot be copied as it is ("CopyPixels is not supported for this bitmap type"), so it is made a
+    // colour image first.
+    public static Bitmap OpenBitmap(string path)
+    {
+        if (!NeedsColour(path)) return new Bitmap(path);
+        using var grey = SkiaSharp.SKBitmap.Decode(path) ?? throw new InvalidDataException("not an image");
+        using var colour = grey.Copy(SkiaSharp.SKColorType.Bgra8888) ?? throw new InvalidDataException("the image could not be converted");
+        using var data = colour.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        using var ms = new MemoryStream(data.ToArray());
+        return new Bitmap(ms);
+    }
+
+    private static bool NeedsColour(string path)
+    {
+        try
+        {
+            using var f = File.OpenRead(path);
+            var head = new byte[26];
+            if (f.Read(head, 0, 26) < 26 || head[0] != 0x89 || head[1] != (byte)'P') return false;
+            int depth = head[24], type = head[25];
+            return type == 0 || type == 4 || depth == 16;   // grey, grey with alpha, 16 bits
+        }
+        catch (IOException) { return false; }
+    }
+
     public static void CopyPixelsBgra(Bitmap src, PixelRect rect, ILockedFramebuffer fb)
     {
         src.CopyPixels(rect, fb.Address, fb.RowBytes * rect.Height, fb.RowBytes);
@@ -3026,7 +3052,7 @@ public sealed class AmosGraphics
         {
             string fullPath = ResourceLoader.GetPath(f);
 
-            using var b = new Bitmap(fullPath);
+            using var b = OpenBitmap(fullPath);
             lock (LockObject)
             {
                 EnsureScreen();
@@ -3062,7 +3088,7 @@ public sealed class AmosGraphics
         {
             string fullPath = ResourceLoader.GetPath(f);
 
-            using var b = new Bitmap(fullPath);
+            using var b = OpenBitmap(fullPath);
             _tileWidth = tw;
             _tileHeight = th;
             _tiles.Clear();
@@ -3321,7 +3347,7 @@ public sealed class AmosGraphics
         try
         {
             string fullPath = ResourceLoader.GetPath(fileName);
-            using var b = new Bitmap(fullPath);
+            using var b = OpenBitmap(fullPath);
             int w = (int)b.Size.Width, h = (int)b.Size.Height;
             CreateSprite(id, w, h);
             var s = GetSprite(id);
@@ -3355,7 +3381,7 @@ public sealed class AmosGraphics
         {
             string fullPath = ResourceLoader.GetPath(fileName);
 
-            using var sourceInfo = new Bitmap(fullPath);
+            using var sourceInfo = OpenBitmap(fullPath);
             int sheetW = (int)sourceInfo.Size.Width;
             int sheetH = (int)sourceInfo.Size.Height;
             int cols = sheetW / frameW;
@@ -3439,7 +3465,7 @@ public sealed class AmosGraphics
     public void AddFrame(int id, string file)
     {
         var s = GetSprite(id);
-        using var b = new Bitmap(ResourceLoader.GetPath(file));
+        using var b = OpenBitmap(ResourceLoader.GetPath(file));
         var f = CreateEmptyBitmap(s.Width, s.Height);
         using (var fb = f.Lock())
         {
@@ -3921,6 +3947,81 @@ public sealed class AmosGraphics
 }
 // Runs sprite/font effects as shaders. With a GRContext everything happens on the GPU and the result
 // stays there as a texture; without one (headless) a CPU surface is used.
+// BUMP: the image lit by a lamp, its brightness taken as height (bitmap bump mapping, as in the demos of
+// the 1990s): where it gets brighter it slopes, and a slope turned towards the lamp is lit and shines.
+// The lamp is at LightX, LightY in the image's own pixels (on a 640 x 480 picture at 0, 0, the screen's),
+// lights to Radius pixels round it, and Depth is how steep the slopes are.
+public class BumpEffect : SpriteEffect
+{
+    public float LightX { get; set; }
+    public float LightY { get; set; }
+    public float Depth { get; set; } = 6f;
+    public float Radius { get; set; } = 320f;
+
+    private static SKRuntimeEffect? _effect;
+    private static readonly object _lock = new();
+
+    public override bool RequiresGpuContext => true;
+    public override bool IsDynamic => true;
+
+    private const string ShaderCode = @"
+uniform shader inputTexture;
+uniform float2 iResolution;
+uniform float2 uLight;
+uniform float uDepth;
+uniform float uRadius;
+
+float lum(float2 p) {
+    half4 c = inputTexture.eval(clamp(p, float2(0.5), iResolution - 0.5));
+    return dot(float3(c.rgb), float3(0.299, 0.587, 0.114));
+}
+
+// the height a little smoothed, so that single pixels do not make grain
+float height(float2 p) {
+    return (lum(p) * 2.0 + lum(p + float2(1, 0)) + lum(p - float2(1, 0)) + lum(p + float2(0, 1)) + lum(p - float2(0, 1))) / 6.0;
+}
+
+half4 main(float2 p) {
+    half4 c = inputTexture.eval(p);
+    float dx = height(p + float2(1, 0)) - height(p - float2(1, 0));
+    float dy = height(p + float2(0, 1)) - height(p - float2(0, 1));
+    float3 n = normalize(float3(-dx * uDepth, -dy * uDepth, 1.0));
+    float3 toLight = float3(uLight - p, uRadius * 0.3);
+    float3 l = normalize(toLight);
+    float fall = clamp(1.0 - length(toLight.xy) / uRadius, 0.0, 1.0);
+    float diffuse = max(dot(n, l), 0.0);
+    float shine = pow(max(dot(n, normalize(l + float3(0, 0, 1))), 0.0), 24.0);
+    float a = float(c.a);
+    float3 rgb = float3(c.rgb) * (0.12 + diffuse * fall * 1.1) + shine * fall * a * 0.7;
+    return half4(half3(clamp(rgb, 0.0, a)), c.a);
+}";
+
+    public override SKPaint? GetShaderPaint(SKImage inputImage)
+    {
+        lock (_lock)
+        {
+            if (_effect == null)
+            {
+                _effect = SKRuntimeEffect.CreateShader(ShaderCode, out var errors);
+                if (_effect == null || !string.IsNullOrEmpty(errors))
+                {
+                    System.Diagnostics.Debug.WriteLine($"Bump shader error: {errors}");
+                    _effect = null;
+                    return null;
+                }
+            }
+        }
+        var children = new SKRuntimeEffectChildren(_effect);
+        children.Add("inputTexture", inputImage.ToShader());
+        var uniforms = new SKRuntimeEffectUniforms(_effect);
+        uniforms.Add("iResolution", new[] { (float)inputImage.Width, (float)inputImage.Height });
+        uniforms.Add("uLight", new[] { LightX, LightY });
+        uniforms.Add("uDepth", Depth);
+        uniforms.Add("uRadius", Math.Max(1f, Radius));
+        return new SKPaint { Shader = _effect.ToShader(uniforms, children) };
+    }
+}
+
 public static class ShaderHelper
 {
     // Runs one effect and returns a new image owned by the caller, or null if the effect failed.
@@ -3971,6 +4072,9 @@ public abstract class SpriteEffect
     public virtual SKPaint? GetShaderPaint(SKImage inputImage) => null;
 
     public virtual bool RequiresGpuContext => false;
+
+    // Run every frame (WAVE moves, BUMP's light moves) instead of once and kept
+    public virtual bool IsDynamic => false;
     
     // ✅ NEW: How much the effect enlarges the image (for correct positioning)
     public virtual (int leftPadding, int rightPadding, int topPadding, int bottomPadding) GetPadding() 
@@ -4087,6 +4191,7 @@ public class WaveEffect : SpriteEffect
     private static readonly object _shaderLock = new object();
 
     public override bool RequiresGpuContext => true;
+    public override bool IsDynamic => true;
     
     public override (int leftPadding, int rightPadding, int topPadding, int bottomPadding) GetPadding()
     {

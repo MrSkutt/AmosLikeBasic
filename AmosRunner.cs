@@ -3352,6 +3352,17 @@ public static partial class AmosRunner
                                                     });
                                                 }
                                                 break;
+                                            case "BUMP":
+                                                // SPRITE EFFECT ADD id, BUMP, lightX, lightY [, depth [, radius]]
+                                                if (ss.Count >= 6)
+                                                    graphics.AddSpriteEffect(id.Value, new BumpEffect
+                                                    {
+                                                        LightX = (float)EvalDouble(ss[4], vars, ln, getInkey, isKeyDown, graphics),
+                                                        LightY = (float)EvalDouble(ss[5], vars, ln, getInkey, isKeyDown, graphics),
+                                                        Depth = ss.Count >= 7 ? (float)EvalDouble(ss[6], vars, ln, getInkey, isKeyDown, graphics) : 6f,
+                                                        Radius = ss.Count >= 8 ? (float)EvalDouble(ss[7], vars, ln, getInkey, isKeyDown, graphics) : 320f
+                                                    });
+                                                break;
                                             case "COLOR":
                                                 if (ss.Count >= 7)
                                                 {
@@ -3388,7 +3399,7 @@ public static partial class AmosRunner
                                             var effect = sprite.Effects[idx];
         
                                             // WAVE is recalculated every frame anyway, so its parameters do not affect the cache
-                                            bool shouldInvalidateCache = effect is not WaveEffect;
+                                            bool shouldInvalidateCache = !effect.IsDynamic;
         
                                             switch (effect)
                                             {
@@ -3421,6 +3432,18 @@ public static partial class AmosRunner
                                                     break;
                                                 case ColorGradeEffect color when param == "BRIGHTNESS":
                                                     color.Brightness = val;
+                                                    break;
+                                                case BumpEffect bump when param == "LIGHTX":
+                                                    bump.LightX = val;
+                                                    break;
+                                                case BumpEffect bump when param == "LIGHTY":
+                                                    bump.LightY = val;
+                                                    break;
+                                                case BumpEffect bump when param == "DEPTH":
+                                                    bump.Depth = val;
+                                                    break;
+                                                case BumpEffect bump when param == "RADIUS":
+                                                    bump.Radius = val;
                                                     break;
                                                 case ColorGradeEffect color when param == "CONTRAST":
                                                     color.Contrast = val;
@@ -4101,7 +4124,7 @@ public static partial class AmosRunner
                                         {
             
                                             // WAVE is recalculated every frame anyway, so its parameters do not affect the cache
-                                            bool shouldInvalidateCache = effect is not WaveEffect;
+                                            bool shouldInvalidateCache = !effect.IsDynamic;
             
                                             switch (effect)
                                             {

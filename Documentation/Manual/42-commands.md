@@ -759,8 +759,9 @@ If the file name in `SPRITE LOAD` contains the size, like `hero_W32_H48_B8.png`,
 | `BLUR` | `radius` | blurry |
 | `WAVE` | `ampX, freqX, ampY, freqY` | ripples; amplitude in dots |
 | `COLOR` | `brightness, contrast, saturation` | changes the colours, 1 = unchanged |
+| `BUMP` | `lightX, lightY [, depth [, radius]]` | bump mapping: lit by a lamp at lightX, lightY in the image's own pixels, its brightness as height; depth 6 and radius 320 if left out (sprites only) |
 
-The effects are numbered from 0 in the order they are added. With `EFFECT UPDATE` the parameters `RADIUS`, `AMPLITUDEX`, `FREQUENCYX`, `AMPLITUDEY`, `FREQUENCYY`, `PHASEX`, `PHASEY`, `TIME`, `BRIGHTNESS`, `CONTRAST` and `SATURATION` can be changed.
+The effects are numbered from 0 in the order they are added. With `EFFECT UPDATE` the parameters `RADIUS`, `AMPLITUDEX`, `FREQUENCYX`, `AMPLITUDEY`, `FREQUENCYY`, `PHASEX`, `PHASEY`, `TIME`, `BRIGHTNESS`, `CONTRAST`, `SATURATION`, `LIGHTX`, `LIGHTY` and `DEPTH` can be changed.
 
 ### SWAP
 

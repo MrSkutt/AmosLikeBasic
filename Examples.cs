@@ -27,6 +27,9 @@ public static class Examples
         {
             new Example("oldschool_demo", "Oldschool Demo", "Copper bars, chrome bobs, a bouncing logo and a sine scroller, Amiga style"),
             new Example("raster_bars", "Raster Bars", "Moving colour bars behind a picture, demo style"),
+            new Example("boing", "Boing!", "The Amiga's bouncing ball from 1984, with its shadow, to a ProTracker module"),
+            new Example("atari_st", "Atari ST Demo", "Raster bars in the ST's 512 colours, stars and a big scroller, to YM chip music"),
+            new Example("bump_mapping", "Bump Mapping", "A moving lamp lights up stone and the Kickstart disk: the new school BUMP effect"),
             new Example("orbit", "Orbit", "A circle scroller round a turning Earth: the text changes at the top as it comes round"),
             new Example("tunnel", "Sine Tunnel", "An animated tunnel with particles and a scrolling text"),
             new Example("parallax_layers", "Parallax Layers", "Mountain ranges that scroll at different speeds; steer with left and right"),
