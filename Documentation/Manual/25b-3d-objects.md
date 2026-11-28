@@ -100,6 +100,25 @@ The objects are lit by a lamp far away, so the sides that face it are light and 
 
 `OBJECT LOAD no, "file.obj"` loads a model saved as Wavefront .obj, a format that Blender and most 3D programs can save. The model's corners, faces, normals and texture places are read; give it a texture with `OBJECT TEXTURE`. 3D programs usually have y going up; it is turned the right way as it is loaded. Models are often small, so `OBJECT ZOOM` may be needed to see them.
 
+A spaceship comes with AMOS Like Basic, in `Graphics/Models`. `Starfighter.png` is the picture its faces are painted with:
+
+```basic
+OBJECT LOAD 1, "Graphics/Models/Starfighter.obj"
+OBJECT TEXTURE 1, "Graphics/Models/Starfighter.png"
+OBJECT ZOOM 1, 145
+OBJECT POS 1, 0, 0, 420
+T = 0
+Loop:
+  T = T + 1
+  OBJECT ROTATE 1, SIN(T) * 20, T, 0
+  WAIT VBL
+GOTO Loop
+```
+
+A model has one texture for all of it. The model knows which part of the picture goes on which face, so one picture can hold the grey hull, the blue glass and the red stripes side by side. In Blender this is called *UV mapping*; save the .obj with UV coordinates and paint the picture it gives. Materials (.mtl files) are not read.
+
+The example *Starfighter* lets the ship turn among rocks in space. The space there is made with `RASTER SPACE` in layer 0, and the objects are in layer 1: a raster background covers everything in its own layer, objects too.
+
 ## Good to know
 
 - All the triangles of a layer are sorted and drawn from the back to the front. Objects that go through each other can come out wrong where they cross. Keep them apart, or put them in different layers.
@@ -108,4 +127,4 @@ The objects are lit by a lamp far away, so the sides that face it are light and 
 
 > **Try it:** Put an `OBJECT PLANE` under a cube as a floor, and make the cube jump with `ABS(SIN(T))`.
 
-> **Try it:** Open the examples *Vector Cubes*, *Boing 3D* and *3D Shapes* and change the textures.
+> **Try it:** Open the examples *Vector Cubes*, *Boing 3D*, *3D Shapes* and *Starfighter* and change the textures.

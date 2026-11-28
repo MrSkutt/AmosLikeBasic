@@ -119,6 +119,24 @@ public class ThreeDTests
     }
 
     [AvaloniaFact]
+    public void The_starfighter_model_loads_and_is_drawn_with_its_texture()
+    {
+        var mesh = Mesh3D.LoadObj(ResourceLoader.GetPath("Graphics/Models/Starfighter.obj"));
+        Assert.True(mesh.Triangles > 200, mesh.Triangles.ToString());
+        var r = Show("""
+            OBJECT LOAD 1, "Graphics/Models/Starfighter.obj"
+            OBJECT TEXTURE 1, "Graphics/Models/Starfighter.png"
+            OBJECT ZOOM 1, 145
+            OBJECT POS 1, 0, 0, 420
+            OBJECT ROTATE 1, 20, 90, 0
+            """);
+        Assert.True(r.Errors.Count == 0, r.Describe());
+        // Seen from the side: the grey hull fills the middle
+        var c = r.Frame!.GetPixel(320, 240);
+        Assert.True(c.Red > 90 && System.Math.Abs(c.Red - c.Blue) < 50, c.ToString());
+    }
+
+    [AvaloniaFact]
     public void Every_shape_can_be_made_and_moved()
     {
         var r = BasicRunner.Run("""

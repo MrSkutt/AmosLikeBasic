@@ -32,6 +32,7 @@ public static class Examples
             new Example("bump_mapping", "Bump Mapping", "A moving lamp lights up stone and the Kickstart disk: the new school BUMP effect"),
             new Example("vector_cubes", "Vector Cubes", "A textured 3D cube with small burning cubes going round it, copper bars and a sine scroller"),
             new Example("boing_3d", "Boing 3D", "The Amiga's ball in real 3D, bouncing in a room with a grid on the floor and the wall"),
+            new Example("starfighter", "Starfighter", "A spaceship loaded from a 3D model file (.obj), with rocks rushing past"),
             new Example("shapes_3d", "3D Shapes", "Every OBJECT shape with a texture of its own, the camera flying round them"),
             new Example("orbit", "Orbit", "A circle scroller round a turning Earth: the text changes at the top as it comes round"),
             new Example("tunnel", "Sine Tunnel", "An animated tunnel with particles and a scrolling text"),
